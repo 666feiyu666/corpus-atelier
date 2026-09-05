@@ -1,0 +1,29 @@
+{
+  "status": "generated",
+  "requested_at": "2026-09-05T11:47:52.622049+00:00",
+  "prompt": "Create a portrait English poster inviting people under everyday productivity pressure to allow a brief pause. Visible copy exactly: “YOU DON’T HAVE TO FILL EVERY MINUTE.” Main copy in large, highly legible dark charcoal sans-serif type, arranged in a calm grid with a deliberate generous vertical gap between “EVERY” and “MINUTE” so the sentence visibly pauses. Add smaller supporting copy exactly: “LEAVE A LITTLE ROOM.” Place it beneath the main message with generous surrounding whitespace. Use a warm off-white background and one restrained muted blue-green accent, minimal editorial typography, strong hierarchy, and clear readability from several feet away. Allow subtle variations in typeface, spacing, and accent placement while preserving the sentence, the intentional gap, portrait format, and inviting tone. Exclude clocks, phones, sleeping people, office scenes, busy patterns, alarmist imagery, guilt-inducing language, unsupported factual claims, extra text, illegible typography, and ornate decoration.",
+  "settings": {
+    "model": "gpt-image-2",
+    "size": "1024x1536",
+    "quality": "medium",
+    "output_format": "png",
+    "n": 1
+  },
+  "file": "image.png",
+  "sha256": "09f2615aa2ae9f05bc2c568948357b6d4bce2fb227edc41be90528de0a44ac52",
+  "request_id": "req_41b75a125cba4d1b9b76aa251d82808b",
+  "usage": {
+    "input_tokens": 200,
+    "input_tokens_details": {
+      "image_tokens": 0,
+      "text_tokens": 200
+    },
+    "output_tokens": 1372,
+    "total_tokens": 1572,
+    "output_tokens_details": {
+      "image_tokens": 1372,
+      "text_tokens": 0
+    }
+  },
+  "revised_prompt": null
+}

@@ -1,0 +1,5 @@
+jupyterlab>=4,<5
+ipykernel>=6,<8
+python-dotenv>=1,<2
+Pillow>=10,<13
+openai>=2,<3

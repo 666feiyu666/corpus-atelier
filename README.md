@@ -1,6 +1,6 @@
 # Semiotic Graphic
 
-探索 AI 设计师如何通过生成、自评和修改，让海报传达宏观想法。
+Exploring how an AI designer generates, reviews, and revises posters to communicate a macro idea.
 
 ```powershell
 python -m venv .venv
@@ -8,6 +8,6 @@ python -m venv .venv
 .venv\Scripts\python -m jupyterlab graphic_design_01.ipynb
 ```
 
-将 `.env.example` 复制为 `.env` 并填写 API 密钥；在 notebook 中启用调用。
+Copy `.env.example` to `.env`, add your API key, and enable calls in the notebook.
 
-[工作 notebook](graphic_design_01.ipynb) · [Pilot 1：两轮实验](pilot1/graphic_design_01.ipynb) · [实验输出](pilot1/outputs/)
+[Working notebook](graphic_design_01.ipynb) · [Pilot 1: two rounds](pilot1/graphic_design_01.ipynb) · [Experiment outputs](pilot1/outputs/)

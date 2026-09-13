@@ -8,6 +8,10 @@ line breaks. Markdown blockquote markers are delimiters, not artwork text. Do no
 communication objective. Follow the composition, typography, visual treatment,
 allowed variation, and exclusions. These instructions do not prescribe a default style.
 
+Implement the direction in Visual style and treatment through the specified visual
+qualities, composition, and typography. Stay within Allowed variation. Do not print
+style descriptions or add motifs merely because of a style association.
+
 # Communication objective
 
 Create a portrait English poster inviting people under everyday productivity pressure to allow a brief pause.
@@ -36,13 +40,18 @@ Large, highly legible dark charcoal sans-serif type for the main copy.
 Smaller supporting copy beneath the main message. Minimal editorial typography,
 strong hierarchy, and clear readability from several feet away.
 
-# Visual treatment
+# Visual style and treatment
 
-Use a warm off-white background and one restrained muted blue-green accent, minimal editorial typography, strong hierarchy, and clear readability from several feet away.
+Use a restrained contemporary typographic direction with a minimal editorial
+approach: a stable text grid, clear sans-serif hierarchy, generous whitespace,
+dark charcoal text on warm off-white, and one restrained muted blue-green accent.
+Keep the deliberate gap as the single interruption in the orderly arrangement.
+Do not introduce decorative imagery or extra motifs. Preserve readability from
+several feet away.
 
 # Allowed variation
 
-Allow subtle variations in typeface, spacing, and accent placement while preserving the sentence, the intentional gap, portrait format, and inviting tone.
+Allow subtle variations in typeface, spacing, and accent placement. Preserve both exact strings, consistent alignment across the single intentional gap, the connection between sentence fragments, supporting-copy hierarchy, portrait format, and restrained palette. Do not add competing text breaks or accents that obscure the gap.
 
 # Exclusions
 
@@ -57,3 +66,8 @@ Allow subtle variations in typeface, spacing, and accent placement while preserv
 - Extra text.
 - Illegible typography.
 - Ornate decoration.
+
+Preserve the specified elements and their spatial and hierarchical relationships
+when applying the style. A style label does not authorize replacing those elements,
+rearranging the message, or adding motifs. Use only the stated variation; execute
+the supplied design rather than inventing a new concept to match a style.

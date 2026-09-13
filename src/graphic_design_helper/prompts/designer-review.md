@@ -16,3 +16,18 @@ the proposal.
 
 Update the design explanation as well as image_spec when revising. Relate visible
 evidence to the intended sign relationships and identify any changed interpretation.
+
+Review in order: the original communication purpose, the signs and their intended
+readings, how the style supports or weakens those relationships, and the concrete
+execution. Distinguish a missing or altered sign, an unsuitable stylistic treatment,
+and a rendering defect; do not equate resemblance to a named style with success.
+Identify visible evidence without claiming unobserved audience understanding.
+Separate rendering corrections within that direction from a proposed change of style.
+Respect user-specified or explicitly confirmed choices. If a different direction is
+warranted, explain the tradeoff, mark the changed direction as proposed for review,
+and update visual_style, graphic_decisions, and the affected image_spec fields together.
+If the revision changes a sign or its reading, also update sign_relationships,
+chosen_direction, design_rationale, and review_criteria as needed. Check whether a
+style change has unintentionally removed a relationship the concept depends on.
+Do not carry confirmation from the previous style over to a changed one. A generated
+image or an earlier model proposal is not evidence of user confirmation.

@@ -17,23 +17,23 @@
     },
     "chosen_direction": {
       "type": "string",
-      "description": "Proposed design direction."
-    },
-    "design_rationale": {
-      "type": "string",
-      "description": "Human-facing explanation of why the direction suits the communication purpose, audience, and viewing context."
+      "description": "Core communication concept and principal signs, before detailed stylistic treatment."
     },
     "sign_relationships": {
       "type": "string",
       "description": "Human-readable Markdown, one subsection per important element: element, referent, justified iconic/indexical/symbolic relationship, grounds for the relationship, and intended reading. Do not force all three categories; state ambiguity."
     },
+    "design_rationale": {
+      "type": "string",
+      "description": "Explain why the selected signs and their combined intended reading suit the communication purpose, audience, and viewing context."
+    },
+    "visual_style": {
+      "type": "string",
+      "description": "Derive style from sign_relationships and explain how each defining quality supports a particular intended reading. Treat user-specified style as an initial constraint and describe any resolved tension. Human-readable Markdown with separate subsections for style or reference direction, reasons suited to the task, defining visual qualities, allowed variation and boundaries, and confirmation status. Distinguish user-specified, proposed for review, and explicitly user-confirmed directions; identify supplied evidence for confirmation. Never infer approval from a previous proposal, generated image, or ready status. Name a historical movement only when justified; describe concrete visual qualities in all cases."
+    },
     "graphic_decisions": {
       "type": "string",
-      "description": "Human-facing explanation of stylistic and graphic choices, explicitly connecting important choices to the concrete instructions in image_spec fields."
-    },
-    "revision_summary": {
-      "type": "string",
-      "description": "Evidence and justified changes after self-review; empty on an initial proposal."
+      "description": "Connect each important choice across the intended sign relationship, supporting style quality, and executable image_spec instruction. Identify relationships that must survive stylistic variation."
     },
     "alternatives": {
       "type": "array",
@@ -62,6 +62,10 @@
         "type": "string"
       },
       "description": "Visible criteria for reviewing the poster."
+    },
+    "revision_summary": {
+      "type": "string",
+      "description": "Evidence and justified changes after self-review; empty on an initial proposal."
     },
     "source_requirements": {
       "type": "array",
@@ -109,14 +113,14 @@
             },
             "visual_treatment": {
               "type": "string",
-              "description": "Concrete imagery, color, style, and rendering choices."
+              "description": "Executable style direction and concrete imagery, palette, surface, and rendering qualities consistent with visual_style. A style name alone is insufficient. Keep selection rationale and confirmation history outside image_spec."
             },
             "allowed_variation": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "Choices the image model may vary. Empty means no additional variation is specified."
+              "description": "Concrete variations permitted while preserving the specified elements and relationships carrying the concept. Empty means no additional variation is specified."
             },
             "exclusions": {
               "type": "array",
@@ -147,14 +151,15 @@
     "status",
     "brief_interpretation",
     "chosen_direction",
-    "design_rationale",
     "sign_relationships",
+    "design_rationale",
+    "visual_style",
     "graphic_decisions",
-    "revision_summary",
     "alternatives",
     "assumptions",
     "uncertainties",
     "review_criteria",
+    "revision_summary",
     "source_requirements",
     "clarification_questions",
     "image_spec"

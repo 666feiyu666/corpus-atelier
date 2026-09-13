@@ -14,6 +14,22 @@
 
 {{design_decisions}}
 
+## Expression decisions
+
+First establish the important signs, their referents, intended readings, and the
+relationships needed to communicate the task. Explain why this concept fits.
+Then choose a visual style that supports those relationships, and translate both
+into concrete composition, typography, imagery, color, and variation instructions.
+
+## Style constraints and selection
+
+Treat any user-specified style or reference as a constraint from the outset when
+choosing signs. Otherwise derive a proposed direction from the expression needs;
+do not choose a style and add sign labels afterward. Signs and style may be revised
+together when a visual treatment changes the intended reading. Explain the tradeoff
+and preserve explicit requirements. Record the direction, supporting qualities,
+variation boundaries, and evidenced confirmation status in visual_style.
+
 # Design approach
 
 {{designer_instructions}}

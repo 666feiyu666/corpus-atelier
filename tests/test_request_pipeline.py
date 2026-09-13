@@ -63,6 +63,8 @@ class PipelineTests(unittest.TestCase):
             calls = []
             result = proposal()
             result["design_rationale"] = "PRIVATE RATIONALE"
+            result["visual_style"] = "### Confirmation status\nSTYLE REVIEW RECORD: proposed, not confirmed."
+            result["image_spec"]["visual_treatment"] = "STYLE EXECUTION: restrained typography and ample whitespace."
             result["sign_relationships"] = "### Headline\nSymbolic relationship: HUMAN SIGN ANALYSIS"
             result["graphic_decisions"] = "HUMAN DESIGN LINK: the spacing supports the intended pause."
             history = []
@@ -80,11 +82,14 @@ class PipelineTests(unittest.TestCase):
             self.assertIn(result["sign_relationships"], explanation)
             self.assertIn(result["graphic_decisions"], explanation)
             self.assertIn(result["design_rationale"], explanation)
+            self.assertIn(result["visual_style"], explanation)
             spec = deepcopy(result["image_spec"])
             spec["visible_copy"] = ["Take a breath."]
             research = {"brief": brief, "proposal": result, "designer_record": record}
             preview = build_image_prompt(spec)
             self.assertNotIn("PRIVATE RATIONALE", preview)
+            self.assertNotIn("STYLE REVIEW RECORD", preview)
+            self.assertIn("STYLE EXECUTION", preview)
             self.assertNotIn("HUMAN SIGN ANALYSIS", preview)
             self.assertNotIn("HUMAN DESIGN LINK", preview)
             settings = {"model": "mock-image", "size": "1024x1536", "quality": "medium"}
@@ -121,6 +126,16 @@ class PipelineTests(unittest.TestCase):
                 design_round(request, approved_token=request_token(request), run_dir=run, history=[],
                              client=designer_client(result, calls))
             self.assertEqual(len(calls), 2)
+
+    def test_historical_style_is_not_invented_but_new_responses_require_it(self):
+        from graphic_design_helper.proposal_presentation import render_design_rationale
+        old = proposal()
+        del old["visual_style"]
+        explanation = render_design_rationale(old)
+        self.assertIn("Style direction and confirmation were not recorded.", explanation)
+        self.assertNotIn("{{visual_style}}", explanation)
+        with self.assertRaises(ValueError):
+            validate_proposal(old)
 
     def test_clarification_and_sources_stop_generation_and_preserve_attempts(self):
         with TemporaryDirectory() as tmp:

@@ -16,13 +16,14 @@
 
 # Visual composition
 
+<!-- Specify the elements and relationships that the style must preserve. -->
 {{composition}}
 
 # Typography
 
 {{typography}}
 
-# Visual treatment
+# Visual style and treatment
 
 {{visual_treatment}}
 

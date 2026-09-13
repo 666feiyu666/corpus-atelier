@@ -68,8 +68,9 @@ def _design_sections(brief, original_user_request):
         "audience_and_context": audience or "Audience and viewing context not specified.",
         "requirements_and_constraints": requirements.strip() or "No additional requirements specified.",
         "design_decisions": decisions or (
-            "Develop the visual concept, imagery, composition, typography, color, and wording "
-            "in support of the communication purpose and viewing context. Respect all "
+            "Develop the concept, signs, and intended readings for the communication purpose "
+            "and viewing context, then select a supporting visual style and implement "
+            "both through imagery, composition, typography, color, and wording. Respect all "
             "specified requirements, including exact visible copy when supplied."),
     }
 

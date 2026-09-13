@@ -7,11 +7,12 @@ from types import SimpleNamespace
 import unittest
 
 from PIL import Image
-from design import review_token
-from review import BLIND_REVIEW_PROMPT, comparison_prompt, review_image
-from workflow import generate_round
-from design import designer_prompt
-from proposals import propose_design, TEXT_FIELDS, LIST_FIELDS
+from graphic_design_helper.workflow import review_token
+from graphic_design_helper.review import BLIND_REVIEW_PROMPT, comparison_prompt, review_image
+from graphic_design_helper.workflow import generate_round
+from graphic_design_helper.designer_prompts import designer_prompt
+from graphic_design_helper.designer import propose_design
+from graphic_design_helper.designer_prompts import TEXT_FIELDS, LIST_FIELDS
 
 
 class WorkflowTests(unittest.TestCase):

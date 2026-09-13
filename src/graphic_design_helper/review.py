@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from records import save_experiment
+from .records import save_experiment
 
 
 BLIND_REVIEW_PROMPT = """Examine this poster without assuming its maker's intention.

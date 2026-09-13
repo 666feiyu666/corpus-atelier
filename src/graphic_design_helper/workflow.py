@@ -2,9 +2,39 @@
 from copy import deepcopy
 import json
 
-from design import compose_prompt, review_token
-from generation import generate_image
-from records import save_experiment
+import hashlib
+from .designer_prompts import validate_proposal
+from .image_generator import generate_image
+from .records import save_experiment
+
+
+def validate_strategies(sign_strategies):
+    for row in sign_strategies:
+        if row.get("selected", False):
+            if row.get("production") != "generate":
+                raise ValueError("Source-based composition is not implemented; keep that candidate unselected.")
+            if not row.get("relations"):
+                raise ValueError("Selected elements need an explained sign relationship.")
+
+
+def compose_prompt(production_prompt):
+    """Validate and return the authored text unchanged; never append research notes."""
+    if not isinstance(production_prompt, str) or not production_prompt.strip():
+        raise ValueError("Write and review a non-empty production prompt first.")
+    return production_prompt
+
+
+def review_token(production_prompt, research, settings):
+    """A fingerprint of the complete reviewed draft, including its rationale."""
+    compose_prompt(production_prompt)
+    validate_strategies(research.get("sign_strategies", []))
+    if "proposal" in research:
+        validate_proposal(research["proposal"])
+        if research["proposal"]["status"] != "ready":
+            raise ValueError("The proposal requires sources or unsupported source composition.")
+    payload = json.dumps([production_prompt, research, settings], sort_keys=True,
+                         ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def generate_round(prompt, research, settings, *, approved_token, history,

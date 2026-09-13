@@ -5,10 +5,18 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from .prompt_files import load_prompt
+
+
+def compose_prompt(production_prompt):
+    """Prepare the complete image input for preview, approval, and generation."""
+    if not isinstance(production_prompt, str) or not production_prompt.strip():
+        raise ValueError("Write and review a non-empty production prompt first.")
+    return load_prompt("image-generation.md") + "\n# Production prompt\n\n" + production_prompt
 
 
 def generate_image(prompt, *, model="gpt-image-2", size="1024x1536", quality="medium", output_dir="outputs", client=None):
-    """Generate one PNG and return its path and a non-secret provenance record.
+    """Send the exact assembled, reviewed prompt and record it alongside one PNG.
 
     If client is omitted, the OpenAI SDK reads OPENAI_API_KEY from the environment.
     Exceptions propagate; there is no automatic retry of a potentially billable call.

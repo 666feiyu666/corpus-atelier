@@ -9,10 +9,10 @@ import unittest
 from PIL import Image
 from graphic_design_helper.workflow import review_token
 from graphic_design_helper.review import BLIND_REVIEW_PROMPT, comparison_prompt, review_image
-from graphic_design_helper.workflow import generate_round
+from graphic_design_helper.workflow import generate_round, compose_prompt
 from graphic_design_helper.designer_prompts import designer_prompt
 from graphic_design_helper.designer import propose_design
-from graphic_design_helper.designer_prompts import TEXT_FIELDS, LIST_FIELDS
+from graphic_design_helper.proposal_schema import TEXT_FIELDS, LIST_FIELDS
 
 
 class WorkflowTests(unittest.TestCase):
@@ -66,7 +66,9 @@ class WorkflowTests(unittest.TestCase):
                 generate_round(prompt, {**research, "rationale": "changed"}, settings, **args)
             self.assertEqual(calls, [])
             entry = generate_round(prompt, research, settings, **args)
-            self.assertEqual(calls[0]["prompt"], prompt)
+            self.assertEqual(calls[0]["prompt"], compose_prompt(prompt))
+            self.assertEqual(entry["image_prompt"], calls[0]["prompt"])
+            self.assertEqual(entry["generation"]["prompt"], calls[0]["prompt"])
             self.assertNotIn("PRIVATE RESEARCH", json.dumps(calls))
             research["rationale"] = "later edit"
             self.assertEqual(entry["research"]["rationale"], "PRIVATE RESEARCH")

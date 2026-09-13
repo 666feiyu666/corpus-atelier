@@ -6,7 +6,7 @@ from pathlib import Path
 from .records import save_experiment
 
 
-from .designer_prompts import PROPOSAL_SCHEMA, validate_proposal
+from .proposal_schema import PROPOSAL_SCHEMA, validate_proposal
 
 
 def propose_design(prompt, *, model="gpt-5.6-luna", reasoning_effort="medium",

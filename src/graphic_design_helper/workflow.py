@@ -3,8 +3,8 @@ from copy import deepcopy
 import json
 
 import hashlib
-from .designer_prompts import validate_proposal
-from .image_generator import generate_image
+from .proposal_schema import validate_proposal
+from .image_generator import compose_prompt, generate_image
 from .records import save_experiment
 
 
@@ -17,29 +17,32 @@ def validate_strategies(sign_strategies):
                 raise ValueError("Selected elements need an explained sign relationship.")
 
 
-def compose_prompt(production_prompt):
-    """Validate and return the authored text unchanged; never append research notes."""
-    if not isinstance(production_prompt, str) or not production_prompt.strip():
-        raise ValueError("Write and review a non-empty production prompt first.")
-    return production_prompt
+def review_token(production_prompt, research, settings, *, image_prompt=None):
+    """Fingerprint current image instructions, authored text, rationale, and settings.
+
+    Pass the displayed image_prompt to reject edits made since that preview.
+    """
+    assembled = compose_prompt(production_prompt)
+    if image_prompt is not None and image_prompt != assembled:
+        raise ValueError("Image instructions or draft changed. Preview and review it again.")
+    return _review_token(production_prompt, assembled, research, settings)
 
 
-def review_token(production_prompt, research, settings):
-    """A fingerprint of the complete reviewed draft, including its rationale."""
-    compose_prompt(production_prompt)
+def _review_token(production_prompt, image_prompt, research, settings):
     validate_strategies(research.get("sign_strategies", []))
     if "proposal" in research:
         validate_proposal(research["proposal"])
         if research["proposal"]["status"] != "ready":
             raise ValueError("The proposal requires sources or unsupported source composition.")
-    payload = json.dumps([production_prompt, research, settings], sort_keys=True,
+    payload = json.dumps([production_prompt, image_prompt, research, settings], sort_keys=True,
                          ensure_ascii=False, allow_nan=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def generate_round(prompt, research, settings, *, approved_token, history,
                    revision, output_dir="outputs", client=None):
-    if approved_token != review_token(prompt, research, settings):
+    image_prompt = compose_prompt(prompt)
+    if approved_token != _review_token(prompt, image_prompt, research, settings):
         raise ValueError("Draft changed or is unreviewed. Preview and review it again.")
     if len(history) >= 3:
         raise ValueError("This experiment is limited to one initial attempt and two revisions.")
@@ -48,13 +51,14 @@ def generate_round(prompt, research, settings, *, approved_token, history,
     entry = deepcopy({"round": len(history) + 1, "status": "requested",
                       "parent": history[-1].get("folder") if history else None,
                       "research": research, "production_prompt": prompt,
+                      "image_prompt": image_prompt,
                       "settings": settings, "reviewed_token": approved_token,
                       "revision": revision})
     folder = save_experiment(entry, output_dir=output_dir)
     entry["folder"] = str(folder.resolve())
     history.append(entry)  # Count attempts, including an uncertain/failed paid request.
     try:
-        path, record = generate_image(compose_prompt(prompt), **settings,
+        path, record = generate_image(image_prompt, **settings,
                                       output_dir=folder, client=client)
         entry.update(status="generated", image_path=str(path.resolve()), generation=record)
     except Exception as exc:

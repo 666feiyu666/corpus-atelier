@@ -18,3 +18,6 @@ notebook = ["jupyterlab>=4,<5", "ipykernel>=6,<8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+graphic_design_helper = ["prompts/*.md"]

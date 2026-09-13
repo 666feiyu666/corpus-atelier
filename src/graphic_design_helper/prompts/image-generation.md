@@ -1,6 +1,8 @@
 # Image rendering instructions
 
-Render the poster described in the production prompt below.
-Treat the specified visible copy as literal artwork text, preserving its wording.
-Only include text intended to appear in the poster; do not render instructions or
-section labels. Follow the supplied composition, allowed variation, and exclusions.
+Render the poster described below. Only the strings in Exact visible text are intended
+to appear in the artwork. Preserve their wording, punctuation, language, and intentional
+line breaks. The JSON quotes and list syntax are delimiters, not artwork text.
+An empty list means no visible text. Do not print instructions, section labels, or the
+communication objective. Follow the composition, typography, visual treatment,
+allowed variation, and exclusions. These instructions do not prescribe a default style.

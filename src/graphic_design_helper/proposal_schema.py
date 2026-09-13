@@ -1,34 +1,52 @@
-"""Structured design proposal contract and validation."""
-
-TEXT_FIELDS = ("brief_interpretation", "chosen_direction", "design_rationale",
-               "sign_relationships", "graphic_decisions", "revision_summary", "production_prompt")
-LIST_FIELDS = ("alternatives", "assumptions", "uncertainties", "review_criteria", "source_requirements")
-PROPOSAL_SCHEMA = {
-    "type": "object", "additionalProperties": False,
-    "properties": {
-        "status": {"type": "string", "enum": ["ready", "needs_sources"]},
-        **{key: {"type": "string"} for key in TEXT_FIELDS},
-        **{key: {"type": "array", "items": {"type": "string"}} for key in LIST_FIELDS},
-    },
-    "required": ["status", *TEXT_FIELDS, *LIST_FIELDS],
-}
+"""Load the response contract and enforce readiness beyond JSON field types."""
+import json
+from jsonschema import Draft202012Validator, ValidationError
+from .prompt_files import load_prompt
 
 
-def validate_proposal(proposal):
-    if not isinstance(proposal, dict) or set(proposal) != set(PROPOSAL_SCHEMA["required"]):
-        raise ValueError("Incomplete or unexpected proposal fields.")
-    if proposal["status"] not in {"ready", "needs_sources"}:
-        raise ValueError("Invalid proposal status.")
-    if any(not isinstance(proposal[k], str) for k in TEXT_FIELDS):
-        raise ValueError("Proposal explanations must be text.")
-    if any(not isinstance(proposal[k], list) or
-           any(not isinstance(v, str) for v in proposal[k]) for k in LIST_FIELDS):
-        raise ValueError("Proposal lists must contain text.")
+def load_proposal_schema():
+    schema = json.loads(load_prompt("designer-response.schema.json"))
+    Draft202012Validator.check_schema(schema)
+    return schema
+
+
+# Compatibility names for callers; live requests load the schema afresh.
+PROPOSAL_SCHEMA = load_proposal_schema()
+TEXT_FIELDS = tuple(k for k, v in PROPOSAL_SCHEMA["properties"].items()
+                    if v.get("type") == "string" and k != "status")
+LIST_FIELDS = tuple(k for k, v in PROPOSAL_SCHEMA["properties"].items() if v.get("type") == "array")
+
+
+def _validate(value, schema):
+    try:
+        Draft202012Validator(schema).validate(value)
+    except ValidationError as exc:
+        raise ValueError("Invalid response structure: " + exc.message) from exc
+
+
+def validate_image_spec(spec, schema=None):
+    schema = schema if schema is not None else load_proposal_schema()
+    contract = schema["properties"]["image_spec"]["anyOf"][0]
+    _validate(spec, contract)
+    for key, field in contract["properties"].items():
+        if field.get("type") == "string" and not spec[key].strip():
+            raise ValueError(f"Image specification needs {key}.")
+        if field.get("type") == "array" and any(not v.strip() for v in spec[key]):
+            raise ValueError(f"Image specification has empty {key} entries.")
+    return spec
+
+
+def validate_proposal(proposal, schema=None):
+    schema = schema if schema is not None else load_proposal_schema()
+    _validate(proposal, schema)
     if proposal["status"] == "ready":
-        if not proposal["production_prompt"].strip() or proposal["source_requirements"]:
-            raise ValueError("A ready proposal needs a prompt and no outstanding sources.")
-    elif proposal["production_prompt"].strip() or not proposal["source_requirements"]:
-        raise ValueError("A source-dependent proposal must list requirements and omit the prompt.")
+        if proposal["source_requirements"] or proposal["clarification_questions"]:
+            raise ValueError("Ready proposals cannot have outstanding sources or clarification questions.")
+        validate_image_spec(proposal["image_spec"], schema)
+    else:
+        if proposal["image_spec"] is not None:
+            raise ValueError("Non-ready proposals must withhold image_spec.")
+        required = "source_requirements" if proposal["status"] == "needs_sources" else "clarification_questions"
+        if not proposal[required] or any(not item.strip() for item in proposal[required]):
+            raise ValueError(f"This proposal must list {required}.")
     return proposal
-
-

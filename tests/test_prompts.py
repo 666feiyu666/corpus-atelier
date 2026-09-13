@@ -6,6 +6,8 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from fixtures import image_spec
+import shutil
 
 from graphic_design_helper import prompt_files
 from graphic_design_helper.designer_prompts import designer_prompt
@@ -15,7 +17,10 @@ from graphic_design_helper.workflow import compose_prompt, review_token, generat
 
 class PromptTests(unittest.TestCase):
     def test_stage_selection_and_live_file_edits(self):
-        with TemporaryDirectory() as tmp, patch.object(prompt_files, "PROMPT_DIR", Path(tmp)):
+        with TemporaryDirectory() as tmp:
+            for source in prompt_files.PROMPT_DIR.iterdir():
+                shutil.copy2(source, Path(tmp) / source.name)
+            self.enterContext(patch.object(prompt_files, "PROMPT_DIR", Path(tmp)))
             folder = Path(tmp)
             for name, text in [("designer.md", "SHARED"),
                                ("designer-proposal.md", "PROPOSAL"),
@@ -39,11 +44,14 @@ class PromptTests(unittest.TestCase):
                 designer_prompt({})
 
     def test_image_file_edit_requires_new_preview_and_approval(self):
-        with TemporaryDirectory() as tmp, patch.object(prompt_files, "PROMPT_DIR", Path(tmp)):
+        with TemporaryDirectory() as tmp:
+            for source in prompt_files.PROMPT_DIR.iterdir():
+                shutil.copy2(source, Path(tmp) / source.name)
+            self.enterContext(patch.object(prompt_files, "PROMPT_DIR", Path(tmp)))
             folder = Path(tmp)
             instructions = folder / "image-generation.md"
             instructions.write_text("FIRST RENDER INSTRUCTIONS", encoding="utf-8")
-            authored = "Visible copy: Pause."
+            authored = image_spec()
             research = {"rationale": "PRIVATE RESEARCH"}
             settings = {"model": "mock-image"}
             preview = compose_prompt(authored)
@@ -71,9 +79,9 @@ class PromptTests(unittest.TestCase):
             entry = generate_round(authored, research, settings, approved_token=token, **args)
             self.assertEqual(calls[0]["prompt"], preview)
             self.assertNotIn("PRIVATE RESEARCH", preview)
-            self.assertEqual(entry["production_prompt"], authored)
+            self.assertEqual(entry["image_spec"], authored)
             self.assertEqual(entry["image_prompt"], preview)
-            generation = json.loads(next(Path(entry["folder"]).glob("*/generation.json")).read_text())
+            generation = json.loads(next(Path(entry["folder"]).glob("image/*/response.json")).read_text())
             saved = json.loads((Path(entry["folder"]) / "round.json").read_text())
             self.assertEqual(generation["prompt"], preview)
             self.assertEqual(saved["image_prompt"], preview)
@@ -81,16 +89,16 @@ class PromptTests(unittest.TestCase):
 
     def test_schema_remains_strict_after_extraction(self):
         proposal = {**{key: "Explanation" for key in TEXT_FIELDS},
-                    **{key: [] for key in LIST_FIELDS}, "status": "ready"}
+                    **{key: [] for key in LIST_FIELDS}, "status": "ready", "image_spec": image_spec()}
         self.assertEqual(validate_proposal(proposal), proposal)
         for changed in [{**proposal, "extra": "unexpected"},
                         {**proposal, "status": "unknown"},
                         {**proposal, "assumptions": [1]},
-                        {**proposal, "production_prompt": " "}]:
+                        {**proposal, "image_spec": None}]:
             with self.assertRaises(ValueError):
                 validate_proposal(changed)
         source_dependent = {**proposal, "status": "needs_sources",
-                            "production_prompt": "", "source_requirements": ["Original source"]}
+                            "image_spec": None, "source_requirements": ["Original source"]}
         self.assertEqual(validate_proposal(source_dependent), source_dependent)
 
 

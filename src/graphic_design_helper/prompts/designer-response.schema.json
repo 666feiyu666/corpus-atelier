@@ -1,0 +1,162 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "needs_sources",
+        "needs_clarification"
+      ],
+      "description": "Only ready permits image preparation; non-ready proposals have null image_spec."
+    },
+    "brief_interpretation": {
+      "type": "string",
+      "description": "Concise interpretation of the user communication problem."
+    },
+    "chosen_direction": {
+      "type": "string",
+      "description": "Proposed design direction."
+    },
+    "design_rationale": {
+      "type": "string",
+      "description": "Concise explanation of design choices."
+    },
+    "sign_relationships": {
+      "type": "string",
+      "description": "Hypothetical readings supported by relevant sign relationships."
+    },
+    "graphic_decisions": {
+      "type": "string",
+      "description": "Explanation of graphic choices."
+    },
+    "revision_summary": {
+      "type": "string",
+      "description": "Evidence and justified changes after self-review; empty on an initial proposal."
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Alternatives only when useful."
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Explicit provisional additions, not confirmed user requirements."
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Open questions or uncertain readings."
+    },
+    "review_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Visible criteria for reviewing the poster."
+    },
+    "source_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Outstanding exact content or source material."
+    },
+    "clarification_questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Focused questions that must be answered before proceeding."
+    },
+    "image_spec": {
+      "description": "Structured handoff to image generation, or null while blocked.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "communication_objective": {
+              "type": "string",
+              "description": "Intended communication, not text to print."
+            },
+            "audience_and_context": {
+              "type": "string",
+              "description": "Relevant audience and viewing conditions from the brief or explicitly stated assumptions."
+            },
+            "visible_copy": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Exact strings to appear in the artwork, including intentional line breaks. Empty means no visible text."
+            },
+            "composition": {
+              "type": "string",
+              "description": "Concrete arrangement, scale, placement, and visual hierarchy."
+            },
+            "typography": {
+              "type": "string",
+              "description": "Typography and text placement. For a text-free poster, explicitly state no typography."
+            },
+            "visual_treatment": {
+              "type": "string",
+              "description": "Concrete imagery, color, style, and rendering choices."
+            },
+            "allowed_variation": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Choices the image model may vary. Empty means no additional variation is specified."
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Concrete content or visual treatments to avoid."
+            }
+          },
+          "required": [
+            "communication_objective",
+            "audience_and_context",
+            "visible_copy",
+            "composition",
+            "typography",
+            "visual_treatment",
+            "allowed_variation",
+            "exclusions"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "status",
+    "brief_interpretation",
+    "chosen_direction",
+    "design_rationale",
+    "sign_relationships",
+    "graphic_decisions",
+    "revision_summary",
+    "alternatives",
+    "assumptions",
+    "uncertainties",
+    "review_criteria",
+    "source_requirements",
+    "clarification_questions",
+    "image_spec"
+  ]
+}

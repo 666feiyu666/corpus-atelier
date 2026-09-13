@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 from PIL import Image
+from fixtures import image_spec
 from graphic_design_helper.workflow import review_token
 from graphic_design_helper.review import BLIND_REVIEW_PROMPT, comparison_prompt, review_image
 from graphic_design_helper.workflow import generate_round, compose_prompt
@@ -19,8 +20,7 @@ class WorkflowTests(unittest.TestCase):
     def test_macro_brief_proposal_and_source_gate(self):
         with TemporaryDirectory() as tmp:
             proposal = {**{k: "Explanation" for k in TEXT_FIELDS},
-                        **{k: [] for k in LIST_FIELDS}, "status": "ready"}
-            proposal["production_prompt"] = "Only this goes to GPT Image."
+                        **{k: [] for k in LIST_FIELDS}, "status": "ready", "image_spec": image_spec()}
             calls = []
             def create(**kwargs):
                 calls.append(kwargs)
@@ -31,16 +31,16 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(calls[0]["input"], prompt)
             self.assertEqual(calls[0]["model"], "gpt-5.6-luna")
             self.assertNotIn("previous_response_id", calls[0])
-            self.assertEqual(record["proposal"]["production_prompt"], proposal["production_prompt"])
+            self.assertEqual(record["proposal"]["image_spec"], proposal["image_spec"])
             self.assertTrue((Path(record["folder"]) / "proposal.json").exists())
             proposal.update(status="needs_sources", source_requirements=["Real source required"],
-                            production_prompt="")
+                            image_spec=None)
             with self.assertRaises(ValueError):
-                review_token("Manually bypass blank prompt", {"proposal": proposal}, {})
+                review_token(image_spec(), {"proposal": proposal}, {})
             proposal["status"] = "ready"
             with self.assertRaises(ValueError):
                 propose_design(prompt, client=client, output_dir=tmp)
-            statuses = [json.loads(p.read_text())["status"] for p in Path(tmp).glob("*/proposal.json")]
+            statuses = [json.loads(p.read_text())["status"] for p in Path(tmp).glob("*/response.json")]
             self.assertIn("failed", statuses)
 
     def test_reviewed_request_and_revision_boundary(self):
@@ -55,13 +55,13 @@ class WorkflowTests(unittest.TestCase):
             client = SimpleNamespace(images=SimpleNamespace(generate=generate))
             research = {"rationale": "PRIVATE RESEARCH", "sign_strategies": []}
             settings = {"model": "mock-image", "size": "1024x1536", "quality": "medium"}
-            prompt = "Exact production text.\n"
+            prompt = image_spec()
             token = review_token(prompt, research, settings)
             history = []
             args = dict(approved_token=token, history=history, revision={},
                         output_dir=tmp, client=client)
             with self.assertRaises(ValueError):
-                generate_round(prompt + "changed", research, settings, **args)
+                generate_round({**prompt, "composition": "changed"}, research, settings, **args)
             with self.assertRaises(ValueError):
                 generate_round(prompt, {**research, "rationale": "changed"}, settings, **args)
             self.assertEqual(calls, [])
@@ -112,7 +112,7 @@ class WorkflowTests(unittest.TestCase):
             image = Path(tmp) / "poster.png"
             Image.new("RGB", (4, 4), "blue").save(image)
             proposal = {**{k: "Revised explanation" for k in TEXT_FIELDS},
-                        **{k: [] for k in LIST_FIELDS}, "status": "ready"}
+                        **{k: [] for k in LIST_FIELDS}, "status": "ready", "image_spec": image_spec()}
             calls = []
             def create(**kwargs):
                 calls.append(kwargs)
@@ -136,7 +136,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_source_composition_is_blocked(self):
         with self.assertRaises(ValueError):
-            review_token("Poster", {"sign_strategies": [{"selected": True,
+            review_token(image_spec(), {"sign_strategies": [{"selected": True,
                          "production": "compose_from_source"}]}, {})
 
 

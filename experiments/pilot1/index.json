@@ -1,22 +1,23 @@
 {
   "name": "Pilot 1",
   "path_base": "repository root",
-  "note": "Historical records and the executed notebook preserve original run-time paths. Use the paths below to locate archived files.",
+  "note": "Historical results are archived under outputs/legacy. Their original contents and run-time paths are preserved. The archived notebook is a pre-cleanup snapshot with historical outputs; the active notebook has been cleared for new experiments. Use the paths below to locate archived files.",
   "notebook": "experiments/pilot1/graphic_design_01.ipynb",
   "rounds": [
     {
       "round": 1,
-      "record": "experiments/pilot1/outputs/20260905T114752Z_429f9b98/round.json",
-      "image": "experiments/pilot1/outputs/20260905T114752Z_429f9b98/20260905T114752Z_823bea7e/image.png",
+      "record": "experiments/pilot1/outputs/legacy/20260905T114752Z_429f9b98/round.json",
+      "image": "experiments/pilot1/outputs/legacy/20260905T114752Z_429f9b98/20260905T114752Z_823bea7e/image.png",
       "original_folder": "D:\\DH-Research\\graphic-design-helper\\outputs\\20260905T114752Z_429f9b98",
       "self_review_completed": true
     },
     {
       "round": 2,
-      "record": "experiments/pilot1/outputs/20260905T115319Z_51353534/round.json",
-      "image": "experiments/pilot1/outputs/20260905T115319Z_51353534/20260905T115319Z_7c6b604a/image.png",
+      "record": "experiments/pilot1/outputs/legacy/20260905T115319Z_51353534/round.json",
+      "image": "experiments/pilot1/outputs/legacy/20260905T115319Z_51353534/20260905T115319Z_7c6b604a/image.png",
       "original_folder": "D:\\DH-Research\\graphic-design-helper\\outputs\\20260905T115319Z_51353534",
       "self_review_completed": false
     }
-  ]
+  ],
+  "archived_notebook": "experiments/pilot1/outputs/legacy/graphic_design_01.before-cleanup.ipynb"
 }

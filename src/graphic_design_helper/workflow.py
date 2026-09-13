@@ -81,12 +81,40 @@ def review_token(image_spec, research, settings, *, image_prompt=None):
 
 
 def generate_round(image_spec, research, settings, *, approved_token, history,
-                   revision, output_dir="outputs", client=None):
+                   revision, output_dir="outputs", client=None,
+                   retry=False, retry_reason=""):
     image_prompt = compose_prompt(image_spec)
     if approved_token != _review_token(image_spec, image_prompt, research, settings):
         raise ValueError("Draft changed or is unreviewed. Preview and review it again.")
-    if len(history) >= 3:
-        raise ValueError("This experiment is limited to one initial attempt and two revisions.")
+    attempts_used = sum(1 + len(row.get("previous_attempts", [])) for row in history)
+    if attempts_used >= 3:
+        raise ValueError("This experiment is limited to three image calls, including failures and retries.")
+    if retry:
+        if not history or history[-1].get("status") not in {"failed", "interrupted"}:
+            raise ValueError("Retry requires a recorded failed or interrupted latest round.")
+        if not retry_reason.strip():
+            raise ValueError("Provide a reason for explicitly retrying the image request.")
+        entry = history[-1]
+        run_dir = entry["run_dir"]
+        _check_saved_history(run_dir, history)
+        if entry.get("image_path") or list((Path(entry["folder"]) / "image").glob("*/image.png")):
+            raise ValueError("An image is already saved. Inspect it before requesting another image.")
+        original_token = _review_token(entry["image_spec"], entry["image_prompt"],
+                                       entry["research"], entry["settings"])
+        if approved_token != original_token:
+            raise ValueError("Retry must use the same saved request. Restore and preview it again.")
+        designer = research.get("designer_record", {})
+        manifest = json.loads((Path(run_dir) / "run.json").read_text(encoding="utf-8"))
+        if designer and manifest.get("latest_designer_attempt") != designer.get("folder"):
+            raise ValueError("A newer designer response exists. Review it before generating.")
+        previous = deepcopy({k: v for k, v in entry.items() if k != "previous_attempts"})
+        entry.setdefault("previous_attempts", []).append(previous)
+        entry.update(status="requested", retry_reason=retry_reason)
+        entry.pop("error_type", None)
+        entry.pop("remote_outcome", None)
+        return _generate_round_image(entry, client=client)
+    if history and history[-1].get("status") in {"failed", "interrupted", "requested"}:
+        raise ValueError("The latest image attempt is unresolved. Inspect it and explicitly retry if appropriate.")
     if history and (not history[-1].get("self_review") or not revision.get("reason", "").strip()):
         raise ValueError("Have the designer examine the previous image and document the revision first.")
     designer = research.get("designer_record", {})
@@ -116,13 +144,25 @@ def generate_round(image_spec, research, settings, *, approved_token, history,
                       "research": research, "image_spec": image_spec, "image_prompt": image_prompt,
                       "settings": settings, "reviewed_token": approved_token, "revision": revision})
     history.append(entry)
+    return _generate_round_image(entry, client=client)
+
+
+def _generate_round_image(entry, *, client=None):
+    """Perform exactly one image call and persist interruptions before propagating them."""
+    run_dir = entry["run_dir"]
+    folder = Path(entry["folder"])
     save_round(entry)
     update_run(run_dir, "image_requested", current_round=entry["round"])
     try:
-        path, record = generate_image(image_prompt, **settings, image_spec=deepcopy(image_spec),
+        path, record = generate_image(entry["image_prompt"], **entry["settings"],
+                                      image_spec=deepcopy(entry["image_spec"]),
                                       output_dir=folder / "image", client=client)
         entry.update(status="generated", image_path=str(path.resolve()), generation=record)
         update_run(run_dir, "awaiting_human_decision", latest_image=str(path.resolve()))
+    except KeyboardInterrupt:
+        entry.update(status="interrupted", error_type="KeyboardInterrupt", remote_outcome="unknown")
+        update_run(run_dir, "image_interrupted")
+        raise
     except Exception as exc:
         entry.update(status="failed", error_type=type(exc).__name__)
         update_run(run_dir, "image_failed")

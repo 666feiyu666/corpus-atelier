@@ -1,10 +1,29 @@
 """Save an experiment's reasoning and locally supplied images together."""
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import copy2
 from uuid import uuid4
+
+
+def _numbered_directory(output_dir, prefix):
+    """Reserve the next number without overwriting existing files or directories."""
+    root = Path(output_dir).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    pattern = re.compile(rf"{re.escape(prefix)}_(\d+)")
+    numbers = [int(match.group(1)) for child in root.iterdir()
+               if (match := pattern.fullmatch(child.name))]
+    number = max(numbers, default=0) + 1
+    while True:
+        folder = root / f"{prefix}_{number:02d}"
+        try:
+            folder.mkdir()
+            return folder
+        except FileExistsError:
+            number += 1
+
 
 def save_experiment(record, image_paths=(), output_dir="outputs"):
     """Create a fresh folder; never overwrite a previous experiment.
@@ -18,8 +37,7 @@ def save_experiment(record, image_paths=(), output_dir="outputs"):
     # Validate notes before creating an output directory.
     notes = json.loads(json.dumps(record, ensure_ascii=False, allow_nan=False))
     now = datetime.now(timezone.utc)
-    run = Path(output_dir) / (now.strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8])
-    run.mkdir(parents=True, exist_ok=False)
+    run = _numbered_directory(output_dir, "snapshot")
     images = []
     for index, source in enumerate(sources, start=1):
         target = run / f"{index:02d}_{source.name}"
@@ -46,8 +64,7 @@ def start_run(brief, *, original_user_request=None, output_dir="outputs"):
     snapshot = {"original_user_request": original_user_request, "brief": brief}
     json.dumps(snapshot, allow_nan=False)
     now = datetime.now(timezone.utc)
-    folder = Path(output_dir).resolve() / (now.strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8])
-    folder.mkdir(parents=True, exist_ok=False)
+    folder = _numbered_directory(output_dir, "run")
     write_json(folder / "brief.json", snapshot)
     write_json(folder / "run.json", {"format_version": 2, "created_at": now.isoformat(),
                                      "status": "planning", "rounds": "rounds"})
@@ -63,7 +80,4 @@ def update_run(folder, status, **details):
 
 def new_attempt(output_dir):
     """Never overwrite an earlier request, including an uncertain failed call."""
-    now = datetime.now(timezone.utc)
-    path = Path(output_dir).resolve() / ("attempt_" + now.strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8])
-    path.mkdir(parents=True, exist_ok=False)
-    return path
+    return _numbered_directory(output_dir, "attempt")

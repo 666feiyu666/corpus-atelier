@@ -39,6 +39,11 @@ def generate_image(prompt, *, model="gpt-image-2", size="1024x1536", quality="me
                       revised_prompt=getattr(response.data[0], "revised_prompt", None))
         write_json(folder / "response.json", record)
         return target, record
+    except KeyboardInterrupt:
+        record.update(status="interrupted", error_type="KeyboardInterrupt",
+                      remote_outcome="unknown")
+        write_json(folder / "response.json", record)
+        raise
     except Exception as exc:
         record.update(status="failed", error_type=type(exc).__name__)
         write_json(folder / "response.json", record)

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from .records import new_attempt, write_json
+from .proposal_presentation import render_design_rationale
 from .proposal_schema import load_proposal_schema, validate_proposal
 
 
@@ -63,6 +64,8 @@ def propose_design(prompt, *, model="gpt-5.6-luna", reasoning_effort="medium",
             raise ValueError("Designer did not return a completed proposal.")
         proposal = validate_proposal(json.loads(response.output_text), request["response_schema"])
         write_json(folder / "proposal.json", proposal)
+        (folder / "design-rationale.md").write_text(
+            render_design_rationale(proposal), encoding="utf-8")
         record.update(status="completed", proposal=proposal)
         write_json(folder / "response.json", record)
         return record

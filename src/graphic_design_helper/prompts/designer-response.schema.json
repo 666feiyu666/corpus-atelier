@@ -21,15 +21,15 @@
     },
     "design_rationale": {
       "type": "string",
-      "description": "Concise explanation of design choices."
+      "description": "Human-facing explanation of why the direction suits the communication purpose, audience, and viewing context."
     },
     "sign_relationships": {
       "type": "string",
-      "description": "Hypothetical readings supported by relevant sign relationships."
+      "description": "Human-readable Markdown, one subsection per important element: element, referent, justified iconic/indexical/symbolic relationship, grounds for the relationship, and intended reading. Do not force all three categories; state ambiguity."
     },
     "graphic_decisions": {
       "type": "string",
-      "description": "Explanation of graphic choices."
+      "description": "Human-facing explanation of stylistic and graphic choices, explicitly connecting important choices to the concrete instructions in image_spec fields."
     },
     "revision_summary": {
       "type": "string",

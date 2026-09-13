@@ -19,6 +19,41 @@ from graphic_design_helper.workflow import design_round, generate_round, review_
 
 
 class PipelineTests(unittest.TestCase):
+    def test_initial_and_review_templates_are_independent(self):
+        from graphic_design_helper.prompt_builder import build_designer_prompt
+        with TemporaryDirectory() as tmp:
+            templates = Path(tmp) / "templates"
+            shutil.copytree(prompt_files.TEMPLATE_DIR, templates)
+            with patch.object(prompt_files, "TEMPLATE_DIR", templates):
+                initial = build_designer_prompt({"purpose": "Pause"})
+                review = build_designer_prompt({"purpose": "Pause"}, {"previous_prompt": "PRIOR POSTER"})
+                self.assertNotIn("Previous design and review context", initial)
+                self.assertNotIn("Current stage", initial)
+                self.assertNotIn("User-supplied brief", initial)
+                self.assertIn("PRIOR POSTER", review)
+                path = templates / "designer-review-input-template.md"
+                path.write_text(path.read_text() + "\nREVIEW CHANGE\n")
+                self.assertEqual(initial, build_designer_prompt({"purpose": "Pause"}))
+                self.assertIn("REVIEW CHANGE", build_designer_prompt({"purpose": "Pause"}, {}))
+                path = templates / "designer-input-template.md"
+                path.write_text(path.read_text() + "\nINITIAL CHANGE\n")
+                self.assertIn("INITIAL CHANGE", build_designer_prompt({"purpose": "Pause"}))
+                self.assertNotIn("INITIAL CHANGE", build_designer_prompt({"purpose": "Pause"}, {}))
+
+    def test_requirement_formatting_preserves_supplied_content(self):
+        from graphic_design_helper.prompt_builder import build_designer_prompt
+        requirements = {"purpose": "Pause {{literal}}", "exact_copy": "Line one\nLine two",
+                        "audience": "Provisional audience", "sources": None,
+                        "custom_requirement": {"wording": ["Keep punctuation!", "Keep order?"]}}
+        original = deepcopy(requirements)
+        prompt = build_designer_prompt(requirements)
+        for wording in ("Pause {{literal}}", "Line one\nLine two", "Provisional audience",
+                        "Keep punctuation!", "Keep order?"):
+            self.assertIn(wording, prompt)
+        self.assertIn("## Required sources\n\nNot specified.", prompt)
+        self.assertLess(prompt.index("Keep punctuation!"), prompt.index("Keep order?"))
+        self.assertEqual(requirements, original)
+
     def test_complete_handoff_and_self_review(self):
         with TemporaryDirectory() as tmp:
             brief = {"purpose": "Invite a pause"}
@@ -28,6 +63,8 @@ class PipelineTests(unittest.TestCase):
             calls = []
             result = proposal()
             result["design_rationale"] = "PRIVATE RATIONALE"
+            result["sign_relationships"] = "### Headline\nSymbolic relationship: HUMAN SIGN ANALYSIS"
+            result["graphic_decisions"] = "HUMAN DESIGN LINK: the spacing supports the intended pause."
             history = []
             record = design_round(request, approved_token=request_token(request), run_dir=run,
                                   history=history, client=designer_client(result, calls))
@@ -39,11 +76,17 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(saved_request["response_schema"], calls[0]["text"]["format"]["schema"])
             self.assertIn(original, calls[0]["input"])
             self.assertEqual(json.loads((attempt / "proposal.json").read_text()), result)
+            explanation = (attempt / "design-rationale.md").read_text(encoding="utf-8")
+            self.assertIn(result["sign_relationships"], explanation)
+            self.assertIn(result["graphic_decisions"], explanation)
+            self.assertIn(result["design_rationale"], explanation)
             spec = deepcopy(result["image_spec"])
             spec["visible_copy"] = ["Take a breath."]
             research = {"brief": brief, "proposal": result, "designer_record": record}
             preview = build_image_prompt(spec)
             self.assertNotIn("PRIVATE RATIONALE", preview)
+            self.assertNotIn("HUMAN SIGN ANALYSIS", preview)
+            self.assertNotIn("HUMAN DESIGN LINK", preview)
             settings = {"model": "mock-image", "size": "1024x1536", "quality": "medium"}
             fixture = Path(tmp) / "fixture.png"
             Image.new("RGB", (4, 4), "white").save(fixture)
@@ -68,6 +111,7 @@ class PipelineTests(unittest.TestCase):
             review = build_designer_request(brief, revision, original_user_request=original, image_path=entry["image_path"])
             reviewed = design_round(review, approved_token=request_token(review), run_dir=run,
                                     history=history, client=designer_client(result, calls))
+            self.assertTrue((Path(reviewed["folder"]) / "design-rationale.md").is_file())
             content = calls[-1]["input"][0]["content"]
             self.assertEqual(base64.b64decode(content[1]["image_url"].split(",")[1]), fixture.read_bytes())
             self.assertEqual(Path(reviewed["folder"]).parent, run / "rounds/02/designer")
@@ -94,6 +138,9 @@ class PipelineTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     review_token(image_spec(), {"proposal": value}, {})
                 self.assertEqual(json.loads((run / "run.json").read_text())["status"], status)
+                rationale = (Path(record["folder"]) / "design-rationale.md").read_text()
+                self.assertIn(status, rationale)
+                self.assertIn("Required information", rationale)
             self.assertEqual(len(list((run / "rounds/01/designer").glob("*/request.json"))), 3)
             self.assertFalse((run / "rounds/01/image").exists())
             research = {"proposal": ready, "designer_record": first}
@@ -148,7 +195,7 @@ class PipelineTests(unittest.TestCase):
                 run = start_run({}, output_dir=tmp)
                 request = build_designer_request({})
                 token = request_token(request)
-                for filename in ["designer-input-template.md", "brief-intake.md", "designer-response.schema.json"]:
+                for filename in ["designer-input-template.md", "designer.md", "designer-response.schema.json"]:
                     path = (templates if filename.endswith("-template.md") else folder) / filename
                     original = path.read_text()
                     if filename.endswith(".json"):

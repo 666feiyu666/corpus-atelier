@@ -25,19 +25,76 @@ def _json(value):
     return json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)
 
 
+def _markdown(value, level=2):
+    """Present structured content without rewriting supplied wording."""
+    if value is None:
+        return "Not specified."
+    if isinstance(value, str):
+        return value if value else "Empty text supplied."
+    if isinstance(value, dict):
+        return "\n\n".join(
+            f"{'#' * min(level, 6)} {key}\n\n{_markdown(item, level + 1)}"
+            for key, item in value.items()) or "No entries."
+    if isinstance(value, list):
+        return "\n".join("- " + _markdown(item, level + 1).replace("\n", "\n  ")
+                         for item in value) or "No entries."
+    return _json(value)
+
+
+def _design_sections(brief, original_user_request):
+    # Retain the existing record/API field name; it is not a user-facing form.
+    remaining = dict(brief)
+
+    def section(fields):
+        rows = []
+        for key, label in fields:
+            if key in remaining:
+                rows.append(f"## {label}\n\n{_markdown(remaining.pop(key), 3)}")
+        return "\n\n".join(rows)
+
+    task = section((("topic", "Topic"), ("purpose", "Communication purpose"),
+                    ("core_message", "Core message"), ("deliverable", "Deliverable")))
+    if original_user_request is not None:
+        task += "\n\n## Additional task wording\n\n" + _markdown(original_user_request)
+    audience = section((("audience", "Audience"), ("setting", "Viewing context")))
+    requirements = section((("constraints", "Hard constraints"), ("tone", "Tone"),
+                            ("preferences", "Preferences"), ("exact_copy", "Exact visible copy"),
+                            ("sources", "Required sources")))
+    decisions = section((("design_decisions", "Decisions to develop"),))
+    if remaining:
+        requirements += "\n\n## Additional requirements and context\n\n" + _markdown(remaining, 3)
+    return {
+        "design_task": task.strip() or "No design task specified.",
+        "audience_and_context": audience or "Audience and viewing context not specified.",
+        "requirements_and_constraints": requirements.strip() or "No additional requirements specified.",
+        "design_decisions": decisions or (
+            "Develop the visual concept, imagery, composition, typography, color, and wording "
+            "in support of the communication purpose and viewing context. Respect all "
+            "specified requirements, including exact visible copy when supplied."),
+    }
+
+
+def _instructions(name):
+    # Nest instruction-file headings under the template's section heading.
+    return re.sub(r"^(#+) ", r"\1# ", load_prompt(name).strip(), flags=re.MULTILINE)
+
+
 def build_designer_prompt(brief, revision=None, *, original_user_request=None):
+    """Build an initial proposal or a separate review request from design requirements."""
     if not isinstance(brief, dict):
-        raise ValueError("The brief must be an object.")
+        raise ValueError("Design requirements must be an object.")
     if original_user_request is not None and not isinstance(original_user_request, str):
         raise ValueError("Original user request must be text or null.")
-    stage = "designer-proposal.md" if revision is None else "designer-review.md"
-    return render_template("designer-input-template.md", {
-        "designer_instructions": load_prompt("designer.md"),
-        "brief_intake": load_prompt("brief-intake.md"),
-        "stage_instructions": load_prompt(stage),
-        "original_user_request": _json(original_user_request), "brief": _json(brief),
-        "revision_context": "Initial proposal. No previous poster." if revision is None else _json(revision),
-    })
+    # Check that all supplied data remains serializable for the saved request.
+    _json(brief)
+    values = {**_design_sections(brief, original_user_request),
+              "designer_instructions": _instructions("designer.md")}
+    if revision is None:
+        return render_template("designer-input-template.md", {
+            **values, "proposal_instructions": _instructions("designer-proposal.md")})
+    return render_template("designer-review-input-template.md", {
+        **values, "review_instructions": _instructions("designer-review.md"),
+        "revision_context": _markdown(revision)})
 
 
 def build_designer_request(brief, revision=None, *, original_user_request=None,

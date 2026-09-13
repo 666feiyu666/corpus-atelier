@@ -18,9 +18,16 @@
 
 {{designer_instructions}}
 
-# Propose the design
+# Previous design and review context
 
-{{proposal_instructions}}
+The generated poster is attached as an image. The following material describes the
+previous design; the task and requirements above remain the reference for review.
+
+{{revision_context}}
+
+# Review and revise the design
+
+{{review_instructions}}
 
 # Required response format
 

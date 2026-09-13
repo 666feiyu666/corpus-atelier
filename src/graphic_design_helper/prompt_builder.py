@@ -4,14 +4,14 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from .prompt_files import load_prompt
+from .prompt_files import load_prompt, load_template
 from .proposal_schema import load_proposal_schema, validate_image_spec
 
 _SLOT = re.compile(r"{{\s*([a-z_]+)\s*}}")
 
 
 def render_template(name, values):
-    template = load_prompt(name)
+    template = load_template(name)
     slots = set(_SLOT.findall(template))
     if slots != set(values):
         raise ValueError(f"Template fields differ: {sorted(slots ^ set(values))}")

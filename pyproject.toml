@@ -17,8 +17,14 @@ dependencies = [
 [project.optional-dependencies]
 notebook = ["jupyterlab>=4,<5", "ipykernel>=6,<8"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["graphic_design_helper", "graphic_design_helper.templates"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+"graphic_design_helper.templates" = "templates"
 
 [tool.setuptools.package-data]
 graphic_design_helper = ["prompts/*.md", "prompts/*.json"]
+
+"graphic_design_helper.templates" = ["*.md"]

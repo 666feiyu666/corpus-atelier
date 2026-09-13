@@ -141,12 +141,15 @@ class PipelineTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             folder = Path(tmp) / "prompts"
             shutil.copytree(prompt_files.PROMPT_DIR, folder)
-            with patch.object(prompt_files, "PROMPT_DIR", folder):
+            templates = Path(tmp) / "templates"
+            shutil.copytree(prompt_files.TEMPLATE_DIR, templates)
+            with patch.object(prompt_files, "PROMPT_DIR", folder), \
+                 patch.object(prompt_files, "TEMPLATE_DIR", templates):
                 run = start_run({}, output_dir=tmp)
                 request = build_designer_request({})
                 token = request_token(request)
                 for filename in ["designer-input-template.md", "brief-intake.md", "designer-response.schema.json"]:
-                    path = folder / filename
+                    path = (templates if filename.endswith("-template.md") else folder) / filename
                     original = path.read_text()
                     if filename.endswith(".json"):
                         value = json.loads(original)

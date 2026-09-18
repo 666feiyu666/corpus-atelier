@@ -1,6 +1,6 @@
 # Pilot 2: local reference images
 
-This pilot uses a small local Mucha corpus to create aesthetic cover and inline images for WeChat articles. It does not analyze article text. Pilot 1 remains unchanged.
+This pilot uses a small local Mucha corpus to create aesthetic cover and inline images for WeChat articles. It does not analyze article text. Pilot 1 remains unchanged. The notebook also works when Jupyter starts in `experiments/pilot2`; it finds the project root by walking up from the current directory.
 
 ## Run
 

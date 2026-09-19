@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "article_title": {"type": "string", "minLength": 1},
+    "article_summary": {"type": "string", "minLength": 1},
+    "audience": {"type": "string", "minLength": 1},
+    "exact_copy": {"type": "array", "items": {"type": "string"}},
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "art_direction": {"type": "string"}
+  },
+  "required": ["article_title", "article_summary", "audience", "exact_copy", "constraints", "art_direction"]
+}

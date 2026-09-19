@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {"type": "string", "enum": ["accept", "revise", "reject"]},
+    "observations": {"type": "array", "items": {"type": "string"}},
+    "interpretations": {"type": "array", "items": {"type": "string"}},
+    "copy_check": {"type": "string"},
+    "priority_actions": {"type": "array", "items": {"type": "string"}},
+    "uncertainties": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["verdict", "observations", "interpretations", "copy_check", "priority_actions", "uncertainties"]
+}

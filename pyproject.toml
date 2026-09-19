@@ -3,28 +3,25 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "graphic-design-helper"
-version = "0.1.0"
-description = "Recorded design-model and image-generation experiments"
+name = "corpus-atelier"
+version = "0.2.0"
+description = "Agentic, corpus-grounded graphic-design experiments"
 requires-python = ">=3.10"
 dependencies = [
     "python-dotenv>=1,<2",
     "Pillow>=10,<13",
     "openai>=2,<3",
     "jsonschema>=4,<5",
+    "langgraph>=1,<2",
 ]
 
-[project.optional-dependencies]
-notebook = ["jupyterlab>=4,<5", "ipykernel>=6,<8"]
+[project.scripts]
+corpus-atelier = "corpus_atelier.cli:main"
 
 [tool.setuptools]
-packages = ["graphic_design_helper", "graphic_design_helper.templates"]
+packages = {find = {where = ["src"]}}
 
 [tool.setuptools.package-dir]
 "" = "src"
-"graphic_design_helper.templates" = "templates"
-
 [tool.setuptools.package-data]
-graphic_design_helper = ["prompts/*.md", "prompts/*.json"]
-
-"graphic_design_helper.templates" = ["*.md"]
+corpus_atelier = ["prompts/**/*.md", "schemas/*.json"]

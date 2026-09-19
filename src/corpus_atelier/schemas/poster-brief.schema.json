@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "topic": {"type": "string", "minLength": 1},
+    "purpose": {"type": "string", "minLength": 1},
+    "audience": {"type": "string", "minLength": 1},
+    "setting": {"type": "string"},
+    "exact_copy": {"type": "array", "items": {"type": "string"}},
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "preferences": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"]
+}

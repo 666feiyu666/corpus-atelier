@@ -1,0 +1,81 @@
+"""Command-line UI for the Corpus Atelier application."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from .application import CorpusAtelierApplication
+from .design.validation import validate
+from .registry import PROFILES, get_profile
+from .state import DesignJob, HumanDecision
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="corpus-atelier")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("profiles", help="List registered design profiles.")
+    validate_cmd = commands.add_parser("validate", help="Validate a brief without model calls.")
+    validate_cmd.add_argument("--profile", required=True, choices=PROFILES)
+    validate_cmd.add_argument("--brief", required=True, type=Path)
+    run = commands.add_parser("run", help="Run one review-gated design experiment.")
+    run.add_argument("--profile", required=True, choices=PROFILES)
+    run.add_argument("--brief", required=True, type=Path)
+    run.add_argument("--snapshot", type=Path, default=Path("experiments/atlas-snapshot"))
+    run.add_argument("--evidence-mode", choices=["hybrid-rag", "knowledge-only", "no-rag"],
+                     default="hybrid-rag")
+    inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
+    inspect.add_argument("run_id")
+    inspect.add_argument("--runs-root", type=Path, default=Path("experiments/runs"))
+    return parser
+
+
+def _read_brief(path: Path) -> dict:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("Brief must be a JSON object.")
+    return value
+
+
+def _print_result(result) -> None:
+    print(f"Run: {result.run_id}")
+    print(f"Status: {result.status}")
+    print(result.message)
+    for name, path in result.artifacts.items():
+        print(f"{name}: {path}")
+
+
+def main(argv=None) -> int:
+    args = _parser().parse_args(argv)
+    if args.command == "profiles":
+        for profile in PROFILES.values():
+            print(f"{profile.name}\t{profile.description}")
+        return 0
+    if args.command == "validate":
+        profile = get_profile(args.profile)
+        validate(_read_brief(args.brief), profile.brief_schema)
+        print(f"Valid {profile.name} brief: {args.brief.resolve()}")
+        return 0
+    app = CorpusAtelierApplication(runs_root=getattr(args, "runs_root", "experiments/runs"))
+    if args.command == "inspect":
+        summary = app.inspect(args.run_id)
+        print(json.dumps(summary.manifest, ensure_ascii=False, indent=2))
+        return 0
+    load_dotenv()
+    result = app.start(DesignJob(
+        profile=args.profile, brief=_read_brief(args.brief), snapshot=args.snapshot,
+        evidence_mode=args.evidence_mode,
+    ))
+    _print_result(result)
+    if result.status != "awaiting_approval":
+        return 1
+    answer = input("Approve this exact image-generation request? [y/N] ").strip().lower()
+    note = input("Approval note (optional): ").strip() if answer in {"y", "yes"} else ""
+    result = app.resume(result.run_id, HumanDecision(
+        approved=answer in {"y", "yes"}, note=note,
+    ))
+    _print_result(result)
+    return 0 if result.status in {"completed", "rejected"} else 1

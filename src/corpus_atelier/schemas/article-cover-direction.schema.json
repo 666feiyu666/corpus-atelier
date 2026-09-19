@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {"type": "string", "enum": ["ready", "needs_sources", "needs_clarification"], "description": "Ready only when both unresolved arrays are empty and image_spec is complete."},
+    "brief_interpretation": {"type": "string"},
+    "chosen_direction": {"type": "string"},
+    "design_rationale": {"type": "string"},
+    "evidence_ids": {"type": "array", "items": {"type": "string"}},
+    "review_criteria": {"type": "array", "items": {"type": "string"}},
+    "source_requirements": {"type": "array", "items": {"type": "string"}, "description": "Outstanding sources; must be empty when status is ready."},
+    "clarification_questions": {"type": "array", "items": {"type": "string"}, "description": "Blocking questions; must be empty when status is ready."},
+    "image_spec": {
+      "description": "Complete specification when ready; null whenever blocked.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "communication_objective": {"type": "string"},
+            "audience_and_context": {"type": "string"},
+            "visible_copy": {"type": "array", "items": {"type": "string"}},
+            "composition": {"type": "string"},
+            "typography": {"type": "string"},
+            "visual_treatment": {"type": "string"},
+            "allowed_variation": {"type": "array", "items": {"type": "string"}},
+            "exclusions": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": ["communication_objective", "audience_and_context", "visible_copy", "composition", "typography", "visual_treatment", "allowed_variation", "exclusions"]
+        },
+        {"type": "null"}
+      ]
+    }
+  },
+  "required": ["status", "brief_interpretation", "chosen_direction", "design_rationale", "evidence_ids", "review_criteria", "source_requirements", "clarification_questions", "image_spec"]
+}

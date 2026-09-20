@@ -33,6 +33,23 @@ def validate_proposal(value: dict, schema_name: str) -> dict:
     return value
 
 
+def validate_reference_plan(value: dict, *, schema_name: str, mode: str,
+                            available_ids: set[str]) -> dict:
+    """Validate structure and provenance without judging artistic understanding."""
+    validate(value, schema_name)
+    if value["mode"] != mode:
+        raise ValueError("Reference plan mode does not match the deterministic graph route.")
+    if mode == "style_grounded":
+        groups = [item["evidence_ids"] for item in value["style_invariants"]]
+    else:
+        groups = [item["evidence_ids"] for item in value["inspiration_mappings"]]
+    cited = {evidence_id for group in groups for evidence_id in group}
+    unknown = sorted(cited - available_ids)
+    if unknown:
+        raise ValueError(f"Reference plan cites unavailable evidence IDs: {unknown}.")
+    return value
+
+
 def validate_revision_review(value: dict, plan: dict) -> dict:
     validate(value, "revision-review.schema.json")
     expected = plan["must_preserve"]

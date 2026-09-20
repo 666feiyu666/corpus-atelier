@@ -12,6 +12,8 @@ from ..design.validation import load_schema, validate
 
 class TextProvider(Protocol):
     def propose(self, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
+    def plan_references(self, prompt: str, image_paths: list[Path], *,
+                        schema_name: str) -> tuple[dict, dict]: ...
     def review(self, image_path: Path, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
     def review_revision(self, before_path: Path, after_path: Path, prompt: str,
                         *, schema_name: str) -> tuple[dict, dict]: ...
@@ -57,6 +59,20 @@ class OpenAITextProvider:
 
     def propose(self, prompt: str, *, schema_name: str) -> tuple[dict, dict]:
         return self._call(prompt, schema_name)
+
+    def plan_references(self, prompt: str, image_paths: list[Path], *,
+                        schema_name: str) -> tuple[dict, dict]:
+        content = [{"type": "input_text", "text": prompt}]
+        for index, path in enumerate(image_paths, start=1):
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            suffix = path.suffix.lower().lstrip(".")
+            media_type = "jpeg" if suffix in {"jpg", "jpeg"} else suffix
+            content.extend([
+                {"type": "input_text", "text": f"Complete reference image {index}:"},
+                {"type": "input_image", "image_url":
+                 f"data:image/{media_type};base64,{encoded}"},
+            ])
+        return self._call([{"role": "user", "content": content}], schema_name)
 
     def review(self, image_path: Path, prompt: str, *, schema_name: str) -> tuple[dict, dict]:
         data = image_path.read_bytes()

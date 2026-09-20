@@ -4,7 +4,11 @@ import re
 
 
 def build_query(brief: dict, profile: str) -> dict:
-    text = " ".join(_flatten(brief))
+    content = {
+        key: value for key, value in brief.items()
+        if key not in {"reference_mode", "reference_scope"}
+    }
+    text = " ".join(_flatten(content))
     terms = []
     for term in re.findall(r"[\w\-]+", text.lower(), flags=re.UNICODE):
         if len(term) > 1 and term not in terms:

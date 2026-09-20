@@ -9,7 +9,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .application import CorpusAtelierApplication
+from .artifacts.records import write_json, write_text
+from .design.prompt_compiler import compile_reference_plan_prompt
 from .design.validation import validate
+from .rag import build_reference_package, retrieve
 from .registry import PROFILES, get_profile
 from .state import DesignJob, HumanDecision, RevisionDecision
 
@@ -24,9 +27,24 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="Run one review-gated design experiment.")
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
-    run.add_argument("--snapshot", type=Path, default=Path("experiments/atlas-snapshot"))
+    run.add_argument(
+        "--snapshot", type=Path,
+        default=Path("experiments/atlas-snapshot/mucha-commercial"),
+    )
     run.add_argument("--evidence-mode", choices=["hybrid-rag", "knowledge-only", "no-rag"],
                      default="hybrid-rag")
+    preview = commands.add_parser(
+        "preview-reference", help="Compile reference inputs without provider calls.",
+    )
+    preview.add_argument("--profile", required=True, choices=PROFILES)
+    preview.add_argument("--brief", required=True, type=Path)
+    preview.add_argument(
+        "--snapshot", type=Path,
+        default=Path("experiments/atlas-snapshot/mucha-commercial"),
+    )
+    preview.add_argument("--evidence-mode", choices=["hybrid-rag", "knowledge-only"],
+                         default="hybrid-rag")
+    preview.add_argument("--output", required=True, type=Path)
     inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
     inspect.add_argument("run_id")
     inspect.add_argument("--runs-root", type=Path, default=Path("experiments/runs"))
@@ -58,6 +76,27 @@ def main(argv=None) -> int:
         profile = get_profile(args.profile)
         validate(_read_brief(args.brief), profile.brief_schema)
         print(f"Valid {profile.name} brief: {args.brief.resolve()}")
+        return 0
+    if args.command == "preview-reference":
+        profile = get_profile(args.profile)
+        brief = _read_brief(args.brief)
+        validate(brief, profile.brief_schema)
+        mode = brief.get("reference_mode")
+        scope = brief.get("reference_scope")
+        if not mode or not scope:
+            raise ValueError("Reference preview requires reference_mode and reference_scope.")
+        _, _, bundle = retrieve(
+            brief, profile.name, args.snapshot, evidence_mode=args.evidence_mode,
+        )
+        package, _ = build_reference_package(args.snapshot, scope=scope)
+        prompt = compile_reference_plan_prompt(
+            mode=mode, brief=brief, bundle=bundle, package=package,
+        )
+        output = args.output.resolve()
+        write_json(output / "retrieval-bundle.json", bundle)
+        write_json(output / "reference-package.json", package)
+        write_text(output / "reference-plan-prompt.md", prompt)
+        print(f"Reference preview: {output}")
         return 0
     app = CorpusAtelierApplication(runs_root=getattr(args, "runs_root", "experiments/runs"))
     if args.command == "inspect":

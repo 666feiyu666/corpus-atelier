@@ -3,7 +3,7 @@
 from langgraph.graph import END, START, StateGraph
 
 from ..state import AtelierState
-from .routing import profile_route
+from .routing import after_retrieval_route, profile_route, reference_mode_route
 
 
 def build_graph(runtime, checkpointer):
@@ -11,6 +11,15 @@ def build_graph(runtime, checkpointer):
 
     graph = StateGraph(AtelierState)
     graph.add_node("retrieve", runtime.retrieve)
+    graph.add_node("prepare_references", runtime.prepare_references)
+    graph.add_node(
+        "build_style_model",
+        lambda state: runtime.plan_references(state, expected_mode="style_grounded"),
+    )
+    graph.add_node(
+        "build_inspiration_map",
+        lambda state: runtime.plan_references(state, expected_mode="style_inspired"),
+    )
     graph.add_node("rhetoric", lambda state: rhetoric.run(state, runtime))
     graph.add_node("artistic", lambda state: artistic.run(state, runtime))
     graph.add_node("approval", runtime.approval)
@@ -22,9 +31,17 @@ def build_graph(runtime, checkpointer):
     graph.add_node("edit_image", runtime.edit_image)
     graph.add_node("review_revision", runtime.review_revision)
     graph.add_edge(START, "retrieve")
-    graph.add_conditional_edges("retrieve", profile_route, {
-        "rhetoric": "rhetoric", "artistic": "artistic",
+    graph.add_conditional_edges("retrieve", after_retrieval_route, {
+        "references": "prepare_references", "rhetoric": "rhetoric", "artistic": "artistic",
     })
+    graph.add_conditional_edges("prepare_references", reference_mode_route, {
+        "style_grounded": "build_style_model",
+        "style_inspired": "build_inspiration_map",
+    })
+    for node in ("build_style_model", "build_inspiration_map"):
+        graph.add_conditional_edges(node, profile_route, {
+            "rhetoric": "rhetoric", "artistic": "artistic",
+        })
     graph.add_edge("rhetoric", "approval")
     graph.add_edge("artistic", "approval")
     graph.add_conditional_edges(

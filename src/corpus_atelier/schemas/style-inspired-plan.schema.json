@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mode": {"const": "style_inspired"},
+    "independent_concept": {"type": "string", "minLength": 1},
+    "inspiration_mappings": {
+      "type": "array", "minItems": 1, "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "source_attribute": {"type": "string", "minLength": 1},
+          "transformation": {"type": "string", "minLength": 1},
+          "destination": {"type": "string", "minLength": 1}
+        },
+        "required": ["evidence_ids", "source_attribute", "transformation", "destination"]
+      }
+    },
+    "features_not_carried_forward": {
+      "type": "array", "minItems": 2,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "human_review_questions": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "required": [
+    "mode", "independent_concept", "inspiration_mappings",
+    "features_not_carried_forward", "human_review_questions"
+  ]
+}

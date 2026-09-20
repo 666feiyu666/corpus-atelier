@@ -16,14 +16,16 @@ from .artifacts.store import ArtifactStore
 from .design.presentation import render
 from .design.prompt_compiler import (
     compile_generation_prompt, compile_review_prompt, compile_revision_plan_prompt,
-    compile_revision_prompt, compile_revision_review_prompt,
+    compile_reference_plan_prompt, compile_revision_prompt, compile_revision_review_prompt,
 )
 from .design.rendering import normalize_canvas
 from .design.synthesis import synthesize
-from .design.validation import validate, validate_proposal, validate_revision_review
+from .design.validation import (
+    validate, validate_proposal, validate_reference_plan, validate_revision_review,
+)
 from .graphs import build_graph
 from .providers import OpenAIImageProvider, OpenAITextProvider
-from .rag import retrieve
+from .rag import build_reference_package, retrieve
 from .rag.atlas_snapshot import load_snapshot
 from .registry import get_profile
 from .state import DesignJob, HumanDecision, RunResult, RunSummary
@@ -57,6 +59,72 @@ class _Runtime:
         return {"retrieval_query": query, "retrieval_candidates": candidates,
                 "retrieval_bundle": bundle, "status": "designing"}
 
+    def prepare_references(self, state):
+        run_dir = self._dir(state)
+        self.store.update(run_dir, "preparing_references")
+        package, paths = build_reference_package(
+            Path(state["snapshot"]), scope=state["brief"]["reference_scope"],
+        )
+        self.store.json(run_dir, "reference/package.json", package)
+        self.store.register(run_dir, reference_package="reference/package.json")
+        return {
+            "reference_package": package,
+            "reference_image_paths": [str(path) for path in paths],
+            "status": "planning_references",
+        }
+
+    def plan_references(self, state, *, expected_mode):
+        mode = state["brief"].get("reference_mode")
+        if mode != expected_mode:
+            raise ValueError("Reference mode reached the wrong planning branch.")
+        run_dir = self._dir(state)
+        self.store.update(run_dir, "planning_references")
+        schema = {
+            "style_grounded": "style-grounded-plan.schema.json",
+            "style_inspired": "style-inspired-plan.schema.json",
+        }[mode]
+        prompt = compile_reference_plan_prompt(
+            mode=mode, brief=state["brief"], bundle=state["retrieval_bundle"],
+            package=state["reference_package"],
+        )
+        request = {
+            "model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
+            "schema": schema,
+            "reference_mode": mode,
+            "references": [{"id": row["id"], "sha256": row["sha256"]}
+                           for row in state["reference_package"]["references"]],
+        }
+        self.store.json(run_dir, "reference/request.json", request)
+        self.store.text(run_dir, "reference/prompt.md", prompt)
+        plan, response = self.text_provider.plan_references(
+            prompt, [Path(path) for path in state["reference_image_paths"]],
+            schema_name=schema,
+        )
+        self.store.json(run_dir, "reference/response.json", response)
+        self.store.json(run_dir, "reference/plan.json", plan)
+        available = {row["id"] for row in state["reference_package"]["references"]}
+        validate_reference_plan(
+            plan, schema_name=schema, mode=mode, available_ids=available,
+        )
+        self.store.register(
+            run_dir, reference_request="reference/request.json",
+            reference_prompt="reference/prompt.md",
+            reference_response="reference/response.json", reference_plan="reference/plan.json",
+        )
+        return {"reference_plan_prompt": prompt, "reference_plan": plan,
+                "status": "designing"}
+
+    @staticmethod
+    def _generation_binding(state, *, proposal, prompt):
+        binding = {"prompt": prompt, "proposal": proposal}
+        if state.get("reference_plan") is not None:
+            binding.update(
+                reference_mode=state["brief"]["reference_mode"],
+                reference_package=state["reference_package"],
+                reference_plan=state["reference_plan"],
+            )
+        return binding
+
     def design(self, state, *, expected_profile):
         if state["profile"] != expected_profile:
             raise ValueError("Profile reached the wrong design subgraph.")
@@ -67,6 +135,7 @@ class _Runtime:
         try:
             prompt, proposal, response = synthesize(
                 profile, state["brief"], state["retrieval_bundle"], self.text_provider,
+                state.get("reference_plan"),
             )
             request = {"model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
                        "profile": profile.name, "schema": profile.proposal_schema}
@@ -75,6 +144,15 @@ class _Runtime:
             self.store.json(run_dir, "design/response.json", response)
             self.store.json(run_dir, "design/proposal.json", proposal)
             proposal = validate_proposal(proposal, profile.proposal_schema)
+            if state.get("reference_plan") is not None:
+                available_ids = {
+                    row["id"] for row in state["reference_package"]["references"]
+                } | {
+                    row["id"] for row in state["reference_package"]["knowledge"]
+                }
+                unknown = sorted(set(proposal["evidence_ids"]) - available_ids)
+                if unknown:
+                    raise ValueError(f"Design proposal cites unavailable evidence IDs: {unknown}.")
             self.store.text(run_dir, "design/presentation.md", render(proposal))
             self.store.register(
                 run_dir, design_request="design/request.json", design_prompt="design/prompt.md",
@@ -84,10 +162,14 @@ class _Runtime:
             if proposal["status"] != "ready":
                 self.store.update(run_dir, proposal["status"])
                 raise ValueError(f"Design proposal is blocked: {proposal['status']}.")
-            generation_prompt = compile_generation_prompt(proposal)
+            generation_prompt = compile_generation_prompt(
+                proposal, state.get("reference_plan"),
+            )
             self.store.text(run_dir, "generation/prompt.md", generation_prompt)
             self.store.register(run_dir, generation_prompt="generation/prompt.md")
-            digest = digest_json({"prompt": generation_prompt, "proposal": proposal})
+            digest = digest_json(self._generation_binding(
+                state, proposal=proposal, prompt=generation_prompt,
+            ))
             return {"design_prompt": prompt, "proposal": proposal,
                     "generation_prompt": generation_prompt, "generation_digest": digest}
         except Exception as exc:
@@ -113,6 +195,13 @@ class _Runtime:
                 "generation_prompt": str((run_dir / "generation/prompt.md").resolve()),
             },
         }
+        if state.get("reference_plan") is not None:
+            payload["reference_mode"] = state["brief"]["reference_mode"]
+            payload["artifacts"].update({
+                "reference_package": str((run_dir / "reference/package.json").resolve()),
+                "reference_plan": str((run_dir / "reference/plan.json").resolve()),
+                "reference_prompt": str((run_dir / "reference/prompt.md").resolve()),
+            })
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
@@ -135,7 +224,15 @@ class _Runtime:
         if saved_prompt != state["generation_prompt"] or saved_proposal != state["proposal"]:
             raise ValueError("Reviewed generation artifacts changed after preview.")
         load_snapshot(Path(state["snapshot"]))
-        actual = digest_json({"prompt": state["generation_prompt"], "proposal": state["proposal"]})
+        if state.get("reference_plan") is not None:
+            saved_package = json.loads(
+                (run_dir / "reference/package.json").read_text(encoding="utf-8"))
+            saved_plan = json.loads((run_dir / "reference/plan.json").read_text(encoding="utf-8"))
+            if saved_package != state["reference_package"] or saved_plan != state["reference_plan"]:
+                raise ValueError("Reviewed reference artifacts changed after preview.")
+        actual = digest_json(self._generation_binding(
+            state, proposal=state["proposal"], prompt=state["generation_prompt"],
+        ))
         if actual != state["generation_digest"]:
             raise ValueError("Approved generation content changed.")
         if state["approval"].get("generation_digest") != actual:
@@ -428,6 +525,15 @@ class CorpusAtelierApplication:
             "image": Path(summary.manifest.get("latest_image", "")),
             "review": summary.run_dir / registered.get("review", "review/review.json"),
         }
+        for name in ("reference_package", "reference_prompt", "reference_plan"):
+            if name in registered:
+                paths[name] = summary.run_dir / registered[name]
+        package_path = paths.get("reference_package")
+        if package_path and package_path.is_file():
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+            snapshot = Path(summary.manifest["atlas_snapshot"])
+            for index, row in enumerate(package["references"], start=1):
+                paths[f"reference_image_{index:02d}"] = snapshot / row["file"]
         for name in (
             "revision_request", "revision_plan", "revision_prompt",
             "revision_approval", "revision_source", "revision_response",

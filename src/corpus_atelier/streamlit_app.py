@@ -15,8 +15,22 @@ from corpus_atelier.state import DesignJob, HumanDecision, RevisionDecision, Run
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = {
-    "工作坊海报": ("rhetoric-poster", ROOT / "experiments/cases/poster-01/brief.json"),
-    "文章封面": ("art-article-cover", ROOT / "experiments/cases/article-cover-01/brief.json"),
+    "工作坊海报": (
+        "rhetoric-poster", ROOT / "experiments/cases/poster-01/brief.json",
+        ROOT / "experiments/atlas-snapshot/mucha-commercial",
+    ),
+    "文章封面": (
+        "art-article-cover", ROOT / "experiments/cases/article-cover-01/brief.json",
+        ROOT / "experiments/atlas-snapshot/mucha-commercial",
+    ),
+    "慕夏风格女士手表广告": (
+        "rhetoric-poster", ROOT / "experiments/cases/mucha-watch/grounded-brief.json",
+        ROOT / "experiments/atlas-snapshot/mucha-commercial",
+    ),
+    "慕夏启发女士手表广告": (
+        "rhetoric-poster", ROOT / "experiments/cases/mucha-watch/inspired-brief.json",
+        ROOT / "experiments/atlas-snapshot/mucha-commercial",
+    ),
 }
 TERMINAL_STATUSES = {"completed", "rejected", "discarded", "failed"}
 
@@ -126,7 +140,7 @@ def _start_page() -> None:
             result = app.start(DesignJob(
                 profile=profile,
                 brief=brief,
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=CASES[st.session_state.case_label][2],
             ))
         st.session_state.atelier_app = app
         st.session_state.result = result
@@ -142,6 +156,20 @@ def _start_page() -> None:
 def _approval_page(result: RunResult) -> None:
     proposal = read_json_artifact(result, "proposal")
     st.subheader("设计方案")
+    reference_plan = read_json_artifact(result, "reference_plan")
+    if reference_plan:
+        st.caption(f"参考关系：{reference_plan.get('mode', 'unknown')}")
+        with st.expander("查看参考使用提案"):
+            st.json(reference_plan)
+        images = sorted(
+            (name, path) for name, path in result.artifacts.items()
+            if name.startswith("reference_image_")
+        )
+        if images:
+            with st.expander("查看完整参考图"):
+                columns = st.columns(3)
+                for index, (_, path) in enumerate(images):
+                    columns[index % 3].image(path, width="stretch")
     st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))
     rationale = proposal.get("design_rationale")
     if rationale:

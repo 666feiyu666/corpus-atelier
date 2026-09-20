@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
-    "created", "retrieving", "designing", "awaiting_approval", "rejected",
+    "created", "retrieving", "preparing_references", "planning_references",
+    "designing", "awaiting_approval", "rejected",
     "generating", "reviewing", "reviewed", "awaiting_revision", "planning_revision",
     "awaiting_revision_approval", "revising", "revision_reviewing",
     "completed", "discarded", "failed",
@@ -70,6 +71,10 @@ class AtelierState(TypedDict, total=False):
     retrieval_query: dict[str, Any]
     retrieval_candidates: list[dict[str, Any]]
     retrieval_bundle: dict[str, Any]
+    reference_package: dict[str, Any]
+    reference_image_paths: list[str]
+    reference_plan_prompt: str
+    reference_plan: dict[str, Any]
     design_prompt: str
     proposal: dict[str, Any]
     generation_prompt: str

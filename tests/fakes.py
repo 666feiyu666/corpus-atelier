@@ -11,6 +11,53 @@ from corpus_atelier.artifacts.records import write_json, write_text
 class FakeTextProvider:
     model = "fake-text"
 
+    def __init__(self):
+        self.reference_calls = []
+
+    def plan_references(self, prompt: str, image_paths: list[Path], *, schema_name: str):
+        self.reference_calls.append({
+            "prompt": prompt, "image_paths": list(image_paths), "schema_name": schema_name,
+        })
+        if schema_name == "style-grounded-plan.schema.json":
+            value = {
+                "mode": "style_grounded",
+                "summary": "A cross-reference commercial style system for human review.",
+                "style_invariants": [
+                    {
+                        "claim": "Curved framing organizes the figure and product.",
+                        "evidence_ids": ["mucha-poster-124474237", "mucha-poster-124474255"],
+                        "application": "Use a new circular watch-led hierarchy.",
+                    },
+                    {
+                        "claim": "Display lettering participates in the composition.",
+                        "evidence_ids": ["mucha-poster-124474229", "mucha-poster-124474277"],
+                        "application": "Integrate the short brand copy into a new frame.",
+                    },
+                ],
+                "allowed_variations": ["The product and gesture may be newly composed."],
+                "content_mapping_rules": ["Map the watch face to a new circular focal system."],
+                "work_specific_features_to_exclude": ["Do not copy any complete reference layout."],
+                "human_review_questions": ["Are the claimed patterns visible across references?"],
+            }
+        else:
+            value = {
+                "mode": "style_inspired",
+                "independent_concept": "Time represented as controlled organic growth.",
+                "inspiration_mappings": [
+                    {
+                        "evidence_ids": ["mucha-poster-124474273"],
+                        "source_attribute": "mechanical-organic contrast",
+                        "transformation": "Turn it into clean trajectories around the watch.",
+                        "destination": "background motion system",
+                    }
+                ],
+                "features_not_carried_forward": [
+                    "full-length period figure", "complete ornamental border",
+                ],
+                "human_review_questions": ["Is the contemporary concept visibly independent?"],
+            }
+        return value, {"status": "completed", "provider": "fake"}
+
     def propose(self, prompt: str, *, schema_name: str):
         if schema_name == "revision-plan.schema.json":
             return {
@@ -27,7 +74,7 @@ class FakeTextProvider:
             "brief_interpretation": "A focused communication task.",
             "chosen_direction": "Layered archival forms become a clear visual argument.",
             "design_rationale": "The hierarchy connects evidence, transformation, and invitation.",
-            "evidence_ids": ["art-direction-coherence"],
+            "evidence_ids": ["mucha-commercial-lettering-image-integration"],
             "review_criteria": ["Exact copy is visible", "The focal hierarchy is clear"],
             "source_requirements": [],
             "clarification_questions": [],

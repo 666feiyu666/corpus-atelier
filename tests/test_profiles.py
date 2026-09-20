@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import unittest
 
 from corpus_atelier.design.validation import validate, validate_revision_review
@@ -16,6 +18,15 @@ class ProfileTests(unittest.TestCase):
         profile = get_profile("rhetoric-poster")
         with self.assertRaises(ValueError):
             validate({"topic": "incomplete"}, profile.brief_schema)
+
+    def test_watch_briefs_are_paired_except_for_reference_mode(self):
+        root = Path(__file__).resolve().parents[1] / "experiments/cases/mucha-watch"
+        grounded = json.loads((root / "grounded-brief.json").read_text(encoding="utf-8"))
+        inspired = json.loads((root / "inspired-brief.json").read_text(encoding="utf-8"))
+        self.assertEqual(grounded.pop("reference_mode"), "style_grounded")
+        self.assertEqual(inspired.pop("reference_mode"), "style_inspired")
+        self.assertEqual(grounded, inspired)
+        validate({**grounded, "reference_mode": "style_grounded"}, "poster-brief.schema.json")
 
     def test_accepted_revision_cannot_hide_regressions(self):
         plan = {

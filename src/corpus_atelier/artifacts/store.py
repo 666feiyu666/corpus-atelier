@@ -37,6 +37,11 @@ class ArtifactStore:
             "evidence_mode": evidence_mode, "atlas_snapshot": str(snapshot.resolve()),
             "status": "created", "iteration": 1, "artifacts": {},
         }
+        if brief.get("reference_mode"):
+            manifest.update(
+                reference_mode=brief["reference_mode"],
+                reference_scope=brief["reference_scope"],
+            )
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 

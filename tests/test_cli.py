@@ -1,5 +1,7 @@
 import io
+import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -25,3 +27,20 @@ class CliTests(unittest.TestCase):
             ])
         self.assertEqual(code, 0)
         self.assertIn("Valid rhetoric-poster brief", stream.getvalue())
+
+    def test_reference_preview_compiles_without_provider_calls(self):
+        with TemporaryDirectory() as directory:
+            stream = io.StringIO()
+            with patch("sys.stdout", stream):
+                code = main([
+                    "preview-reference", "--profile", "rhetoric-poster",
+                    "--brief", str(ROOT / "experiments/cases/mucha-watch/grounded-brief.json"),
+                    "--snapshot", str(ROOT / "experiments/atlas-snapshot/mucha-commercial"),
+                    "--output", directory,
+                ])
+            self.assertEqual(code, 0)
+            output = Path(directory)
+            self.assertTrue((output / "reference-plan-prompt.md").is_file())
+            package = json.loads(
+                (output / "reference-package.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(package["references"]), 15)

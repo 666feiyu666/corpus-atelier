@@ -9,6 +9,7 @@ from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
 
 
 def brief(name):
@@ -27,7 +28,7 @@ class GraphTests(unittest.TestCase):
         )
         result = app.start(DesignJob(
             profile=profile, brief=brief(case),
-            snapshot=ROOT / "experiments/atlas-snapshot",
+            snapshot=SNAPSHOT,
         ))
         self.assertEqual(result.status, "awaiting_approval")
         self.assertEqual(image.calls, 0)
@@ -58,7 +59,7 @@ class GraphTests(unittest.TestCase):
             )
             started = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             result = app.resume(started.run_id, HumanDecision(False, reviewer="test"))
             self.assertEqual(result.status, "rejected")
@@ -72,7 +73,7 @@ class GraphTests(unittest.TestCase):
             )
             started = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             with self.assertRaises(RuntimeError):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
@@ -88,7 +89,7 @@ class GraphTests(unittest.TestCase):
             )
             started = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             prompt = started.run_dir / "generation/prompt.md"
             prompt.write_text(prompt.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
@@ -104,7 +105,7 @@ class GraphTests(unittest.TestCase):
             )
             result = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(result.status, "awaiting_revision")
@@ -132,7 +133,7 @@ class GraphTests(unittest.TestCase):
             )
             result = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(result.status, "awaiting_revision")
@@ -148,7 +149,7 @@ class GraphTests(unittest.TestCase):
             )
             result = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
             result = app.resume(result.run_id, RevisionDecision(
@@ -169,7 +170,7 @@ class GraphTests(unittest.TestCase):
             )
             result = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
             result = app.resume(result.run_id, RevisionDecision(
@@ -190,7 +191,7 @@ class GraphTests(unittest.TestCase):
             )
             result = app.start(DesignJob(
                 profile="rhetoric-poster", brief=brief("poster-01"),
-                snapshot=ROOT / "experiments/atlas-snapshot",
+                snapshot=SNAPSHOT,
             ))
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
             for number in range(4):

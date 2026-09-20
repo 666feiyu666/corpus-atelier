@@ -10,6 +10,24 @@ from typing import Protocol
 from ..design.validation import load_schema, validate
 
 
+def _schema_for_openai(schema_name: str) -> dict:
+    """Return the local schema adapted to OpenAI's supported JSON Schema subset."""
+    schema = load_schema(schema_name)
+
+    def strip_unsupported_keywords(value):
+        if isinstance(value, dict):
+            return {
+                key: strip_unsupported_keywords(item)
+                for key, item in value.items()
+                if key != "uniqueItems"
+            }
+        if isinstance(value, list):
+            return [strip_unsupported_keywords(item) for item in value]
+        return value
+
+    return strip_unsupported_keywords(schema)
+
+
 class TextProvider(Protocol):
     def propose(self, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
     def plan_references(self, prompt: str, image_paths: list[Path], *,
@@ -38,7 +56,7 @@ class OpenAITextProvider:
                 model=self.model, reasoning={"effort": self.reasoning_effort}, store=False,
                 input=input_value, text={"format": {
                     "type": "json_schema", "name": schema_name.removesuffix(".schema.json").replace("-", "_"),
-                    "strict": True, "schema": load_schema(schema_name),
+                    "strict": True, "schema": _schema_for_openai(schema_name),
                 }},
             )
             if getattr(response, "status", "completed") != "completed" or not response.output_text:

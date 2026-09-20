@@ -72,6 +72,28 @@ class ReferenceModeTests(unittest.TestCase):
                 mode="style_inspired", available_ids={"real-reference"},
             )
 
+    def test_reference_plan_may_cite_supplied_knowledge_ids(self):
+        plan = {
+            "mode": "style_inspired",
+            "independent_concept": "Independent concept.",
+            "inspiration_mappings": [{
+                "evidence_ids": ["corpus-pattern"],
+                "source_attribute": "curve",
+                "transformation": "abstract it",
+                "destination": "background",
+            }],
+            "features_not_carried_forward": ["period figure", "complete border"],
+            "human_review_questions": ["Is the mapping supported?"],
+        }
+
+        self.assertEqual(
+            validate_reference_plan(
+                plan, schema_name="style-inspired-plan.schema.json",
+                mode="style_inspired", available_ids={"corpus-pattern"},
+            ),
+            plan,
+        )
+
     def test_reference_artifact_change_invalidates_approval(self):
         app, _, image, result = self._start("grounded")
         plan = Path(result.artifacts["reference_plan"])

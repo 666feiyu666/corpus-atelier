@@ -102,7 +102,11 @@ class _Runtime:
         )
         self.store.json(run_dir, "reference/response.json", response)
         self.store.json(run_dir, "reference/plan.json", plan)
-        available = {row["id"] for row in state["reference_package"]["references"]}
+        available = {
+            row["id"]
+            for kind in ("references", "knowledge")
+            for row in state["reference_package"][kind]
+        }
         validate_reference_plan(
             plan, schema_name=schema, mode=mode, available_ids=available,
         )

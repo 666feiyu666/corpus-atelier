@@ -2,7 +2,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "mode": {"const": "style_grounded"},
+    "mode": {"type": "string", "const": "style_grounded"},
     "summary": {"type": "string", "minLength": 1},
     "style_invariants": {
       "type": "array",

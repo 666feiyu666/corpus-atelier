@@ -13,6 +13,8 @@ from ..design.validation import load_schema, validate
 class TextProvider(Protocol):
     def propose(self, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
     def review(self, image_path: Path, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
+    def review_revision(self, before_path: Path, after_path: Path, prompt: str,
+                        *, schema_name: str) -> tuple[dict, dict]: ...
 
 
 class OpenAITextProvider:
@@ -62,4 +64,16 @@ class OpenAITextProvider:
         return self._call([{"role": "user", "content": [
             {"type": "input_text", "text": prompt},
             {"type": "input_image", "image_url": f"data:image/png;base64,{encoded}"},
+        ]}], schema_name)
+
+    def review_revision(self, before_path: Path, after_path: Path, prompt: str,
+                        *, schema_name: str) -> tuple[dict, dict]:
+        before = base64.b64encode(before_path.read_bytes()).decode("ascii")
+        after = base64.b64encode(after_path.read_bytes()).decode("ascii")
+        return self._call([{"role": "user", "content": [
+            {"type": "input_text", "text": prompt},
+            {"type": "input_text", "text": "Baseline image:"},
+            {"type": "input_image", "image_url": f"data:image/png;base64,{before}"},
+            {"type": "input_text", "text": "Edited image:"},
+            {"type": "input_image", "image_url": f"data:image/png;base64,{after}"},
         ]}], schema_name)

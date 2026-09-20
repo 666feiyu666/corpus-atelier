@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.state import DesignJob, HumanDecision
+from corpus_atelier.state import DesignJob, HumanDecision, RevisionDecision
 from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
@@ -32,7 +32,7 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(result.status, "awaiting_approval")
         self.assertEqual(image.calls, 0)
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
-        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.status, "awaiting_revision")
         self.assertEqual(image.calls, 1)
         self.assertIn("image", result.artifacts)
         self.assertIn("review", result.artifacts)
@@ -40,6 +40,8 @@ class GraphTests(unittest.TestCase):
         with Image.open(result.artifacts["image"]) as opened:
             expected = (2, 3) if profile == "rhetoric-poster" else (47, 20)
             self.assertEqual(opened.width * expected[1], opened.height * expected[0])
+        result = app.resume(result.run_id, RevisionDecision("accept", reviewer="test"))
+        self.assertEqual(result.status, "completed")
         return result
 
     def test_rhetoric_graph_end_to_end(self):
@@ -93,3 +95,89 @@ class GraphTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed after preview"):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 0)
+
+    def test_explicit_revision_is_planned_approved_edited_and_compared(self):
+        with TemporaryDirectory() as directory:
+            image = FakeImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory, text_provider=FakeTextProvider(), image_provider=image,
+            )
+            result = app.start(DesignJob(
+                profile="rhetoric-poster", brief=brief("poster-01"),
+                snapshot=ROOT / "experiments/atlas-snapshot",
+            ))
+            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            self.assertEqual(result.status, "awaiting_revision")
+            result = app.resume(result.run_id, RevisionDecision(
+                "revise", instruction="Remove the lower-left handwriting only.",
+                reviewer="test",
+            ))
+            self.assertEqual(result.status, "awaiting_revision_approval")
+            self.assertIn("revision_plan", result.artifacts)
+            self.assertIn("revision_prompt", result.artifacts)
+            self.assertEqual(image.edit_calls, 0)
+            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            self.assertEqual(result.status, "awaiting_revision")
+            self.assertEqual(image.edit_calls, 1)
+            review = json.loads(Path(result.artifacts["review"]).read_text(encoding="utf-8"))
+            self.assertTrue(review["requested_change_met"])
+            result = app.resume(result.run_id, RevisionDecision("accept", reviewer="test"))
+            self.assertEqual(result.status, "completed")
+
+    def test_review_does_not_trigger_revision_without_user_request(self):
+        with TemporaryDirectory() as directory:
+            image = FakeImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory, text_provider=FakeTextProvider(), image_provider=image,
+            )
+            result = app.start(DesignJob(
+                profile="rhetoric-poster", brief=brief("poster-01"),
+                snapshot=ROOT / "experiments/atlas-snapshot",
+            ))
+            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            self.assertEqual(result.status, "awaiting_revision")
+            self.assertEqual(image.edit_calls, 0)
+            result = app.resume(result.run_id, RevisionDecision("discard", reviewer="test"))
+            self.assertEqual(result.status, "discarded")
+
+    def test_revision_edit_requires_bound_approval(self):
+        with TemporaryDirectory() as directory:
+            image = FakeImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory, text_provider=FakeTextProvider(), image_provider=image,
+            )
+            result = app.start(DesignJob(
+                profile="rhetoric-poster", brief=brief("poster-01"),
+                snapshot=ROOT / "experiments/atlas-snapshot",
+            ))
+            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            result = app.resume(result.run_id, RevisionDecision(
+                "revise", instruction="Remove the lower-left handwriting only.",
+                reviewer="test",
+            ))
+            prompt = next(result.run_dir.glob("revision/attempt_01/prompt.md"))
+            prompt.write_text(prompt.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "changed after preview"):
+                app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            self.assertEqual(image.edit_calls, 0)
+
+    def test_declined_revision_approval_returns_to_human_gate(self):
+        with TemporaryDirectory() as directory:
+            image = FakeImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory, text_provider=FakeTextProvider(), image_provider=image,
+            )
+            result = app.start(DesignJob(
+                profile="rhetoric-poster", brief=brief("poster-01"),
+                snapshot=ROOT / "experiments/atlas-snapshot",
+            ))
+            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            result = app.resume(result.run_id, RevisionDecision(
+                "revise", instruction="Remove the lower-left handwriting only.",
+                reviewer="test",
+            ))
+            result = app.resume(result.run_id, HumanDecision(False, reviewer="test"))
+            self.assertEqual(result.status, "awaiting_revision")
+            self.assertEqual(image.edit_calls, 0)
+            result = app.resume(result.run_id, RevisionDecision("accept", reviewer="test"))
+            self.assertEqual(result.status, "completed")

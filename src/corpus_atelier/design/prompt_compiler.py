@@ -35,3 +35,32 @@ def compile_review_prompt(profile, proposal: dict) -> str:
         _read("shared/review-core.md"), profile.review_prompt,
         "# Design proposal", json.dumps(proposal, ensure_ascii=False, indent=2),
     ])
+
+
+def compile_revision_plan_prompt(*, brief: dict, proposal: dict, review: dict,
+                                 instruction: str) -> str:
+    return "\n\n".join([
+        _read("shared/revision-planner.md"),
+        "# Original brief\n\n" + json.dumps(brief, ensure_ascii=False, indent=2),
+        "# Approved design proposal\n\n" + json.dumps(proposal, ensure_ascii=False, indent=2),
+        "# Latest independent review\n\n" + json.dumps(review, ensure_ascii=False, indent=2),
+        "# Explicit user revision request\n\n" + instruction,
+    ])
+
+
+def compile_revision_prompt(proposal: dict, plan: dict) -> str:
+    return "\n\n".join([
+        _read("shared/revision-boundaries.md"),
+        "# Original approved image specification\n\n" + json.dumps(
+            proposal["image_spec"], ensure_ascii=False, indent=2),
+        "# Approved revision plan\n\n" + json.dumps(plan, ensure_ascii=False, indent=2),
+    ])
+
+
+def compile_revision_review_prompt(*, proposal: dict, plan: dict) -> str:
+    return "\n\n".join([
+        _read("shared/revision-review.md"),
+        "# Original approved design proposal\n\n" + json.dumps(
+            proposal, ensure_ascii=False, indent=2),
+        "# Approved revision plan\n\n" + json.dumps(plan, ensure_ascii=False, indent=2),
+    ])

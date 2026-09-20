@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import shutil
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, interrupt
@@ -13,10 +14,13 @@ from .artifacts.hashing import digest_file, digest_json
 from .artifacts.records import write_json
 from .artifacts.store import ArtifactStore
 from .design.presentation import render
-from .design.prompt_compiler import compile_generation_prompt, compile_review_prompt
+from .design.prompt_compiler import (
+    compile_generation_prompt, compile_review_prompt, compile_revision_plan_prompt,
+    compile_revision_prompt, compile_revision_review_prompt,
+)
 from .design.rendering import normalize_canvas
 from .design.synthesis import synthesize
-from .design.validation import validate, validate_proposal
+from .design.validation import validate, validate_proposal, validate_revision_review
 from .graphs import build_graph
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .rag import retrieve
@@ -26,6 +30,8 @@ from .state import DesignJob, HumanDecision, RunResult, RunSummary
 
 
 class _Runtime:
+    MAX_REVISIONS = 3
+
     def __init__(self, store, text_provider, image_provider):
         self.store = store
         self.text_provider = text_provider
@@ -180,8 +186,182 @@ class _Runtime:
             run_dir, review_request="review/request.json", review_prompt="review/prompt.md",
             review_response="review/response.json", review="review/review.json",
         )
-        self.store.update(run_dir, "completed", completed_at=datetime.now(timezone.utc).isoformat())
-        return {"review": review, "status": "completed"}
+        self.store.update(run_dir, "reviewed")
+        return {"review": review, "status": "reviewed"}
+
+    def revision_gate(self, state):
+        run_dir = self._dir(state)
+        revision_count = state.get("iteration", 1) - 1
+        payload = {
+            "run_id": state["run_id"], "image": state["image_path"],
+            "review": state["review"], "revision_count": revision_count,
+            "max_revisions": self.MAX_REVISIONS,
+            "can_revise": revision_count < self.MAX_REVISIONS,
+        }
+        self.store.update(run_dir, "awaiting_revision", revision_request=payload)
+        decision = interrupt(payload)
+        if not isinstance(decision, dict) or decision.get("action") not in {
+            "accept", "revise", "discard",
+        }:
+            raise ValueError("Revision decision must explicitly accept, revise, or discard.")
+        action = decision["action"]
+        if action == "revise":
+            instruction = decision.get("instruction", "").strip()
+            if not instruction:
+                raise ValueError("A revision decision requires a non-empty instruction.")
+            if revision_count >= self.MAX_REVISIONS:
+                raise ValueError(f"The maximum of {self.MAX_REVISIONS} revisions was reached.")
+            attempt = self.store.next_attempt(run_dir, "revision")
+            record = {
+                **decision, "instruction": instruction,
+                "decided_at": datetime.now(timezone.utc).isoformat(),
+                "base_image": state["image_path"],
+                "base_image_sha256": digest_file(Path(state["image_path"])),
+            }
+            write_json(attempt / "request.json", record)
+            relative = attempt.relative_to(run_dir).as_posix()
+            self.store.register(run_dir, revision_request=f"{relative}/request.json")
+            return {
+                "revision_action": action, "revision_request": record,
+                "revision_dir": str(attempt), "base_image_path": state["image_path"],
+                "status": "planning_revision",
+            }
+        record = {**decision, "decided_at": datetime.now(timezone.utc).isoformat()}
+        terminal = "completed" if action == "accept" else "discarded"
+        self.store.update(
+            run_dir, terminal, final_decision=record,
+            completed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        return {"revision_action": action, "status": terminal}
+
+    def plan_revision(self, state):
+        run_dir = self._dir(state)
+        attempt = Path(state["revision_dir"])
+        self.store.update(run_dir, "planning_revision")
+        prompt = compile_revision_plan_prompt(
+            brief=state["brief"], proposal=state["proposal"], review=state["review"],
+            instruction=state["revision_request"]["instruction"],
+        )
+        plan, response = self.text_provider.propose(
+            prompt, schema_name="revision-plan.schema.json",
+        )
+        validate(plan, "revision-plan.schema.json")
+        revision_prompt = compile_revision_prompt(state["proposal"], plan)
+        (attempt / "plan-prompt.md").write_text(prompt, encoding="utf-8")
+        write_json(attempt / "plan-response.json", response)
+        write_json(attempt / "plan.json", plan)
+        (attempt / "prompt.md").write_text(revision_prompt, encoding="utf-8")
+        digest = digest_json({
+            "base_image_sha256": digest_file(Path(state["base_image_path"])),
+            "request": state["revision_request"], "plan": plan,
+            "prompt": revision_prompt,
+        })
+        relative = attempt.relative_to(run_dir).as_posix()
+        self.store.register(
+            run_dir, revision_plan=f"{relative}/plan.json",
+            revision_prompt=f"{relative}/prompt.md",
+        )
+        return {
+            "revision_plan": plan, "revision_prompt": revision_prompt,
+            "revision_digest": digest, "status": "awaiting_revision_approval",
+        }
+
+    def revision_approval(self, state):
+        run_dir = self._dir(state)
+        attempt = Path(state["revision_dir"])
+        payload = {
+            "run_id": state["run_id"], "revision_digest": state["revision_digest"],
+            "base_image": state["base_image_path"],
+            "artifacts": {
+                "request": str((attempt / "request.json").resolve()),
+                "plan": str((attempt / "plan.json").resolve()),
+                "prompt": str((attempt / "prompt.md").resolve()),
+            },
+        }
+        self.store.update(run_dir, "awaiting_revision_approval",
+                          revision_approval_request=payload)
+        decision = interrupt(payload)
+        if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
+            raise ValueError("Revision approval must be an explicit boolean decision.")
+        record = {
+            **decision, "decided_at": datetime.now(timezone.utc).isoformat(),
+            "revision_digest": state["revision_digest"],
+        }
+        write_json(attempt / "approval.json", record)
+        relative = attempt.relative_to(run_dir).as_posix()
+        self.store.register(run_dir, revision_approval=f"{relative}/approval.json")
+        status = "revising" if record["approved"] else "awaiting_revision"
+        return {"revision_approval": record, "status": status}
+
+    def edit_image(self, state):
+        run_dir = self._dir(state)
+        attempt = Path(state["revision_dir"])
+        saved_prompt = (attempt / "prompt.md").read_text(encoding="utf-8")
+        saved_plan = json.loads((attempt / "plan.json").read_text(encoding="utf-8"))
+        if saved_prompt != state["revision_prompt"] or saved_plan != state["revision_plan"]:
+            raise ValueError("Reviewed revision artifacts changed after preview.")
+        actual = digest_json({
+            "base_image_sha256": digest_file(Path(state["base_image_path"])),
+            "request": state["revision_request"], "plan": state["revision_plan"],
+            "prompt": state["revision_prompt"],
+        })
+        if actual != state["revision_digest"]:
+            raise ValueError("Approved revision content changed.")
+        if state["revision_approval"].get("revision_digest") != actual:
+            raise ValueError("Revision approval does not bind to the current edit.")
+        self.store.update(run_dir, "revising")
+        source = attempt / "source.png"
+        shutil.copy2(Path(state["base_image_path"]), source)
+        response = self.image_provider.edit(
+            source, state["revision_prompt"],
+            size=get_profile(state["profile"]).default_size, output=attempt,
+        )
+        image_path = (attempt / response["file"]).resolve()
+        image_path, render_record = normalize_canvas(
+            image_path, get_profile(state["profile"]).output_ratio,
+        )
+        response.update(
+            file=image_path.name, sha256=digest_file(image_path), render=render_record,
+        )
+        write_json(attempt / "response.json", response)
+        relative = attempt.relative_to(run_dir).as_posix()
+        iteration = state.get("iteration", 1) + 1
+        self.store.register(
+            run_dir, revision_source=f"{relative}/source.png",
+            revision_response=f"{relative}/response.json", image=f"{relative}/image.png",
+        )
+        self.store.update(
+            run_dir, "revision_reviewing", iteration=iteration,
+            latest_image=str(image_path), image_sha256=digest_file(image_path),
+        )
+        return {"image_path": str(image_path), "iteration": iteration,
+                "status": "revision_reviewing"}
+
+    def review_revision(self, state):
+        run_dir = self._dir(state)
+        attempt = Path(state["revision_dir"])
+        prompt = compile_revision_review_prompt(
+            proposal=state["proposal"], plan=state["revision_plan"],
+        )
+        (attempt / "review-prompt.md").write_text(prompt, encoding="utf-8")
+        write_json(attempt / "review-request.json", {
+            "schema": "revision-review.schema.json",
+            "baseline_image": state["base_image_path"],
+            "baseline_sha256": digest_file(Path(state["base_image_path"])),
+            "edited_image": state["image_path"],
+            "edited_sha256": digest_file(Path(state["image_path"])),
+        })
+        review, response = self.text_provider.review_revision(
+            Path(state["base_image_path"]), Path(state["image_path"]), prompt,
+            schema_name="revision-review.schema.json",
+        )
+        validate_revision_review(review, state["revision_plan"])
+        write_json(attempt / "review-response.json", response)
+        write_json(attempt / "review.json", review)
+        relative = attempt.relative_to(run_dir).as_posix()
+        self.store.register(run_dir, review=f"{relative}/review.json")
+        self.store.update(run_dir, "reviewed")
+        return {"review": review, "revision_review": review, "status": "reviewed"}
 
 
 class CorpusAtelierApplication:
@@ -209,7 +389,7 @@ class CorpusAtelierApplication:
         state = {
             "run_id": run_id, "run_dir": str(run_dir), "profile": profile.name,
             "brief": job.brief, "snapshot": str(snapshot),
-            "evidence_mode": job.evidence_mode, "status": "created",
+            "evidence_mode": job.evidence_mode, "status": "created", "iteration": 1,
         }
         try:
             self.graph.invoke(state, config=config)
@@ -218,17 +398,19 @@ class CorpusAtelierApplication:
             raise
         return self._result(run_id)
 
-    def resume(self, run_id: str, decision: HumanDecision) -> RunResult:
+    def resume(self, run_id: str, decision: object) -> RunResult:
         if run_id not in self._active:
             raise ValueError("This process has no resumable checkpoint for the run.")
         run_dir = self.store.root / run_id
         try:
+            if not hasattr(decision, "to_dict"):
+                raise TypeError("A resumable decision must provide to_dict().")
             self.graph.invoke(Command(resume=decision.to_dict()), config=self._active[run_id])
         except Exception as exc:
             self.store.update(run_dir, "failed", error_type=type(exc).__name__, error=str(exc))
             raise
         result = self._result(run_id)
-        if result.status in {"completed", "rejected", "failed"}:
+        if result.status in {"completed", "rejected", "discarded", "failed"}:
             self._active.pop(run_id, None)
         return result
 
@@ -242,6 +424,7 @@ class CorpusAtelierApplication:
 
     def _result(self, run_id: str) -> RunResult:
         summary = self.inspect(run_id)
+        registered = summary.manifest.get("artifacts", {})
         paths = {
             "manifest": summary.run_dir / "manifest.json",
             "retrieval_bundle": summary.run_dir / "retrieval/bundle.json",
@@ -249,14 +432,23 @@ class CorpusAtelierApplication:
             "presentation": summary.run_dir / "design/presentation.md",
             "generation_prompt": summary.run_dir / "generation/prompt.md",
             "image": Path(summary.manifest.get("latest_image", "")),
-            "review": summary.run_dir / "review/review.json",
+            "review": summary.run_dir / registered.get("review", "review/review.json"),
         }
+        for name in (
+            "revision_request", "revision_plan", "revision_prompt",
+            "revision_approval", "revision_source", "revision_response",
+        ):
+            if name in registered:
+                paths[name] = summary.run_dir / registered[name]
         artifacts = {name: str(path.resolve()) for name, path in paths.items()
                      if str(path) and path.is_file()}
         messages = {
             "awaiting_approval": "Review the saved proposal and generation prompt.",
             "rejected": "Image generation was rejected; the experiment remains recorded.",
-            "completed": "Image generation and profile-specific review completed.",
+            "awaiting_revision": "Review the image and either accept, revise, or discard it.",
+            "awaiting_revision_approval": "Review and approve the exact image-edit request.",
+            "completed": "The reviewer accepted the generated image.",
+            "discarded": "The reviewer discarded the generated image.",
             "failed": "The experiment failed; inspect its manifest and saved attempts.",
         }
         return RunResult(run_id=run_id, status=summary.status, run_dir=summary.run_dir,

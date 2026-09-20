@@ -8,7 +8,9 @@ from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
     "created", "retrieving", "designing", "awaiting_approval", "rejected",
-    "generating", "reviewing", "completed", "failed",
+    "generating", "reviewing", "reviewed", "awaiting_revision", "planning_revision",
+    "awaiting_revision_approval", "revising", "revision_reviewing",
+    "completed", "discarded", "failed",
 ]
 
 
@@ -23,6 +25,17 @@ class DesignJob:
 @dataclass(frozen=True)
 class HumanDecision:
     approved: bool
+    reviewer: str = "cli-user"
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RevisionDecision:
+    action: Literal["accept", "revise", "discard"]
+    instruction: str = ""
     reviewer: str = "cli-user"
     note: str = ""
 
@@ -64,5 +77,15 @@ class AtelierState(TypedDict, total=False):
     approval: dict[str, Any]
     image_path: str
     review: dict[str, Any]
+    revision_action: str
+    revision_request: dict[str, Any]
+    revision_dir: str
+    revision_plan: dict[str, Any]
+    revision_prompt: str
+    revision_digest: str
+    revision_approval: dict[str, Any]
+    base_image_path: str
+    revision_review: dict[str, Any]
+    iteration: int
     status: RunStatus
     error: str

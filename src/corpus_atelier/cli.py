@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from .application import CorpusAtelierApplication
 from .design.validation import validate
 from .registry import PROFILES, get_profile
-from .state import DesignJob, HumanDecision
+from .state import DesignJob, HumanDecision, RevisionDecision
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -69,13 +69,34 @@ def main(argv=None) -> int:
         profile=args.profile, brief=_read_brief(args.brief), snapshot=args.snapshot,
         evidence_mode=args.evidence_mode,
     ))
-    _print_result(result)
-    if result.status != "awaiting_approval":
-        return 1
-    answer = input("Approve this exact image-generation request? [y/N] ").strip().lower()
-    note = input("Approval note (optional): ").strip() if answer in {"y", "yes"} else ""
-    result = app.resume(result.run_id, HumanDecision(
-        approved=answer in {"y", "yes"}, note=note,
-    ))
-    _print_result(result)
-    return 0 if result.status in {"completed", "rejected"} else 1
+    while True:
+        _print_result(result)
+        if result.status == "awaiting_approval":
+            answer = input("Approve this exact image-generation request? [y/N] ").strip().lower()
+            note = input("Approval note (optional): ").strip() if answer in {"y", "yes"} else ""
+            result = app.resume(result.run_id, HumanDecision(
+                approved=answer in {"y", "yes"}, note=note,
+            ))
+            continue
+        if result.status == "awaiting_revision":
+            action = input("Accept, revise, or discard this image? [a/r/d] ").strip().lower()
+            if action in {"a", "accept"}:
+                decision = RevisionDecision("accept")
+            elif action in {"r", "revise"}:
+                instruction = input("State the exact revision request: ").strip()
+                decision = RevisionDecision("revise", instruction=instruction)
+            elif action in {"d", "discard"}:
+                decision = RevisionDecision("discard")
+            else:
+                print("Please enter a, r, or d.")
+                continue
+            result = app.resume(result.run_id, decision)
+            continue
+        if result.status == "awaiting_revision_approval":
+            answer = input("Approve this exact image-edit request? [y/N] ").strip().lower()
+            note = input("Approval note (optional): ").strip() if answer in {"y", "yes"} else ""
+            result = app.resume(result.run_id, HumanDecision(
+                approved=answer in {"y", "yes"}, note=note,
+            ))
+            continue
+        return 0 if result.status in {"completed", "rejected", "discarded"} else 1

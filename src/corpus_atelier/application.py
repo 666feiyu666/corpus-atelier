@@ -30,8 +30,6 @@ from .state import DesignJob, HumanDecision, RunResult, RunSummary
 
 
 class _Runtime:
-    MAX_REVISIONS = 3
-
     def __init__(self, store, text_provider, image_provider):
         self.store = store
         self.text_provider = text_provider
@@ -195,8 +193,6 @@ class _Runtime:
         payload = {
             "run_id": state["run_id"], "image": state["image_path"],
             "review": state["review"], "revision_count": revision_count,
-            "max_revisions": self.MAX_REVISIONS,
-            "can_revise": revision_count < self.MAX_REVISIONS,
         }
         self.store.update(run_dir, "awaiting_revision", revision_request=payload)
         decision = interrupt(payload)
@@ -209,8 +205,6 @@ class _Runtime:
             instruction = decision.get("instruction", "").strip()
             if not instruction:
                 raise ValueError("A revision decision requires a non-empty instruction.")
-            if revision_count >= self.MAX_REVISIONS:
-                raise ValueError(f"The maximum of {self.MAX_REVISIONS} revisions was reached.")
             attempt = self.store.next_attempt(run_dir, "revision")
             record = {
                 **decision, "instruction": instruction,

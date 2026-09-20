@@ -181,3 +181,24 @@ class GraphTests(unittest.TestCase):
             self.assertEqual(image.edit_calls, 0)
             result = app.resume(result.run_id, RevisionDecision("accept", reviewer="test"))
             self.assertEqual(result.status, "completed")
+
+    def test_more_than_three_user_requested_revisions_are_allowed(self):
+        with TemporaryDirectory() as directory:
+            image = FakeImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory, text_provider=FakeTextProvider(), image_provider=image,
+            )
+            result = app.start(DesignJob(
+                profile="rhetoric-poster", brief=brief("poster-01"),
+                snapshot=ROOT / "experiments/atlas-snapshot",
+            ))
+            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            for number in range(4):
+                result = app.resume(result.run_id, RevisionDecision(
+                    "revise", instruction=f"Make small requested adjustment {number + 1}.",
+                    reviewer="test",
+                ))
+                self.assertEqual(result.status, "awaiting_revision_approval")
+                result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+                self.assertEqual(result.status, "awaiting_revision")
+            self.assertEqual(image.edit_calls, 4)

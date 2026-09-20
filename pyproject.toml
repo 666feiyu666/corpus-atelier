@@ -13,6 +13,7 @@ dependencies = [
     "openai>=2,<3",
     "jsonschema>=4,<5",
     "langgraph>=1,<2",
+    "streamlit>=1.40,<2",
 ]
 
 [project.scripts]

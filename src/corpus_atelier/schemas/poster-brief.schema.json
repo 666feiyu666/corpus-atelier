@@ -16,14 +16,14 @@
     },
     "reference_scope": {
       "type": "string",
-      "enum": ["retrieved_snapshot_images"],
-      "description": "Top-ranked complete visual references selected from the snapshot."
+      "enum": ["selected_snapshot_images", "retrieved_snapshot_images"],
+      "description": "Complete visual references explicitly selected from the snapshot. The retrieved value is accepted for archived briefs."
     },
     "reference_count": {
       "type": "integer",
       "minimum": 1,
       "maximum": 3,
-      "description": "Number of ranked reference images used for planning and generation."
+      "description": "Number of explicitly selected reference images used for planning and generation."
     }
   },
   "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"],

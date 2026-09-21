@@ -66,13 +66,6 @@ class FakeTextProvider:
         return value, {"status": "completed", "provider": "fake"}
 
     def propose(self, prompt: str, *, schema_name: str):
-        if schema_name == "revision-plan.schema.json":
-            return {
-                "requested_changes": ["Remove the unwanted lower-left writing."],
-                "must_preserve": ["Preserve exact copy and the overall composition."],
-                "forbidden_changes": ["Do not add copy or redesign the image."],
-                "success_criteria": ["The unwanted writing is absent without regressions."],
-            }, {"status": "completed", "provider": "fake"}
         visible = ["CORPUS ATELIER"] if schema_name.startswith("poster") else [
             "从语料到视觉论证", "Corpus Atelier"
         ]
@@ -110,32 +103,11 @@ class FakeTextProvider:
             "uncertainties": ["A real review must verify small-size text rendering."],
         }, {"status": "completed", "provider": "fake"}
 
-    def review_revision(self, before_path: Path, after_path: Path, prompt: str,
-                        *, schema_name: str):
-        return {
-            "verdict": "accept",
-            "requested_change_met": True,
-            "requested_change_evidence": ["The requested local change is visible."],
-            "preservation_checks": [{
-                "criterion": "Preserve exact copy and the overall composition.",
-                "passed": True,
-                "evidence": "The edited artifact retains the baseline structure.",
-            }],
-            "regressions": [],
-            "copy_check": {
-                "passed": True, "observed_copy": ["CORPUS ATELIER"],
-                "notes": "No copy regression in the test artifact.",
-            },
-            "uncertainties": [],
-        }, {"status": "completed", "provider": "fake"}
-
-
 class FakeImageProvider:
     model = "fake-image"
 
     def __init__(self, fail=False):
         self.calls = 0
-        self.edit_calls = 0
         self.reference_paths = []
         self.fail = fail
 
@@ -154,24 +126,5 @@ class FakeImageProvider:
         target = output / "image.png"
         Image.new("RGB", (94, 60), (235, 224, 196)).save(target, format="PNG")
         response = {"status": "generated", "file": "image.png", "sha256": digest_file(target)}
-        write_json(output / "response.json", response)
-        return response
-
-    def edit(self, image_path: Path, prompt: str, *, size: str, output: Path,
-             mask_path: Path | None = None):
-        self.edit_calls += 1
-        write_json(output / "request.json", {
-            "prompt": prompt, "size": size, "model": self.model,
-            "source": image_path.name,
-        })
-        write_text(output / "prompt.md", prompt)
-        if self.fail:
-            write_json(output / "response.json", {
-                "status": "failed", "error_type": "RuntimeError",
-            })
-            raise RuntimeError("deliberate fake provider failure")
-        target = output / "image.png"
-        Image.new("RGB", (94, 60), (225, 214, 186)).save(target, format="PNG")
-        response = {"status": "edited", "file": target.name, "sha256": digest_file(target)}
         write_json(output / "response.json", response)
         return response

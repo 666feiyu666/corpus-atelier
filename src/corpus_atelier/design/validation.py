@@ -48,21 +48,3 @@ def validate_reference_plan(value: dict, *, schema_name: str, mode: str,
     if unknown:
         raise ValueError(f"Reference plan cites unavailable evidence IDs: {unknown}.")
     return value
-
-
-def validate_revision_review(value: dict, plan: dict) -> dict:
-    validate(value, "revision-review.schema.json")
-    expected = plan["must_preserve"]
-    observed = [item["criterion"] for item in value["preservation_checks"]]
-    if observed != expected:
-        raise ValueError("Revision review must check every must_preserve criterion in order.")
-    if value["verdict"] == "accept":
-        if not value["requested_change_met"]:
-            raise ValueError("An accepted revision must satisfy the requested change.")
-        if not value["copy_check"]["passed"]:
-            raise ValueError("An accepted revision must pass exact-copy review.")
-        if not all(item["passed"] for item in value["preservation_checks"]):
-            raise ValueError("An accepted revision must pass every preservation check.")
-        if value["regressions"]:
-            raise ValueError("An accepted revision cannot contain reported regressions.")
-    return value

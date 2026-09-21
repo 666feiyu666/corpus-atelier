@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "corpus-atelier"
-version = "0.2.0"
-description = "Agentic, corpus-grounded graphic-design experiments"
+version = "0.3.0"
+description = "Reproducible, corpus-grounded graphic-design experiments"
 requires-python = ">=3.10"
 dependencies = [
     "python-dotenv>=1,<2",

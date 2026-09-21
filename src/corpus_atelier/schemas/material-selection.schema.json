@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "format_version": {"type": "integer", "const": 1},
+    "knowledge_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "reference_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "maxItems": 3,
+      "uniqueItems": true
+    }
+  },
+  "required": ["format_version", "knowledge_ids", "reference_ids"],
+  "anyOf": [
+    {"properties": {"knowledge_ids": {"minItems": 1}}},
+    {"properties": {"reference_ids": {"minItems": 1}}}
+  ]
+}

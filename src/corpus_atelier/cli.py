@@ -1,4 +1,4 @@
-"""Command-line UI for the Corpus Atelier application."""
+"""Command-line adapter for reproducible Corpus Atelier experiments."""
 
 from __future__ import annotations
 
@@ -12,49 +12,48 @@ from .application import CorpusAtelierApplication
 from .artifacts.records import write_json, write_text
 from .design.prompt_compiler import compile_reference_plan_prompt
 from .design.validation import validate
-from .rag import build_reference_package, retrieve
+from .materials import build_material_package
 from .registry import PROFILES, get_profile
-from .state import DesignJob, HumanDecision, RevisionDecision
+from .state import DesignJob, FinalDecision, HumanDecision
+
+
+DEFAULT_SNAPSHOT = Path("experiments/atlas-snapshot/mucha-commercial")
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="corpus-atelier")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("profiles", help="List registered design profiles.")
-    validate_cmd = commands.add_parser("validate", help="Validate a brief without model calls.")
+
+    validate_cmd = commands.add_parser("validate", help="Validate inputs without model calls.")
     validate_cmd.add_argument("--profile", required=True, choices=PROFILES)
     validate_cmd.add_argument("--brief", required=True, type=Path)
+    validate_cmd.add_argument("--materials", type=Path)
+
     run = commands.add_parser("run", help="Run one review-gated design experiment.")
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
-    run.add_argument(
-        "--snapshot", type=Path,
-        default=Path("experiments/atlas-snapshot/mucha-commercial"),
-    )
-    run.add_argument("--evidence-mode", choices=["hybrid-rag", "knowledge-only", "no-rag"],
-                     default="hybrid-rag")
+    run.add_argument("--materials", required=True, type=Path)
+    run.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
+
     preview = commands.add_parser(
-        "preview-reference", help="Compile reference inputs without provider calls.",
+        "preview-materials", help="Resolve selected materials without provider calls.",
     )
-    preview.add_argument("--profile", required=True, choices=PROFILES)
     preview.add_argument("--brief", required=True, type=Path)
-    preview.add_argument(
-        "--snapshot", type=Path,
-        default=Path("experiments/atlas-snapshot/mucha-commercial"),
-    )
-    preview.add_argument("--evidence-mode", choices=["hybrid-rag", "knowledge-only"],
-                         default="hybrid-rag")
+    preview.add_argument("--materials", required=True, type=Path)
+    preview.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
     preview.add_argument("--output", required=True, type=Path)
+
     inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
     inspect.add_argument("run_id")
     inspect.add_argument("--runs-root", type=Path, default=Path("experiments/runs"))
     return parser
 
 
-def _read_brief(path: Path) -> dict:
+def _read_object(path: Path, label: str) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
-        raise ValueError("Brief must be a JSON object.")
+        raise ValueError(f"{label} must be a JSON object.")
     return value
 
 
@@ -72,44 +71,48 @@ def main(argv=None) -> int:
         for profile in PROFILES.values():
             print(f"{profile.name}\t{profile.description}")
         return 0
+
     if args.command == "validate":
         profile = get_profile(args.profile)
-        validate(_read_brief(args.brief), profile.brief_schema)
+        validate(_read_object(args.brief, "Brief"), profile.brief_schema)
+        if args.materials:
+            validate(
+                _read_object(args.materials, "Material selection"),
+                "material-selection.schema.json",
+            )
         print(f"Valid {profile.name} brief: {args.brief.resolve()}")
         return 0
-    if args.command == "preview-reference":
-        profile = get_profile(args.profile)
-        brief = _read_brief(args.brief)
-        validate(brief, profile.brief_schema)
-        mode = brief.get("reference_mode")
-        scope = brief.get("reference_scope")
-        if not mode or not scope:
-            raise ValueError("Reference preview requires reference_mode and reference_scope.")
-        _, _, bundle = retrieve(
-            brief, profile.name, args.snapshot, evidence_mode=args.evidence_mode,
-        )
-        package, _ = build_reference_package(
-            args.snapshot, scope=scope, selected=bundle["selected"],
-            count=brief["reference_count"],
-        )
-        prompt = compile_reference_plan_prompt(
-            mode=mode, brief=brief, bundle=bundle, package=package,
-        )
+
+    if args.command == "preview-materials":
+        brief = _read_object(args.brief, "Brief")
+        selection = _read_object(args.materials, "Material selection")
+        package, _ = build_material_package(args.snapshot, selection)
         output = args.output.resolve()
-        write_json(output / "retrieval-bundle.json", bundle)
-        write_json(output / "reference-package.json", package)
-        write_text(output / "reference-plan-prompt.md", prompt)
-        print(f"Reference preview: {output}")
+        write_json(output / "material-selection.json", selection)
+        write_json(output / "material-package.json", package)
+        mode = brief.get("reference_mode")
+        if mode:
+            prompt = compile_reference_plan_prompt(
+                mode=mode, brief=brief, materials=package,
+            )
+            write_text(output / "reference-plan-prompt.md", prompt)
+        print(f"Material preview: {output}")
         return 0
-    app = CorpusAtelierApplication(runs_root=getattr(args, "runs_root", "experiments/runs"))
+
+    app = CorpusAtelierApplication(
+        runs_root=getattr(args, "runs_root", "experiments/runs"),
+    )
     if args.command == "inspect":
         summary = app.inspect(args.run_id)
         print(json.dumps(summary.manifest, ensure_ascii=False, indent=2))
         return 0
+
     load_dotenv()
     result = app.start(DesignJob(
-        profile=args.profile, brief=_read_brief(args.brief), snapshot=args.snapshot,
-        evidence_mode=args.evidence_mode,
+        profile=args.profile,
+        brief=_read_object(args.brief, "Brief"),
+        snapshot=args.snapshot,
+        materials=_read_object(args.materials, "Material selection"),
     ))
     while True:
         _print_result(result)
@@ -120,25 +123,15 @@ def main(argv=None) -> int:
                 approved=answer in {"y", "yes"}, note=note,
             ))
             continue
-        if result.status == "awaiting_revision":
-            action = input("Accept, revise, or discard this image? [a/r/d] ").strip().lower()
+        if result.status == "awaiting_final_decision":
+            action = input("Accept or discard this image? [a/d] ").strip().lower()
             if action in {"a", "accept"}:
-                decision = RevisionDecision("accept")
-            elif action in {"r", "revise"}:
-                instruction = input("State the exact revision request: ").strip()
-                decision = RevisionDecision("revise", instruction=instruction)
+                decision = FinalDecision("accept")
             elif action in {"d", "discard"}:
-                decision = RevisionDecision("discard")
+                decision = FinalDecision("discard")
             else:
-                print("Please enter a, r, or d.")
+                print("Please enter a or d.")
                 continue
             result = app.resume(result.run_id, decision)
-            continue
-        if result.status == "awaiting_revision_approval":
-            answer = input("Approve this exact image-edit request? [y/N] ").strip().lower()
-            note = input("Approval note (optional): ").strip() if answer in {"y", "yes"} else ""
-            result = app.resume(result.run_id, HumanDecision(
-                approved=answer in {"y", "yes"}, note=note,
-            ))
             continue
         return 0 if result.status in {"completed", "rejected", "discarded"} else 1

@@ -22,7 +22,7 @@ class FakeUiApplication:
 
     def resume(self, run_id, decision):
         if hasattr(decision, "approved"):
-            status = "awaiting_revision" if decision.approved else "rejected"
+            status = "awaiting_final_decision" if decision.approved else "rejected"
         else:
             status = "completed" if decision.action == "accept" else "discarded"
         return RunResult(
@@ -56,7 +56,7 @@ class StreamlitAppTests(unittest.TestCase):
     def test_streamlit_source_does_not_expose_protocol_details(self):
         source = ROOT / "src/corpus_atelier/streamlit_app.py"
         text = source.read_text(encoding="utf-8")
-        for term in ("generation_digest", "max_revisions", "forbidden_changes"):
+        for term in ("generation_digest", "revision_text", "forbidden_changes"):
             self.assertNotIn(term, text)
 
     def test_initial_page_renders_and_switches_examples(self):
@@ -69,15 +69,16 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertIn("从语料到视觉修辞", app.text_area[0].value)
 
-    def test_reference_example_defaults_to_one_and_offers_up_to_three(self):
+    def test_reference_example_uses_explicit_material_selection(self):
         app = AppTest.from_file(
             str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
         ).run()
         app.selectbox[0].select("慕夏风格女士手表广告").run()
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.segmented_control), 1)
-        self.assertEqual(app.segmented_control[0].value, 1)
-        self.assertEqual(app.segmented_control[0].options, ["1", "2", "3"])
+        self.assertEqual(len(app.multiselect), 2)
+        self.assertEqual(
+            app.multiselect[1].value, ["mucha-poster-124474277"],
+        )
 
     def test_approval_acceptance_flow_renders_each_page_state(self):
         with TemporaryDirectory() as directory:
@@ -112,8 +113,8 @@ class StreamlitAppTests(unittest.TestCase):
 
             app.button[0].click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "查看设计")
+            self.assertEqual(app.subheader[0].value, "查看实验结果")
 
             app.button[0].click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "当前设计已接受")
+            self.assertEqual(app.subheader[0].value, "实验结果已接受")

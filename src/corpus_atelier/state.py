@@ -7,11 +7,9 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
-    "created", "retrieving", "preparing_references", "planning_references",
-    "designing", "awaiting_approval", "rejected",
-    "generating", "reviewing", "reviewed", "awaiting_revision", "planning_revision",
-    "awaiting_revision_approval", "revising", "revision_reviewing",
-    "completed", "discarded", "failed",
+    "created", "loading_materials", "planning_references", "designing",
+    "awaiting_approval", "rejected", "generating", "reviewing",
+    "awaiting_final_decision", "completed", "discarded", "failed",
 ]
 
 
@@ -20,7 +18,7 @@ class DesignJob:
     profile: str
     brief: dict[str, Any]
     snapshot: Path
-    evidence_mode: str = "hybrid-rag"
+    materials: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -34,9 +32,8 @@ class HumanDecision:
 
 
 @dataclass(frozen=True)
-class RevisionDecision:
-    action: Literal["accept", "revise", "discard"]
-    instruction: str = ""
+class FinalDecision:
+    action: Literal["accept", "discard"]
     reviewer: str = "cli-user"
     note: str = ""
 
@@ -67,11 +64,8 @@ class AtelierState(TypedDict, total=False):
     profile: str
     brief: dict[str, Any]
     snapshot: str
-    evidence_mode: str
-    retrieval_query: dict[str, Any]
-    retrieval_candidates: list[dict[str, Any]]
-    retrieval_bundle: dict[str, Any]
-    reference_package: dict[str, Any]
+    materials_selection: dict[str, Any]
+    materials_package: dict[str, Any]
     reference_image_paths: list[str]
     reference_plan_prompt: str
     reference_plan: dict[str, Any]
@@ -82,15 +76,6 @@ class AtelierState(TypedDict, total=False):
     approval: dict[str, Any]
     image_path: str
     review: dict[str, Any]
-    revision_action: str
-    revision_request: dict[str, Any]
-    revision_dir: str
-    revision_plan: dict[str, Any]
-    revision_prompt: str
-    revision_digest: str
-    revision_approval: dict[str, Any]
-    base_image_path: str
-    revision_review: dict[str, Any]
-    iteration: int
+    final_action: str
     status: RunStatus
     error: str

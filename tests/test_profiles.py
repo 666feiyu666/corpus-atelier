@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import unittest
 
-from corpus_atelier.design.validation import load_schema, validate, validate_revision_review
+from corpus_atelier.design.validation import load_schema, validate
 from corpus_atelier.providers.text import _schema_for_openai
 from corpus_atelier.registry import PROFILES, get_profile
 
@@ -16,8 +16,7 @@ class ProfileTests(unittest.TestCase):
         } | {
             "style-grounded-plan.schema.json",
             "style-inspired-plan.schema.json",
-            "revision-plan.schema.json",
-            "revision-review.schema.json",
+            "material-selection.schema.json",
         }
 
         def check_node(node, path):
@@ -41,8 +40,7 @@ class ProfileTests(unittest.TestCase):
         } | {
             "style-grounded-plan.schema.json",
             "style-inspired-plan.schema.json",
-            "revision-plan.schema.json",
-            "revision-review.schema.json",
+            "material-selection.schema.json",
         }
 
         def check_node(node, path):
@@ -108,22 +106,3 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(inspired.pop("reference_mode"), "style_inspired")
         self.assertEqual(grounded, inspired)
         validate({**grounded, "reference_mode": "style_grounded"}, "poster-brief.schema.json")
-
-    def test_accepted_revision_cannot_hide_regressions(self):
-        plan = {
-            "must_preserve": ["Preserve exact copy."],
-        }
-        review = {
-            "verdict": "accept",
-            "requested_change_met": True,
-            "requested_change_evidence": ["The local defect is absent."],
-            "preservation_checks": [{
-                "criterion": "Preserve exact copy.", "passed": True,
-                "evidence": "Copy remains visible.",
-            }],
-            "regressions": ["A new artifact appeared."],
-            "copy_check": {"passed": True, "observed_copy": ["Exact"], "notes": ""},
-            "uncertainties": [],
-        }
-        with self.assertRaisesRegex(ValueError, "reported regressions"):
-            validate_revision_review(review, plan)

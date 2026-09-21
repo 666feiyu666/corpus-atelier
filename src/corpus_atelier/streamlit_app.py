@@ -72,9 +72,11 @@ def _reset() -> None:
 
 
 def _change_case() -> None:
+    brief = load_case(st.session_state.case_label)
     st.session_state.brief_editor = json.dumps(
-        load_case(st.session_state.case_label), ensure_ascii=False, indent=2,
+        brief, ensure_ascii=False, indent=2,
     )
+    st.session_state.reference_count = int(brief.get("reference_count", 1))
 
 
 def _resume(decision: HumanDecision | RevisionDecision, message: str) -> None:
@@ -126,6 +128,15 @@ def _start_page() -> None:
     st.selectbox(
         "选择示例", list(CASES), key="case_label", on_change=_change_case,
     )
+    case_brief = load_case(st.session_state.case_label)
+    if case_brief.get("reference_mode"):
+        st.session_state.setdefault(
+            "reference_count", int(case_brief.get("reference_count", 1)),
+        )
+        st.segmented_control(
+            "参考图数量", [1, 2, 3], key="reference_count",
+            help="按检索相关度选择排名最前的完整参考图；同一组图片用于规划和生成。",
+        )
     with st.expander("编辑内容", expanded=False):
         st.text_area("Brief（JSON）", height=280, key="brief_editor")
 
@@ -133,6 +144,8 @@ def _start_page() -> None:
         return
     try:
         brief = parse_brief(st.session_state.brief_editor)
+        if brief.get("reference_mode"):
+            brief["reference_count"] = int(st.session_state.get("reference_count", 1))
         profile = CASES[st.session_state.case_label][0]
         load_dotenv(ROOT / ".env")
         app = CorpusAtelierApplication(runs_root=ROOT / "experiments/runs")
@@ -158,7 +171,11 @@ def _approval_page(result: RunResult) -> None:
     st.subheader("设计方案")
     reference_plan = read_json_artifact(result, "reference_plan")
     if reference_plan:
-        st.caption(f"参考关系：{reference_plan.get('mode', 'unknown')}")
+        package = read_json_artifact(result, "reference_package")
+        count = package.get("reference_count", len(package.get("references", [])))
+        st.caption(
+            f"参考关系：{reference_plan.get('mode', 'unknown')} · 已选 {count} 张参考图"
+        )
         with st.expander("查看参考使用提案"):
             st.json(reference_plan)
         images = sorted(
@@ -166,7 +183,7 @@ def _approval_page(result: RunResult) -> None:
             if name.startswith("reference_image_")
         )
         if images:
-            with st.expander("查看完整参考图"):
+            with st.expander("查看所选参考图"):
                 columns = st.columns(3)
                 for index, (_, path) in enumerate(images):
                     columns[index % 3].image(path, width="stretch")

@@ -1,5 +1,6 @@
 """Offline providers for deterministic graph tests."""
 
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -13,11 +14,17 @@ class FakeTextProvider:
 
     def __init__(self):
         self.reference_calls = []
+        self.reference_evidence_ids = []
 
     def plan_references(self, prompt: str, image_paths: list[Path], *, schema_name: str):
         self.reference_calls.append({
             "prompt": prompt, "image_paths": list(image_paths), "schema_name": schema_name,
         })
+        package = json.loads(prompt.split("order shown here:\n\n", 1)[1])
+        reference_ids = [row["id"] for row in package["references"]]
+        knowledge_ids = [row["id"] for row in package["knowledge"]]
+        self.reference_evidence_ids = reference_ids + knowledge_ids
+        evidence_ids = (reference_ids + knowledge_ids)[:2]
         if schema_name == "style-grounded-plan.schema.json":
             value = {
                 "mode": "style_grounded",
@@ -25,12 +32,12 @@ class FakeTextProvider:
                 "style_invariants": [
                     {
                         "claim": "Curved framing organizes the figure and product.",
-                        "evidence_ids": ["mucha-poster-124474237", "mucha-poster-124474255"],
+                        "evidence_ids": evidence_ids,
                         "application": "Use a new circular watch-led hierarchy.",
                     },
                     {
                         "claim": "Display lettering participates in the composition.",
-                        "evidence_ids": ["mucha-poster-124474229", "mucha-poster-124474277"],
+                        "evidence_ids": evidence_ids,
                         "application": "Integrate the short brand copy into a new frame.",
                     },
                 ],
@@ -45,7 +52,7 @@ class FakeTextProvider:
                 "independent_concept": "Time represented as controlled organic growth.",
                 "inspiration_mappings": [
                     {
-                        "evidence_ids": ["mucha-poster-124474273"],
+                        "evidence_ids": reference_ids[:1],
                         "source_attribute": "mechanical-organic contrast",
                         "transformation": "Turn it into clean trajectories around the watch.",
                         "destination": "background motion system",
@@ -74,7 +81,9 @@ class FakeTextProvider:
             "brief_interpretation": "A focused communication task.",
             "chosen_direction": "Layered archival forms become a clear visual argument.",
             "design_rationale": "The hierarchy connects evidence, transformation, and invitation.",
-            "evidence_ids": ["mucha-commercial-lettering-image-integration"],
+            "evidence_ids": self.reference_evidence_ids[:1] or [
+                "mucha-commercial-lettering-image-integration"
+            ],
             "review_criteria": ["Exact copy is visible", "The focal hierarchy is clear"],
             "source_requirements": [],
             "clarification_questions": [],
@@ -127,11 +136,17 @@ class FakeImageProvider:
     def __init__(self, fail=False):
         self.calls = 0
         self.edit_calls = 0
+        self.reference_paths = []
         self.fail = fail
 
-    def generate(self, prompt: str, *, size: str, output: Path):
+    def generate(self, prompt: str, *, size: str, output: Path,
+                 reference_paths: list[Path] | None = None):
         self.calls += 1
-        write_json(output / "request.json", {"prompt": prompt, "size": size, "model": self.model})
+        self.reference_paths = list(reference_paths or [])
+        write_json(output / "request.json", {
+            "prompt": prompt, "size": size, "model": self.model,
+            "references": [str(path) for path in self.reference_paths],
+        })
         write_text(output / "prompt.md", prompt)
         if self.fail:
             write_json(output / "response.json", {"status": "failed", "error_type": "RuntimeError"})

@@ -64,6 +64,8 @@ class _Runtime:
         self.store.update(run_dir, "preparing_references")
         package, paths = build_reference_package(
             Path(state["snapshot"]), scope=state["brief"]["reference_scope"],
+            selected=state["retrieval_bundle"]["selected"],
+            count=state["brief"]["reference_count"],
         )
         self.store.json(run_dir, "reference/package.json", package)
         self.store.register(run_dir, reference_package="reference/package.json")
@@ -247,6 +249,7 @@ class _Runtime:
         response = self.image_provider.generate(
             state["generation_prompt"], size=get_profile(state["profile"]).default_size,
             output=attempt,
+            reference_paths=[Path(path) for path in state.get("reference_image_paths", [])],
         )
         image_path = (attempt / response["file"]).resolve()
         image_path, render_record = normalize_canvas(

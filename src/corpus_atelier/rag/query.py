@@ -6,7 +6,7 @@ import re
 def build_query(brief: dict, profile: str) -> dict:
     content = {
         key: value for key, value in brief.items()
-        if key not in {"reference_mode", "reference_scope"}
+        if key not in {"reference_mode", "reference_scope", "reference_count"}
     }
     text = " ".join(_flatten(content))
     terms = []

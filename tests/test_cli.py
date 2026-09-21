@@ -43,4 +43,5 @@ class CliTests(unittest.TestCase):
             self.assertTrue((output / "reference-plan-prompt.md").is_file())
             package = json.loads(
                 (output / "reference-package.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(package["references"]), 15)
+            self.assertEqual(package["reference_count"], 1)
+            self.assertEqual(len(package["references"]), 1)

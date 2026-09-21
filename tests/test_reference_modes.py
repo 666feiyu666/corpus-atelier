@@ -32,17 +32,35 @@ class ReferenceModeTests(unittest.TestCase):
         ))
         return app, text, image, result
 
-    def test_grounded_branch_supplies_every_complete_reference_before_approval(self):
+    def test_grounded_branch_supplies_one_ranked_reference_by_default(self):
         _, text, image, result = self._start("grounded")
         self.assertEqual(result.status, "awaiting_approval")
         self.assertEqual(image.calls, 0)
         self.assertEqual(len(text.reference_calls), 1)
-        self.assertEqual(len(text.reference_calls[0]["image_paths"]), 15)
+        self.assertEqual(len(text.reference_calls[0]["image_paths"]), 1)
         self.assertEqual(
             text.reference_calls[0]["schema_name"], "style-grounded-plan.schema.json",
         )
         self.assertIn("reference_plan", result.artifacts)
         self.assertIn("reference_prompt", result.artifacts)
+
+    def test_reference_count_three_is_used_for_planning_and_generation(self):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        text = FakeTextProvider()
+        image = FakeImageProvider()
+        app = CorpusAtelierApplication(
+            runs_root=temporary.name, text_provider=text, image_provider=image,
+        )
+        brief = load_brief("grounded")
+        brief["reference_count"] = 3
+        result = app.start(DesignJob(
+            profile="rhetoric-poster", brief=brief, snapshot=SNAPSHOT,
+        ))
+        self.assertEqual(len(text.reference_calls[0]["image_paths"]), 3)
+        result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+        self.assertEqual(result.status, "awaiting_revision")
+        self.assertEqual(image.reference_paths, text.reference_calls[0]["image_paths"])
 
     def test_inspired_branch_uses_its_distinct_contract(self):
         _, text, _, result = self._start("inspired")

@@ -69,6 +69,16 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertIn("从语料到视觉修辞", app.text_area[0].value)
 
+    def test_reference_example_defaults_to_one_and_offers_up_to_three(self):
+        app = AppTest.from_file(
+            str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
+        ).run()
+        app.selectbox[0].select("慕夏风格女士手表广告").run()
+        self.assertFalse(app.exception)
+        self.assertEqual(len(app.segmented_control), 1)
+        self.assertEqual(app.segmented_control[0].value, 1)
+        self.assertEqual(app.segmented_control[0].options, ["1", "2", "3"])
+
     def test_approval_acceptance_flow_renders_each_page_state(self):
         with TemporaryDirectory() as directory:
             run_dir = Path(directory)

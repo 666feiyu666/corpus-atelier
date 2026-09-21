@@ -16,13 +16,20 @@
     },
     "reference_scope": {
       "type": "string",
-      "enum": ["all_snapshot_images"],
-      "description": "Complete visual references supplied to the reference-planning model."
+      "enum": ["retrieved_snapshot_images"],
+      "description": "Top-ranked complete visual references selected from the snapshot."
+    },
+    "reference_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3,
+      "description": "Number of ranked reference images used for planning and generation."
     }
   },
   "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"],
   "dependentRequired": {
-    "reference_mode": ["reference_scope"],
-    "reference_scope": ["reference_mode"]
+    "reference_mode": ["reference_scope", "reference_count"],
+    "reference_scope": ["reference_mode", "reference_count"],
+    "reference_count": ["reference_mode", "reference_scope"]
   }
 }

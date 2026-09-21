@@ -88,7 +88,10 @@ def main(argv=None) -> int:
         _, _, bundle = retrieve(
             brief, profile.name, args.snapshot, evidence_mode=args.evidence_mode,
         )
-        package, _ = build_reference_package(args.snapshot, scope=scope)
+        package, _ = build_reference_package(
+            args.snapshot, scope=scope, selected=bundle["selected"],
+            count=brief["reference_count"],
+        )
         prompt = compile_reference_plan_prompt(
             mode=mode, brief=brief, bundle=bundle, package=package,
         )

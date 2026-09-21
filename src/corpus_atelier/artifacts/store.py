@@ -41,6 +41,7 @@ class ArtifactStore:
             manifest.update(
                 reference_mode=brief["reference_mode"],
                 reference_scope=brief["reference_scope"],
+                reference_count=brief["reference_count"],
             )
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir

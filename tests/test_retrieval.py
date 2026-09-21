@@ -14,12 +14,12 @@ class RetrievalTests(unittest.TestCase):
         common = {"topic": "women's watch", "purpose": "portrait advertisement"}
         grounded, _, _ = retrieve(
             {**common, "reference_mode": "style_grounded",
-             "reference_scope": "all_snapshot_images"},
+             "reference_scope": "retrieved_snapshot_images", "reference_count": 1},
             "rhetoric-poster", SNAPSHOT, evidence_mode="hybrid-rag",
         )
         inspired, _, _ = retrieve(
             {**common, "reference_mode": "style_inspired",
-             "reference_scope": "all_snapshot_images"},
+             "reference_scope": "retrieved_snapshot_images", "reference_count": 3},
             "rhetoric-poster", SNAPSHOT, evidence_mode="hybrid-rag",
         )
         self.assertEqual(grounded, inspired)

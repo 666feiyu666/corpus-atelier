@@ -6,7 +6,9 @@ import unittest
 from PIL import Image
 from streamlit.testing.v1 import AppTest
 
-from corpus_atelier.streamlit_app import load_case, parse_brief, review_points
+from corpus_atelier.streamlit_app import (
+    build_general_brief, load_case, parse_brief, review_points,
+)
 from corpus_atelier.state import RunResult
 
 
@@ -53,6 +55,21 @@ class StreamlitAppTests(unittest.TestCase):
             review_points(review), ["Title is legible.", "Increase spacing."],
         )
 
+    def test_general_brief_keeps_delivery_context_open(self):
+        brief = build_general_brief(
+            deliverable="展览导览卡",
+            purpose="帮助观众识别展区",
+            audience="现场观众",
+            use_context="手持阅读并可能低照度观看",
+            exact_copy="第一展区\n夜间开放",
+            constraints="不可使用荧光色",
+            preferences="克制",
+            canvas_mode="auto",
+        )
+        self.assertEqual(brief["deliverable"], "展览导览卡")
+        self.assertEqual(brief["exact_copy"], ["第一展区", "夜间开放"])
+        self.assertEqual(brief["canvas"], {"mode": "auto"})
+
     def test_streamlit_source_does_not_expose_protocol_details(self):
         source = ROOT / "src/corpus_atelier/streamlit_app.py"
         text = source.read_text(encoding="utf-8")
@@ -65,7 +82,8 @@ class StreamlitAppTests(unittest.TestCase):
         ).run()
         self.assertFalse(app.exception)
         self.assertEqual(app.title[0].value, "Corpus Atelier")
-        app.selectbox[0].select("文章封面").run()
+        app.segmented_control(key="start_mode").set_value("使用示例").run()
+        app.selectbox(key="case_label").select("文章封面").run()
         self.assertFalse(app.exception)
         self.assertIn("从语料到视觉修辞", app.text_area[0].value)
 
@@ -73,7 +91,8 @@ class StreamlitAppTests(unittest.TestCase):
         app = AppTest.from_file(
             str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
         ).run()
-        app.selectbox[0].select("慕夏风格女士手表广告").run()
+        app.segmented_control(key="start_mode").set_value("使用示例").run()
+        app.selectbox(key="case_label").select("慕夏风格女士手表广告").run()
         self.assertFalse(app.exception)
         self.assertEqual(len(app.multiselect), 2)
         self.assertEqual(

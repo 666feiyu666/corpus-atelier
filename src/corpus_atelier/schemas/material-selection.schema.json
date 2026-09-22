@@ -15,9 +15,5 @@
       "uniqueItems": true
     }
   },
-  "required": ["format_version", "knowledge_ids", "reference_ids"],
-  "anyOf": [
-    {"properties": {"knowledge_ids": {"minItems": 1}}},
-    {"properties": {"reference_ids": {"minItems": 1}}}
-  ]
+  "required": ["format_version", "knowledge_ids", "reference_ids"]
 }

@@ -87,10 +87,27 @@ class ProfileTests(unittest.TestCase):
             validate(plan, "style-grounded-plan.schema.json")
 
     def test_expected_profiles_are_registered(self):
-        self.assertEqual(set(PROFILES), {"rhetoric-poster", "art-article-cover"})
+        self.assertEqual(set(PROFILES), {
+            "rhetoric-poster", "art-article-cover", "rhetoric-graphic", "art-graphic",
+        })
         self.assertNotEqual(
             get_profile("rhetoric-poster").objective,
             get_profile("art-article-cover").objective,
+        )
+
+    def test_general_graphic_brief_accepts_open_delivery_and_auto_canvas(self):
+        brief = {
+            "deliverable": "museum ticket graphic",
+            "purpose": "Help visitors identify the evening program.",
+            "audience": "Museum visitors",
+            "use_context": "Printed on a narrow ticket and viewed at arm's length.",
+            "exact_copy": ["NIGHT COLLECTION"],
+            "constraints": [],
+            "preferences": [],
+            "canvas": {"mode": "auto"},
+        }
+        self.assertEqual(
+            validate(brief, get_profile("rhetoric-graphic").brief_schema), brief,
         )
 
     def test_brief_schemas_are_strict(self):

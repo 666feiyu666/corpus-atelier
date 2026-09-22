@@ -45,6 +45,22 @@ CASES = {
     ),
 }
 TERMINAL_STATUSES = {"completed", "rejected", "discarded", "failed"}
+DESIGN_METHODS = {
+    "修辞导向": "rhetoric-graphic",
+    "艺术指导导向": "art-graphic",
+}
+DELIVERY_CONTEXTS = [
+    "手机阅读海报",
+    "张贴或印刷海报",
+    "小红书配图",
+    "文章内插图",
+    "微信公众号封面",
+]
+REFERENCE_MODES = {
+    "不使用参考图": None,
+    "以共同风格特征为约束": "style_grounded",
+    "仅作为创意启发": "style_inspired",
+}
 
 
 def load_case(label: str) -> dict[str, Any]:
@@ -64,6 +80,44 @@ def parse_brief(value: str) -> dict[str, Any]:
     if not isinstance(brief, dict):
         raise ValueError("Brief 必须是一个 JSON 对象。")
     return brief
+
+
+def split_lines(value: str) -> list[str]:
+    """Convert a multiline UI field into compact ordered strings."""
+    return [line.strip() for line in value.splitlines() if line.strip()]
+
+
+def build_general_brief(
+    *, deliverable: str, purpose: str, audience: str, use_context: str,
+    exact_copy: str, constraints: str, preferences: str,
+    canvas_mode: str, ratio_width: int = 1, ratio_height: int = 1,
+    validate_required: bool = True,
+) -> dict[str, Any]:
+    """Build the open graphic-design brief without UI or model side effects."""
+    required = {
+        "交付类型": deliverable,
+        "设计目的": purpose,
+        "受众": audience,
+        "使用与观看场景": use_context,
+    }
+    missing = [label for label, value in required.items() if not value.strip()]
+    if validate_required and missing:
+        raise ValueError(f"请填写：{'、'.join(missing)}。")
+    canvas: dict[str, Any] = {"mode": canvas_mode}
+    if canvas_mode == "fixed":
+        canvas["aspect_ratio"] = {
+            "width": int(ratio_width), "height": int(ratio_height),
+        }
+    return {
+        "deliverable": deliverable.strip(),
+        "purpose": purpose.strip(),
+        "audience": audience.strip(),
+        "use_context": use_context.strip(),
+        "exact_copy": split_lines(exact_copy),
+        "constraints": split_lines(constraints),
+        "preferences": split_lines(preferences),
+        "canvas": canvas,
+    }
 
 
 def read_json_artifact(result: RunResult, name: str) -> dict[str, Any]:
@@ -92,6 +146,145 @@ def _change_case() -> None:
     )
     st.session_state.selected_knowledge_ids = list(defaults["knowledge_ids"])
     st.session_state.selected_reference_ids = list(defaults["reference_ids"])
+
+
+def _material_fields(*, show_references: bool) -> None:
+    choices = load_material_choices(str(SNAPSHOT))
+    knowledge = [item["id"] for item in choices if item["kind"] == "knowledge"]
+    references = [item["id"] for item in choices if item["kind"] == "reference"]
+    titles = {item["id"]: item["title"] for item in choices}
+    st.multiselect(
+        "知识材料（可留空，以测试无语料基线）",
+        knowledge,
+        key="selected_knowledge_ids",
+        format_func=lambda material_id: titles[material_id],
+    )
+    if show_references:
+        st.multiselect(
+            "参考图像",
+            references,
+            key="selected_reference_ids",
+            max_selections=3,
+            format_func=lambda material_id: titles[material_id],
+        )
+
+
+def _new_design_inputs() -> tuple[str, dict[str, Any], list[str]]:
+    method = st.segmented_control(
+        "设计方法", list(DESIGN_METHODS), default=list(DESIGN_METHODS)[0],
+        key="design_method",
+    )
+    deliverable = st.selectbox(
+        "交付类型",
+        DELIVERY_CONTEXTS,
+        accept_new_options=True,
+        placeholder="选择常见类型，或直接输入自定义场景",
+        key="general_deliverable",
+    )
+    purpose = st.text_area(
+        "设计目的", placeholder="希望这张图完成什么沟通任务？", key="general_purpose",
+    )
+    audience = st.text_input("受众", key="general_audience")
+    use_context = st.text_area(
+        "使用与观看场景",
+        placeholder="在哪里出现、用什么设备或距离观看、是否可能裁切或印刷？",
+        key="general_use_context",
+    )
+    exact_copy = st.text_area(
+        "必须出现的文字（每行一项，可留空）", key="general_exact_copy",
+    )
+    with st.expander("补充要求", expanded=False):
+        constraints = st.text_area("硬性限制（每行一项）", key="general_constraints")
+        preferences = st.text_area("设计偏好（每行一项）", key="general_preferences")
+
+    canvas_choice = st.segmented_control(
+        "画布比例", ["由设计师决定", "指定比例"], default="由设计师决定",
+        key="canvas_choice",
+    )
+    ratio_width, ratio_height = 1, 1
+    if canvas_choice == "指定比例":
+        ratio_columns = st.columns(2)
+        ratio_width = ratio_columns[0].number_input(
+            "宽度比例", min_value=1, max_value=100, value=4, step=1,
+            key="ratio_width",
+        )
+        ratio_height = ratio_columns[1].number_input(
+            "高度比例", min_value=1, max_value=100, value=5, step=1,
+            key="ratio_height",
+        )
+    else:
+        st.caption("设计师会依据交付类型、观看场景和内容层级提出比例，并说明理由。")
+
+    reference_label = st.selectbox(
+        "参考图关系", list(REFERENCE_MODES), key="general_reference_mode",
+    )
+    reference_mode = REFERENCE_MODES[reference_label]
+    with st.expander("选择语料材料", expanded=bool(reference_mode)):
+        _material_fields(show_references=bool(reference_mode))
+
+    brief = build_general_brief(
+        deliverable=deliverable or "",
+        purpose=purpose,
+        audience=audience,
+        use_context=use_context,
+        exact_copy=exact_copy,
+        constraints=constraints,
+        preferences=preferences,
+        canvas_mode="fixed" if canvas_choice == "指定比例" else "auto",
+        ratio_width=int(ratio_width),
+        ratio_height=int(ratio_height),
+        validate_required=False,
+    )
+    reference_ids = list(st.session_state.get("selected_reference_ids", []))
+    if reference_mode:
+        brief.update(
+            reference_mode=reference_mode,
+            reference_scope="selected_snapshot_images",
+            reference_count=len(reference_ids),
+        )
+    else:
+        reference_ids = []
+    return DESIGN_METHODS[method], brief, reference_ids
+
+
+def _example_inputs() -> tuple[str, dict[str, Any], list[str]]:
+    if "case_label" not in st.session_state:
+        st.session_state.case_label = next(iter(CASES))
+    if "brief_editor" not in st.session_state:
+        _change_case()
+    st.selectbox(
+        "选择示例", list(CASES), key="case_label", on_change=_change_case,
+    )
+    case_brief = load_case(st.session_state.case_label)
+    with st.expander("选择语料材料", expanded=bool(case_brief.get("reference_mode"))):
+        _material_fields(show_references=bool(case_brief.get("reference_mode")))
+    with st.expander("编辑内容", expanded=False):
+        st.text_area("Brief（JSON）", height=280, key="brief_editor")
+    brief = parse_brief(st.session_state.brief_editor)
+    reference_ids = list(st.session_state.get("selected_reference_ids", []))
+    if brief.get("reference_mode"):
+        if not reference_ids:
+            raise ValueError("使用参考模式时，至少选择一张参考图像。")
+        brief["reference_count"] = len(reference_ids)
+        brief["reference_scope"] = "selected_snapshot_images"
+    else:
+        reference_ids = []
+    return CASES[st.session_state.case_label][0], brief, reference_ids
+
+
+def _validate_start_inputs(brief: dict[str, Any], reference_ids: list[str]) -> None:
+    if "deliverable" in brief:
+        required = {
+            "交付类型": brief["deliverable"],
+            "设计目的": brief["purpose"],
+            "受众": brief["audience"],
+            "使用与观看场景": brief["use_context"],
+        }
+        missing = [label for label, value in required.items() if not value.strip()]
+        if missing:
+            raise ValueError(f"请填写：{'、'.join(missing)}。")
+    if brief.get("reference_mode") and not reference_ids:
+        raise ValueError("使用参考图模式时，至少选择一张参考图像。")
 
 
 def _resume(decision: HumanDecision | FinalDecision, message: str) -> None:
@@ -130,57 +323,31 @@ def _show_image(result: RunResult) -> None:
 
 def _start_page() -> None:
     st.subheader("开始一个实验")
-    if "case_label" not in st.session_state:
-        st.session_state.case_label = next(iter(CASES))
-    if "brief_editor" not in st.session_state:
-        _change_case()
-
-    st.selectbox(
-        "选择示例", list(CASES), key="case_label", on_change=_change_case,
+    start_mode = st.segmented_control(
+        "开始方式", ["新建设计", "使用示例"], default="新建设计", key="start_mode",
     )
-    case_brief = load_case(st.session_state.case_label)
-    choices = load_material_choices(str(SNAPSHOT))
-    knowledge = [item["id"] for item in choices if item["kind"] == "knowledge"]
-    references = [item["id"] for item in choices if item["kind"] == "reference"]
-    titles = {item["id"]: item["title"] for item in choices}
 
-    with st.expander("选择语料材料", expanded=bool(case_brief.get("reference_mode"))):
-        st.multiselect(
-            "知识材料",
-            knowledge,
-            key="selected_knowledge_ids",
-            format_func=lambda material_id: titles[material_id],
-        )
-        if case_brief.get("reference_mode"):
-            st.multiselect(
-                "参考图像",
-                references,
-                key="selected_reference_ids",
-                max_selections=3,
-                format_func=lambda material_id: titles[material_id],
-            )
-
-    with st.expander("编辑内容", expanded=False):
-        st.text_area("Brief（JSON）", height=280, key="brief_editor")
+    try:
+        if start_mode == "新建设计":
+            profile, brief, reference_ids = _new_design_inputs()
+        else:
+            profile, brief, reference_ids = _example_inputs()
+        input_error: Exception | None = None
+    except (json.JSONDecodeError, ValueError) as exc:
+        profile, brief, reference_ids = "", {}, []
+        input_error = exc
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
         return
     try:
-        brief = parse_brief(st.session_state.brief_editor)
-        reference_ids = list(st.session_state.get("selected_reference_ids", []))
-        if brief.get("reference_mode"):
-            if not reference_ids:
-                raise ValueError("使用参考模式时，至少选择一张参考图像。")
-            brief["reference_count"] = len(reference_ids)
-            brief["reference_scope"] = "selected_snapshot_images"
-        else:
-            reference_ids = []
+        if input_error is not None:
+            raise input_error
+        _validate_start_inputs(brief, reference_ids)
         materials = {
             "format_version": 1,
             "knowledge_ids": list(st.session_state.get("selected_knowledge_ids", [])),
             "reference_ids": reference_ids,
         }
-        profile = CASES[st.session_state.case_label][0]
         load_dotenv(ROOT / ".env")
         app = CorpusAtelierApplication(runs_root=ROOT / "experiments/runs")
         with st.spinner("正在准备设计方案…"):
@@ -226,6 +393,13 @@ def _approval_page(result: RunResult) -> None:
     rationale = proposal.get("design_rationale")
     if rationale:
         st.caption(rationale)
+    canvas_plan = (proposal.get("image_spec") or {}).get("canvas_plan")
+    if canvas_plan:
+        ratio = canvas_plan["aspect_ratio"]
+        st.info(
+            f"画布：{canvas_plan['format']} · {ratio['width']}:{ratio['height']} · "
+            f"{canvas_plan['orientation']}\n\n{canvas_plan['size_rationale']}"
+        )
     approve, reject = st.columns(2)
     if approve.button("批准并生成", type="primary", width="stretch"):
         _resume(HumanDecision(True, reviewer="streamlit-user"), "正在生成并审查图片…")

@@ -134,13 +134,15 @@ class ReferenceModeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "absent from the snapshot"):
             build_material_package(SNAPSHOT, value)
 
-    def test_material_selection_cannot_be_empty(self):
-        with self.assertRaises(ValueError):
-            build_material_package(SNAPSHOT, {
-                "format_version": 1,
-                "knowledge_ids": [],
-                "reference_ids": [],
-            })
+    def test_material_selection_can_be_empty_for_no_corpus_baseline(self):
+        package, paths = build_material_package(SNAPSHOT, {
+            "format_version": 1,
+            "knowledge_ids": [],
+            "reference_ids": [],
+        })
+        self.assertEqual(package["knowledge"], [])
+        self.assertEqual(package["references"], [])
+        self.assertEqual(paths, [])
 
     def test_reference_plan_change_invalidates_approval(self):
         app, _, image, result = self._start("grounded")

@@ -1,9 +1,13 @@
 """Profile registry used by every UI adapter."""
 
 from .profiles.article_cover import PROFILE as ARTICLE_COVER
+from .profiles.general_graphic import ART_PROFILE, RHETORIC_PROFILE
 from .profiles.poster import PROFILE as POSTER
 
-PROFILES = {profile.name: profile for profile in (POSTER, ARTICLE_COVER)}
+PROFILES = {
+    profile.name: profile
+    for profile in (POSTER, ARTICLE_COVER, RHETORIC_PROFILE, ART_PROFILE)
+}
 
 
 def get_profile(name: str):

@@ -66,30 +66,47 @@ class FakeTextProvider:
         return value, {"status": "completed", "provider": "fake"}
 
     def propose(self, prompt: str, *, schema_name: str):
+        is_graphic = schema_name == "graphic-design-proposal.schema.json"
         visible = ["CORPUS ATELIER"] if schema_name.startswith("poster") else [
             "从语料到视觉论证", "Corpus Atelier"
         ]
+        if is_graphic:
+            visible = ["Design for context"]
+        image_spec = {
+            "communication_objective": "Invite the intended audience to engage.",
+            "audience_and_context": "Mobile and public display contexts.",
+            "visible_copy": visible,
+            "composition": "One dominant title, a central layered motif, and quiet margins.",
+            "typography": "High-contrast display title with restrained supporting type.",
+            "visual_treatment": "Contemporary editorial collage with flat organic forms.",
+            "allowed_variation": ["Texture density may vary"],
+            "exclusions": ["No logos", "No additional copy"],
+        }
+        if is_graphic:
+            image_spec["canvas_plan"] = {
+                "format": "mobile reading graphic",
+                "orientation": "portrait",
+                "aspect_ratio": {"width": 4, "height": 5},
+                "viewing_context": "Read on a handheld phone screen.",
+                "safe_area": "Keep essential copy and focal content inside the central 80%.",
+                "size_rationale": "A 4:5 portrait canvas balances mobile reading and feed space.",
+            }
         value = {
             "status": "ready",
             "brief_interpretation": "A focused communication task.",
             "chosen_direction": "Layered archival forms become a clear visual argument.",
             "design_rationale": "The hierarchy connects evidence, transformation, and invitation.",
-            "evidence_ids": self.reference_evidence_ids[:1] or [
-                "mucha-commercial-lettering-image-integration"
-            ],
+            "evidence_ids": (
+                self.reference_evidence_ids[:1]
+                if is_graphic
+                else self.reference_evidence_ids[:1] or [
+                    "mucha-commercial-lettering-image-integration"
+                ]
+            ),
             "review_criteria": ["Exact copy is visible", "The focal hierarchy is clear"],
             "source_requirements": [],
             "clarification_questions": [],
-            "image_spec": {
-                "communication_objective": "Invite the intended audience to engage.",
-                "audience_and_context": "Mobile and public display contexts.",
-                "visible_copy": visible,
-                "composition": "One dominant title, a central layered motif, and quiet margins.",
-                "typography": "High-contrast display title with restrained supporting type.",
-                "visual_treatment": "Contemporary editorial collage with flat organic forms.",
-                "allowed_variation": ["Texture density may vary"],
-                "exclusions": ["No logos", "No additional copy"],
-            },
+            "image_spec": image_spec,
         }
         return value, {"status": "completed", "provider": "fake"}
 
@@ -109,11 +126,13 @@ class FakeImageProvider:
     def __init__(self, fail=False):
         self.calls = 0
         self.reference_paths = []
+        self.last_size = None
         self.fail = fail
 
     def generate(self, prompt: str, *, size: str, output: Path,
                  reference_paths: list[Path] | None = None):
         self.calls += 1
+        self.last_size = size
         self.reference_paths = list(reference_paths or [])
         write_json(output / "request.json", {
             "prompt": prompt, "size": size, "model": self.model,

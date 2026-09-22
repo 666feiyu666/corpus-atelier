@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "deliverable": {"type": "string", "minLength": 1},
+    "purpose": {"type": "string", "minLength": 1},
+    "audience": {"type": "string", "minLength": 1},
+    "use_context": {"type": "string", "minLength": 1},
+    "exact_copy": {"type": "array", "items": {"type": "string"}},
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "preferences": {"type": "array", "items": {"type": "string"}},
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"type": "string", "enum": ["auto", "fixed"]},
+        "aspect_ratio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "width": {"type": "integer", "minimum": 1, "maximum": 100},
+            "height": {"type": "integer", "minimum": 1, "maximum": 100}
+          },
+          "required": ["width", "height"]
+        }
+      },
+      "required": ["mode"],
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "fixed"}}, "required": ["mode"]},
+          "then": {"required": ["aspect_ratio"]}
+        }
+      ]
+    },
+    "reference_mode": {"type": "string", "enum": ["style_grounded", "style_inspired"]},
+    "reference_scope": {"type": "string", "enum": ["selected_snapshot_images"]},
+    "reference_count": {"type": "integer", "minimum": 1, "maximum": 3}
+  },
+  "required": ["deliverable", "purpose", "audience", "use_context", "exact_copy", "constraints", "preferences", "canvas"],
+  "dependentRequired": {
+    "reference_mode": ["reference_scope", "reference_count"],
+    "reference_scope": ["reference_mode", "reference_count"],
+    "reference_count": ["reference_mode", "reference_scope"]
+  }
+}

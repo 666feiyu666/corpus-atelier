@@ -13,6 +13,7 @@ from .artifacts.hashing import digest_file, digest_json
 from .artifacts.records import write_json
 from .artifacts.store import ArtifactStore
 from .design.presentation import render
+from .design.canvas import resolve_canvas
 from .design.prompt_compiler import (
     compile_generation_prompt,
     compile_reference_plan_prompt,
@@ -121,6 +122,9 @@ class _Runtime:
             "prompt": prompt,
             "proposal": proposal,
             "materials": state["materials_package"],
+            "generation_size": state["generation_size"],
+            "output_ratio": list(state["output_ratio"]),
+            "canvas": state["canvas"],
         }
         if state.get("reference_plan") is not None:
             binding.update(
@@ -172,18 +176,44 @@ class _Runtime:
             if proposal["status"] != "ready":
                 self.store.update(run_dir, proposal["status"])
                 raise ValueError(f"Design proposal is blocked: {proposal['status']}.")
+            if profile.deliverable == "graphic-design.v1":
+                generation_size, output_ratio, canvas = resolve_canvas(
+                    proposal["image_spec"], state["brief"],
+                )
+            else:
+                generation_size = profile.default_size
+                output_ratio = profile.output_ratio
+                canvas = {
+                    "size": generation_size,
+                    "ratio": list(output_ratio),
+                    "mode": "profile_default",
+                }
+            self.store.json(run_dir, "generation/canvas.json", canvas)
             generation_prompt = compile_generation_prompt(
                 proposal, state.get("reference_plan"),
             )
             self.store.text(run_dir, "generation/prompt.md", generation_prompt)
-            self.store.register(run_dir, generation_prompt="generation/prompt.md")
+            self.store.register(
+                run_dir,
+                generation_prompt="generation/prompt.md",
+                canvas="generation/canvas.json",
+            )
+            generation_state = {
+                **state,
+                "generation_size": generation_size,
+                "output_ratio": output_ratio,
+                "canvas": canvas,
+            }
             digest = digest_json(self._generation_binding(
-                state, proposal=proposal, prompt=generation_prompt,
+                generation_state, proposal=proposal, prompt=generation_prompt,
             ))
             return {
                 "design_prompt": prompt,
                 "proposal": proposal,
                 "generation_prompt": generation_prompt,
+                "generation_size": generation_size,
+                "output_ratio": output_ratio,
+                "canvas": canvas,
                 "generation_digest": digest,
             }
         except Exception as exc:
@@ -215,6 +245,7 @@ class _Runtime:
                 "proposal": str((run_dir / "design/proposal.json").resolve()),
                 "presentation": str((run_dir / "design/presentation.md").resolve()),
                 "generation_prompt": str((run_dir / "generation/prompt.md").resolve()),
+                "canvas": str((run_dir / "generation/canvas.json").resolve()),
             },
         }
         if state.get("reference_plan") is not None:
@@ -251,11 +282,15 @@ class _Runtime:
         saved_materials = json.loads(
             (run_dir / "materials/package.json").read_text(encoding="utf-8")
         )
+        saved_canvas = json.loads(
+            (run_dir / "generation/canvas.json").read_text(encoding="utf-8")
+        )
         if (
             saved_prompt != state["generation_prompt"]
             or saved_proposal != state["proposal"]
             or saved_selection != state["materials_selection"]
             or saved_materials != state["materials_package"]
+            or saved_canvas != state["canvas"]
         ):
             raise ValueError("Reviewed generation artifacts changed after preview.")
         load_snapshot(Path(state["snapshot"]))
@@ -278,13 +313,13 @@ class _Runtime:
         write_json(attempt / "image-spec.json", state["proposal"]["image_spec"])
         response = self.image_provider.generate(
             state["generation_prompt"],
-            size=get_profile(state["profile"]).default_size,
+            size=state["generation_size"],
             output=attempt,
             reference_paths=[Path(path) for path in state.get("reference_image_paths", [])],
         )
         image_path = (attempt / response["file"]).resolve()
         image_path, render_record = normalize_canvas(
-            image_path, get_profile(state["profile"]).output_ratio,
+            image_path, tuple(state["output_ratio"]),
         )
         response.update(
             file=image_path.name,

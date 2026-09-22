@@ -60,6 +60,41 @@ class GraphTests(unittest.TestCase):
     def test_artistic_profile_end_to_end(self):
         self._run("art-article-cover", "article-cover-01")
 
+    def test_open_graphic_profile_uses_designer_canvas_without_corpus(self):
+        with TemporaryDirectory() as directory:
+            image = FakeImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=FakeTextProvider(),
+                image_provider=image,
+            )
+            design_brief = {
+                "deliverable": "小红书配图",
+                "purpose": "Introduce a reading group.",
+                "audience": "Mobile readers",
+                "use_context": "Viewed in a mobile feed.",
+                "exact_copy": ["Design for context"],
+                "constraints": [],
+                "preferences": [],
+                "canvas": {"mode": "auto"},
+            }
+            result = app.start(DesignJob(
+                profile="rhetoric-graphic",
+                brief=design_brief,
+                snapshot=SNAPSHOT,
+                materials={"format_version": 1, "knowledge_ids": [], "reference_ids": []},
+            ))
+            self.assertEqual(result.status, "awaiting_approval")
+            canvas = json.loads(Path(result.artifacts["canvas"]).read_text(encoding="utf-8"))
+            self.assertEqual(canvas["ratio"], [4, 5])
+
+            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            self.assertEqual(result.status, "awaiting_final_decision")
+            self.assertEqual(image.last_size, canvas["size"])
+            from PIL import Image
+            with Image.open(result.artifacts["image"]) as opened:
+                self.assertEqual(opened.width * 5, opened.height * 4)
+
     def test_rejection_never_calls_image_provider(self):
         with TemporaryDirectory() as directory:
             image = FakeImageProvider()

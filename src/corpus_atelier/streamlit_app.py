@@ -10,6 +10,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.artifacts.store import validate_case_id
 from corpus_atelier.materials import list_references
 from corpus_atelier.state import DesignJob, FinalDecision, HumanDecision, RunResult
 
@@ -19,21 +20,25 @@ SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
 DEFAULT_REFERENCE = "mucha-poster-124474277"
 CASES = {
     "工作坊海报": (
+        "poster-01",
         "rhetoric-poster",
         ROOT / "experiments/cases/poster-01/brief.json",
         None,
     ),
     "文章封面": (
+        "article-cover-01",
         "art-article-cover",
         ROOT / "experiments/cases/article-cover-01/brief.json",
         None,
     ),
     "慕夏风格女士手表广告": (
+        "mucha-watch",
         "rhetoric-poster",
         ROOT / "experiments/cases/mucha-watch/grounded-brief.json",
         DEFAULT_REFERENCE,
     ),
     "慕夏启发女士手表广告": (
+        "mucha-watch",
         "rhetoric-poster",
         ROOT / "experiments/cases/mucha-watch/inspired-brief.json",
         DEFAULT_REFERENCE,
@@ -70,7 +75,7 @@ GENERATION_MODES = {
 
 def load_case(label: str) -> dict[str, Any]:
     """Load one bundled example brief."""
-    return json.loads(CASES[label][1].read_text(encoding="utf-8"))
+    return json.loads(CASES[label][2].read_text(encoding="utf-8"))
 
 
 @st.cache_data(max_entries=4)
@@ -149,7 +154,7 @@ def _reset() -> None:
 
 
 def _change_case() -> None:
-    _, _, defaults = CASES[st.session_state.case_label]
+    _, _, _, defaults = CASES[st.session_state.case_label]
     case_brief = load_case(st.session_state.case_label)
     st.session_state.brief_editor = json.dumps(
         case_brief, ensure_ascii=False, indent=2,
@@ -178,7 +183,13 @@ def _reference_field() -> str | None:
     )
 
 
-def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None]:
+def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
+    case_id = st.text_input(
+        "Case ID",
+        placeholder="例如 reading-group-poster",
+        help="用于将本次运行归档到 experiments/runs/<case-id>/。",
+        key="new_case_id",
+    )
     method = st.segmented_control(
         "设计方法", list(DESIGN_METHODS), default=list(DESIGN_METHODS)[0],
         key="design_method",
@@ -247,10 +258,10 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None]:
             "参考图使用策略", list(REFERENCE_MODES), key="general_reference_mode",
         )
         brief["reference_mode"] = REFERENCE_MODES[reference_label]
-    return DESIGN_METHODS[method], generation_mode, brief, reference_id
+    return DESIGN_METHODS[method], generation_mode, brief, reference_id, case_id
 
 
-def _example_inputs() -> tuple[str, str, dict[str, Any], str | None]:
+def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
     if "case_label" not in st.session_state:
         st.session_state.case_label = next(iter(CASES))
     if "brief_editor" not in st.session_state:
@@ -275,12 +286,15 @@ def _example_inputs() -> tuple[str, str, dict[str, Any], str | None]:
         brief["reference_mode"] = REFERENCE_MODES[reference_label]
     else:
         brief.pop("reference_mode", None)
-    return CASES[st.session_state.case_label][0], generation_mode, brief, reference_id
+    case_id, profile, _, _ = CASES[st.session_state.case_label]
+    return profile, generation_mode, brief, reference_id, case_id
 
 
 def _validate_start_inputs(
     generation_mode: str, brief: dict[str, Any], reference_id: str | None,
+    case_id: str,
 ) -> None:
+    validate_case_id(case_id)
     if "deliverable" in brief:
         required = {
             "交付类型": brief["deliverable"],
@@ -339,12 +353,12 @@ def _start_page() -> None:
 
     try:
         if start_mode == "新建设计":
-            profile, generation_mode, brief, reference_id = _new_design_inputs()
+            profile, generation_mode, brief, reference_id, case_id = _new_design_inputs()
         else:
-            profile, generation_mode, brief, reference_id = _example_inputs()
+            profile, generation_mode, brief, reference_id, case_id = _example_inputs()
         input_error: Exception | None = None
     except (json.JSONDecodeError, ValueError) as exc:
-        profile, generation_mode, brief, reference_id = "", "", {}, None
+        profile, generation_mode, brief, reference_id, case_id = "", "", {}, None, ""
         input_error = exc
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
@@ -352,7 +366,7 @@ def _start_page() -> None:
     try:
         if input_error is not None:
             raise input_error
-        _validate_start_inputs(generation_mode, brief, reference_id)
+        _validate_start_inputs(generation_mode, brief, reference_id, case_id)
         reference = None
         snapshot = None
         if generation_mode == "with_corpus":
@@ -365,6 +379,7 @@ def _start_page() -> None:
         app = CorpusAtelierApplication(runs_root=ROOT / "experiments/runs")
         with st.spinner("正在准备设计方案…"):
             result = app.start(DesignJob(
+                case_id=case_id,
                 profile=profile,
                 brief=brief,
                 generation_mode=generation_mode,

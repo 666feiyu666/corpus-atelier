@@ -97,6 +97,7 @@ class StreamlitAppTests(unittest.TestCase):
             app.segmented_control(key="new_generation_mode").value,
             "无语料库生成",
         )
+        self.assertEqual(app.text_input(key="new_case_id").value, "")
         self.assertEqual(len(app.multiselect), 0)
         app.segmented_control(key="new_generation_mode").set_value("有语料库生成").run()
         self.assertFalse(app.exception)

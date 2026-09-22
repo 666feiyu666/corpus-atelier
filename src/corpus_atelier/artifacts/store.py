@@ -5,22 +5,45 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 from uuid import uuid4
 
 from .records import write_json, write_text
+
+
+CASE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+RUN_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z_[a-f0-9]{8}$")
+
+
+def validate_case_id(case_id: str) -> str:
+    """Validate a stable, path-safe experiment case identifier."""
+    if not isinstance(case_id, str) or not CASE_ID_PATTERN.fullmatch(case_id):
+        raise ValueError(
+            "Case ID must use lowercase letters, digits, and single hyphens."
+        )
+    return case_id
+
+
+def validate_run_id(run_id: str) -> str:
+    """Validate the generated identifier used beneath one case directory."""
+    if not isinstance(run_id, str) or not RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError("Run ID must use the generated timestamp_hash format.")
+    return run_id
 
 
 class ArtifactStore:
     def __init__(self, root: Path | str = "experiments/runs"):
         self.root = Path(root).resolve()
 
-    def create(self, *, brief: dict, profile, generation_mode: str,
+    def create(self, *, case_id: str, brief: dict, profile, generation_mode: str,
                snapshot: Path | None = None) -> tuple[str, Path]:
-        self.root.mkdir(parents=True, exist_ok=True)
+        case_id = validate_case_id(case_id)
+        case_root = self.root / case_id
+        case_root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         while True:
             run_id = f"{stamp}_{uuid4().hex[:8]}"
-            run_dir = self.root / run_id
+            run_dir = case_root / run_id
             try:
                 run_dir.mkdir()
                 break
@@ -32,7 +55,8 @@ class ArtifactStore:
             "deliverable": profile.deliverable, "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 5, "run_id": run_id,
+            "format_version": 1, "workflow_version": 5,
+            "case_id": case_id, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,
             "generation_mode": generation_mode,

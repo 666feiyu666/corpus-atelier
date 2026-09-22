@@ -11,7 +11,7 @@ from langgraph.types import Command, interrupt
 
 from .artifacts.hashing import digest_file, digest_json
 from .artifacts.records import write_json
-from .artifacts.store import ArtifactStore
+from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
 from .design.presentation import render
 from .design.canvas import resolve_canvas
 from .design.prompt_compiler import (
@@ -366,14 +366,16 @@ class CorpusAtelierApplication:
             snapshot = Path(job.snapshot).resolve(strict=True)
             reference = job.reference
         run_id, run_dir = self.store.create(
+            case_id=job.case_id,
             brief=job.brief,
             profile=profile,
             generation_mode=job.generation_mode,
             snapshot=snapshot,
         )
         config = {"configurable": {"thread_id": run_id}}
-        self._active[run_id] = config
+        self._active[run_id] = {"config": config, "run_dir": run_dir}
         state = {
+            "case_id": job.case_id,
             "run_id": run_id,
             "run_dir": str(run_dir),
             "profile": profile.name,
@@ -398,12 +400,13 @@ class CorpusAtelierApplication:
     def resume(self, run_id: str, decision: object) -> RunResult:
         if run_id not in self._active:
             raise ValueError("This process has no resumable checkpoint for the run.")
-        run_dir = self.store.root / run_id
+        active = self._active[run_id]
+        run_dir = Path(active["run_dir"])
         try:
             if not hasattr(decision, "to_dict"):
                 raise TypeError("A resumable decision must provide to_dict().")
             self.graph.invoke(
-                Command(resume=decision.to_dict()), config=self._active[run_id],
+                Command(resume=decision.to_dict()), config=active["config"],
             )
         except Exception as exc:
             self.store.update(
@@ -415,8 +418,10 @@ class CorpusAtelierApplication:
             self._active.pop(run_id, None)
         return result
 
-    def inspect(self, run_id: str) -> RunSummary:
-        run_dir = (self.store.root / run_id).resolve(strict=True)
+    def inspect(self, case_id: str, run_id: str) -> RunSummary:
+        case_id = validate_case_id(case_id)
+        run_id = validate_run_id(run_id)
+        run_dir = (self.store.root / case_id / run_id).resolve(strict=True)
         if self.store.root not in run_dir.parents:
             raise ValueError("Run id escapes the run store.")
         manifest = self.store.manifest(run_dir)
@@ -428,7 +433,15 @@ class CorpusAtelierApplication:
         )
 
     def _result(self, run_id: str) -> RunResult:
-        summary = self.inspect(run_id)
+        active = self._active[run_id]
+        run_dir = Path(active["run_dir"]).resolve(strict=True)
+        manifest = self.store.manifest(run_dir)
+        summary = RunSummary(
+            run_id=run_id,
+            status=manifest["status"],
+            run_dir=run_dir,
+            manifest=manifest,
+        )
         registered = summary.manifest.get("artifacts", {})
         paths = {
             "manifest": summary.run_dir / "manifest.json",

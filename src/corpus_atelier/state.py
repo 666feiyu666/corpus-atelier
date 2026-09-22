@@ -17,6 +17,7 @@ GenerationMode = Literal["without_corpus", "with_corpus"]
 
 @dataclass(frozen=True)
 class DesignJob:
+    case_id: str
     profile: str
     brief: dict[str, Any]
     generation_mode: GenerationMode
@@ -62,6 +63,7 @@ class RunSummary:
 
 
 class AtelierState(TypedDict, total=False):
+    case_id: str
     run_id: str
     run_dir: str
     profile: str

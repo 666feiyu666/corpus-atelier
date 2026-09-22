@@ -30,6 +30,7 @@ class ReferenceModeTests(unittest.TestCase):
             runs_root=temporary.name, text_provider=text, image_provider=image,
         )
         result = app.start(DesignJob(
+            case_id="mucha-watch",
             profile="rhetoric-poster",
             brief=load_brief(mode),
             generation_mode="with_corpus",

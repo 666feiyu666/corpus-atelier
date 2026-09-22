@@ -12,6 +12,7 @@ class ArtifactTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             store = ArtifactStore(directory)
             args = dict(
+                case_id="poster-01",
                 brief={"topic": "x"}, profile=get_profile("rhetoric-poster"),
                 generation_mode="without_corpus",
             )
@@ -19,6 +20,18 @@ class ArtifactTests(unittest.TestCase):
             second, second_dir = store.create(**args)
             self.assertNotEqual(first, second)
             self.assertNotEqual(first_dir, second_dir)
+            self.assertEqual(first_dir.parent.name, "poster-01")
+
+    def test_case_id_must_be_a_path_safe_slug(self):
+        with TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            with self.assertRaisesRegex(ValueError, "Case ID"):
+                store.create(
+                    case_id="../poster-01",
+                    brief={"topic": "x"},
+                    profile=get_profile("rhetoric-poster"),
+                    generation_mode="without_corpus",
+                )
 
     def test_atomic_json_rejects_nan(self):
         with TemporaryDirectory() as directory:

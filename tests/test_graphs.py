@@ -34,6 +34,7 @@ class GraphTests(unittest.TestCase):
         case_brief = brief(case)
         case_brief["reference_mode"] = "style_grounded"
         result = app.start(DesignJob(
+            case_id=case,
             profile=profile,
             brief=case_brief,
             generation_mode="with_corpus",
@@ -54,6 +55,9 @@ class GraphTests(unittest.TestCase):
         result = app.resume(result.run_id, FinalDecision("accept", reviewer="test"))
         self.assertEqual(result.status, "completed")
         self.assertIn("final_decision", result.artifacts)
+        self.assertEqual(result.run_dir.parent.name, case)
+        manifest = json.loads(Path(result.artifacts["manifest"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["case_id"], case)
         return result
 
     def test_rhetoric_graph_end_to_end(self):
@@ -81,6 +85,7 @@ class GraphTests(unittest.TestCase):
                 "canvas": {"aspect_ratio": {"width": 4, "height": 5}},
             }
             result = app.start(DesignJob(
+                case_id="open-graphic-01",
                 profile="rhetoric-graphic",
                 brief=design_brief,
                 generation_mode="without_corpus",
@@ -111,6 +116,7 @@ class GraphTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "cannot include a snapshot or reference"):
                 app.start(DesignJob(
+                    case_id="poster-01",
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="without_corpus",
@@ -119,12 +125,14 @@ class GraphTests(unittest.TestCase):
                 ))
             with self.assertRaisesRegex(ValueError, "require a snapshot and reference selection"):
                 app.start(DesignJob(
+                    case_id="poster-01",
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="with_corpus",
                 ))
             with self.assertRaisesRegex(ValueError, "Invalid reference-selection"):
                 app.start(DesignJob(
+                    case_id="poster-01",
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="with_corpus",
@@ -144,6 +152,7 @@ class GraphTests(unittest.TestCase):
                 image_provider=image,
             )
             started = app.start(DesignJob(
+                case_id="poster-01",
                 profile="rhetoric-poster",
                 brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
@@ -163,6 +172,7 @@ class GraphTests(unittest.TestCase):
                 image_provider=image,
             )
             started = app.start(DesignJob(
+                case_id="poster-01",
                 profile="rhetoric-poster",
                 brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
@@ -172,7 +182,9 @@ class GraphTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 1)
-            response = next(Path(directory).glob("*/generation/attempt_01/response.json"))
+            response = next(
+                Path(directory).glob("*/*/generation/attempt_01/response.json")
+            )
             self.assertEqual(json.loads(response.read_text())["status"], "failed")
 
     def test_edited_generation_prompt_invalidates_approval(self):
@@ -184,6 +196,7 @@ class GraphTests(unittest.TestCase):
                 image_provider=image,
             )
             started = app.start(DesignJob(
+                case_id="poster-01",
                 profile="rhetoric-poster",
                 brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
@@ -207,6 +220,7 @@ class GraphTests(unittest.TestCase):
                 image_provider=image,
             )
             started = app.start(DesignJob(
+                case_id="poster-01",
                 profile="rhetoric-poster",
                 brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
@@ -229,6 +243,7 @@ class GraphTests(unittest.TestCase):
                 image_provider=FakeImageProvider(),
             )
             result = app.start(DesignJob(
+                case_id="poster-01",
                 profile="rhetoric-poster",
                 brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",

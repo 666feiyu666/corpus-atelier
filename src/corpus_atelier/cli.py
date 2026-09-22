@@ -30,6 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     validate_cmd.add_argument("--reference", type=Path)
 
     run = commands.add_parser("run", help="Run one review-gated design experiment.")
+    run.add_argument("--case-id", required=True)
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
     run.add_argument(
@@ -49,6 +50,7 @@ def _parser() -> argparse.ArgumentParser:
 
     inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
     inspect.add_argument("run_id")
+    inspect.add_argument("--case-id", required=True)
     inspect.add_argument("--runs-root", type=Path, default=Path("experiments/runs"))
     return parser
 
@@ -99,7 +101,7 @@ def main(argv=None) -> int:
         runs_root=getattr(args, "runs_root", "experiments/runs"),
     )
     if args.command == "inspect":
-        summary = app.inspect(args.run_id)
+        summary = app.inspect(args.case_id, args.run_id)
         print(json.dumps(summary.manifest, ensure_ascii=False, indent=2))
         return 0
 
@@ -109,6 +111,7 @@ def main(argv=None) -> int:
         if args.reference is not None else None
     )
     result = app.start(DesignJob(
+        case_id=args.case_id,
         profile=args.profile,
         brief=_read_object(args.brief, "Brief"),
         generation_mode=args.generation_mode,

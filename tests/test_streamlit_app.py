@@ -7,7 +7,7 @@ from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 from corpus_atelier.streamlit_app import (
-    build_general_brief, delivery_ratio, load_case, parse_brief,
+    CASES, build_general_brief, delivery_ratio, load_case, parse_brief,
 )
 from corpus_atelier.state import RunResult
 
@@ -37,13 +37,14 @@ class StreamlitAppTests(unittest.TestCase):
     def test_bundled_cases_are_available_to_the_page(self):
         poster = load_case("工作坊海报")
         cover = load_case("文章封面")
-        grounded_watch = load_case("慕夏风格女士手表广告")
-        inspired_watch = load_case("慕夏启发女士手表广告")
+        watch = load_case("AURELIA 女士手表广告")
+        self.assertEqual(list(CASES), [
+            "工作坊海报", "文章封面", "AURELIA 女士手表广告",
+        ])
         self.assertEqual(poster["topic"], "Corpus Atelier")
         self.assertEqual(cover["article_title"], "从语料到视觉修辞")
-        self.assertEqual(grounded_watch, inspired_watch)
-        self.assertNotIn("reference_mode", grounded_watch)
-        self.assertNotIn("corpus", grounded_watch["purpose"].lower())
+        self.assertNotIn("reference_mode", watch)
+        self.assertNotIn("corpus", watch["purpose"].lower())
 
     def test_brief_editor_requires_a_json_object(self):
         self.assertEqual(parse_brief('{"topic": "x"}'), {"topic": "x"})
@@ -101,6 +102,9 @@ class StreamlitAppTests(unittest.TestCase):
             "mucha-poster-124474229",
         )
         app.segmented_control(key="start_mode").set_value("使用示例").run()
+        self.assertEqual(app.selectbox(key="case_label").options, [
+            "工作坊海报", "文章封面", "AURELIA 女士手表广告",
+        ])
         app.selectbox(key="case_label").select("文章封面").run()
         self.assertFalse(app.exception)
         self.assertIn("从语料到视觉修辞", app.text_area[0].value)
@@ -110,7 +114,7 @@ class StreamlitAppTests(unittest.TestCase):
             str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
         ).run()
         app.segmented_control(key="start_mode").set_value("使用示例").run()
-        app.selectbox(key="case_label").select("慕夏风格女士手表广告").run()
+        app.selectbox(key="case_label").select("AURELIA 女士手表广告").run()
         self.assertFalse(app.exception)
         self.assertEqual(
             app.selectbox(key="selected_reference_id").value,
@@ -142,9 +146,19 @@ class StreamlitAppTests(unittest.TestCase):
                 "chosen_direction": "A restrained editorial composition.",
                 "design_rationale": "Clear hierarchy for a small screen.",
             }), encoding="utf-8")
+            generation_prompt = (
+                "# Image rendering instructions\n\n"
+                "Render the complete approved image specification."
+            )
+            prompt = run_dir / "generation-prompt.md"
+            prompt.write_text(generation_prompt, encoding="utf-8")
             image = run_dir / "image.png"
             Image.new("RGB", (12, 18), "white").save(image)
-            artifacts = {"proposal": str(proposal), "image": str(image)}
+            artifacts = {
+                "proposal": str(proposal),
+                "generation_prompt": str(prompt),
+                "image": str(image),
+            }
             result = RunResult(
                 run_id="ui-test", status="awaiting_approval", run_dir=run_dir,
                 message="awaiting approval", artifacts=artifacts,
@@ -157,6 +171,7 @@ class StreamlitAppTests(unittest.TestCase):
             app.run()
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "设计方案")
+            self.assertEqual(app.code[0].value, generation_prompt)
 
             app.button[0].click().run()
             self.assertFalse(app.exception)

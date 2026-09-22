@@ -31,13 +31,7 @@ CASES = {
         ROOT / "experiments/cases/article-cover-01/brief.json",
         None,
     ),
-    "慕夏风格女士手表广告": (
-        "mucha-watch",
-        "rhetoric-poster",
-        ROOT / "experiments/cases/mucha-watch/brief.json",
-        DEFAULT_REFERENCE,
-    ),
-    "慕夏启发女士手表广告": (
+    "AURELIA 女士手表广告": (
         "mucha-watch",
         "rhetoric-poster",
         ROOT / "experiments/cases/mucha-watch/brief.json",
@@ -45,8 +39,7 @@ CASES = {
     ),
 }
 CASE_REFERENCE_MODES = {
-    "慕夏风格女士手表广告": "style_grounded",
-    "慕夏启发女士手表广告": "style_inspired",
+    "AURELIA 女士手表广告": "style_grounded",
 }
 TERMINAL_STATUSES = {"completed", "rejected", "discarded", "failed"}
 DESIGN_METHODS = {
@@ -143,6 +136,13 @@ def read_json_artifact(result: RunResult, name: str) -> dict[str, Any]:
     if not path:
         return {}
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def read_text_artifact(result: RunResult, name: str) -> str:
+    path = result.artifacts.get(name)
+    if not path:
+        return ""
+    return Path(path).read_text(encoding="utf-8")
 
 
 def _reset() -> None:
@@ -413,6 +413,10 @@ def _approval_page(result: RunResult) -> None:
     if canvas:
         ratio = canvas["ratio"]
         st.info(f"画布：{ratio[0]}:{ratio[1]} · {canvas['size']} px")
+    generation_prompt = read_text_artifact(result, "generation_prompt")
+    if generation_prompt:
+        with st.expander("发送给图像模型的完整提示词", expanded=True):
+            st.code(generation_prompt, language=None, wrap_lines=True)
     approve, reject = st.columns(2)
     if approve.button("批准并生成", type="primary", width="stretch"):
         _resume(HumanDecision(True, reviewer="streamlit-user"), "正在生成图片…")

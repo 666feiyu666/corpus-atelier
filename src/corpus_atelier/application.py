@@ -220,7 +220,7 @@ class _Runtime:
             or saved_proposal != state["proposal"]
             or saved_canvas != state["canvas"]
         ):
-            raise ValueError("Reviewed generation artifacts changed after preview.")
+            raise ValueError("Approved generation artifacts changed after preview.")
         if state["generation_mode"] == "with_corpus":
             saved_selection = json.loads(
                 (run_dir / "reference/selection.json").read_text(encoding="utf-8")
@@ -232,7 +232,7 @@ class _Runtime:
                 saved_selection != state["reference_selection"]
                 or saved_reference != state["reference_package"]
             ):
-                raise ValueError("Reviewed generation artifacts changed after preview.")
+                raise ValueError("Approved generation artifacts changed after preview.")
             load_snapshot(Path(state["snapshot"]))
         actual = digest_json(self._generation_binding(
             state, proposal=state["proposal"], prompt=state["generation_prompt"],

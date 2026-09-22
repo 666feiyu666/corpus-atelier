@@ -10,10 +10,8 @@ class DesignProfile:
     deliverable: str
     brief_schema: str
     proposal_schema: str
-    review_schema: str
     description: str
     objective_prompt: str
     deliverable_prompts: tuple[str, ...]
-    review_prompt: str
     default_size: str
     output_ratio: tuple[int, int]

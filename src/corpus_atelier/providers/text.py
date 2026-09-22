@@ -31,7 +31,6 @@ def _schema_for_openai(schema_name: str) -> dict:
 class TextProvider(Protocol):
     def propose(self, prompt: str, *, schema_name: str,
                 reference_paths: list[Path] | None = None) -> tuple[dict, dict]: ...
-    def review(self, image_path: Path, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
 
 
 class OpenAITextProvider:
@@ -88,11 +87,3 @@ class OpenAITextProvider:
                  f"data:image/{media_type};base64,{encoded}"},
             ])
         return self._call([{"role": "user", "content": content}], schema_name)
-
-    def review(self, image_path: Path, prompt: str, *, schema_name: str) -> tuple[dict, dict]:
-        data = image_path.read_bytes()
-        encoded = base64.b64encode(data).decode("ascii")
-        return self._call([{"role": "user", "content": [
-            {"type": "input_text", "text": prompt},
-            {"type": "input_image", "image_url": f"data:image/png;base64,{encoded}"},
-        ]}], schema_name)

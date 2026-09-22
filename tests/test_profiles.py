@@ -12,8 +12,6 @@ class ProfileTests(unittest.TestCase):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
         } | {
-            profile.review_schema for profile in PROFILES.values()
-        } | {
             "reference-selection.schema.json",
         }
 
@@ -33,8 +31,6 @@ class ProfileTests(unittest.TestCase):
     def test_openai_schema_omits_unsupported_unique_items_keyword(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {
-            profile.review_schema for profile in PROFILES.values()
         } | {
             "reference-selection.schema.json",
         }

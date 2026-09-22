@@ -58,10 +58,3 @@ def compile_generation_prompt(proposal: dict, reference_mode: str | None = None)
             raise ValueError(f"Unsupported reference mode: {reference_mode!r}.") from exc
         sections.append(f"# Approved reference relationship\n\n{relationship}")
     return "\n\n".join(sections)
-
-
-def compile_review_prompt(profile, proposal: dict) -> str:
-    return "\n\n".join([
-        _read("shared/review-core.md"), profile.review_prompt,
-        "# Design proposal", json.dumps(proposal, ensure_ascii=False, indent=2),
-    ])

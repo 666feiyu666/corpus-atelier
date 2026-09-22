@@ -47,7 +47,6 @@ class GraphTests(unittest.TestCase):
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
         self.assertEqual(result.status, "awaiting_final_decision")
         self.assertEqual(image.calls, 1)
-        self.assertEqual(text.review_calls, 0)
         self.assertIn("image", result.artifacts)
         self.assertNotIn("review", result.artifacts)
         pending_manifest = json.loads(

@@ -8,8 +8,8 @@ from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
     "created", "preparing_inputs", "loading_reference", "designing",
-    "awaiting_approval", "rejected", "generating", "reviewing",
-    "awaiting_final_decision", "completed", "discarded", "failed",
+    "awaiting_approval", "rejected", "generating", "awaiting_final_decision",
+    "completed", "discarded", "failed",
 ]
 
 GenerationMode = Literal["without_corpus", "with_corpus"]
@@ -82,7 +82,6 @@ class AtelierState(TypedDict, total=False):
     generation_digest: str
     approval: dict[str, Any]
     image_path: str
-    review: dict[str, Any]
     final_action: str
     status: RunStatus
     error: str

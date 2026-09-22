@@ -13,7 +13,6 @@ class FakeTextProvider:
 
     def __init__(self):
         self.design_calls = []
-        self.review_calls = 0
 
     def propose(self, prompt: str, *, schema_name: str,
                 reference_paths: list[Path] | None = None):
@@ -50,17 +49,6 @@ class FakeTextProvider:
             "image_spec": image_spec,
         }
         return value, {"status": "completed", "provider": "fake"}
-
-    def review(self, image_path: Path, prompt: str, *, schema_name: str):
-        self.review_calls += 1
-        return {
-            "verdict": "accept",
-            "observations": ["The title is dominant and the central motif is visible."],
-            "interpretations": ["The layered motif can suggest evidence becoming form."],
-            "copy_check": "Expected copy is represented in the test artifact.",
-            "priority_actions": [],
-            "uncertainties": ["A real review must verify small-size text rendering."],
-        }, {"status": "completed", "provider": "fake"}
 
 class FakeImageProvider:
     model = "fake-image"

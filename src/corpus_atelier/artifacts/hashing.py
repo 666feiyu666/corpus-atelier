@@ -1,4 +1,4 @@
-"""Stable content digests used to bind approval to reviewed content."""
+"""Stable content digests used to bind approval to approved content."""
 
 import hashlib
 import json

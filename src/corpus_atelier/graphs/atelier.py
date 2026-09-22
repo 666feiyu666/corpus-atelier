@@ -7,7 +7,7 @@ from ..state import AtelierState
 
 def build_graph(runtime, checkpointer):
     graph = StateGraph(AtelierState)
-    graph.add_node("load_materials", runtime.load_materials)
+    graph.add_node("prepare_inputs", runtime.prepare_inputs)
     graph.add_node("plan_references", runtime.plan_references)
     graph.add_node("design", runtime.design)
     graph.add_node("approval", runtime.approval)
@@ -15,9 +15,9 @@ def build_graph(runtime, checkpointer):
     graph.add_node("review", runtime.review)
     graph.add_node("final_decision", runtime.final_decision)
 
-    graph.add_edge(START, "load_materials")
+    graph.add_edge(START, "prepare_inputs")
     graph.add_conditional_edges(
-        "load_materials",
+        "prepare_inputs",
         lambda state: "references" if state.get("brief", {}).get("reference_mode") else "design",
         {"references": "plan_references", "design": "design"},
     )

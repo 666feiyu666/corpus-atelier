@@ -82,6 +82,14 @@ class StreamlitAppTests(unittest.TestCase):
         ).run()
         self.assertFalse(app.exception)
         self.assertEqual(app.title[0].value, "Corpus Atelier")
+        self.assertEqual(
+            app.segmented_control(key="new_generation_mode").value,
+            "无语料库生成",
+        )
+        self.assertEqual(len(app.multiselect), 0)
+        app.segmented_control(key="new_generation_mode").set_value("有语料库生成").run()
+        self.assertFalse(app.exception)
+        self.assertEqual(len(app.multiselect), 2)
         app.segmented_control(key="start_mode").set_value("使用示例").run()
         app.selectbox(key="case_label").select("文章封面").run()
         self.assertFalse(app.exception)

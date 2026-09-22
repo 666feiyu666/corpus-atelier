@@ -14,7 +14,8 @@ class ArtifactStore:
     def __init__(self, root: Path | str = "experiments/runs"):
         self.root = Path(root).resolve()
 
-    def create(self, *, brief: dict, profile, snapshot: Path) -> tuple[str, Path]:
+    def create(self, *, brief: dict, profile, generation_mode: str,
+               snapshot: Path | None = None) -> tuple[str, Path]:
         self.root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         while True:
@@ -31,13 +32,20 @@ class ArtifactStore:
             "deliverable": profile.deliverable, "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 3, "run_id": run_id,
+            "format_version": 1, "workflow_version": 4, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,
-            "materials_mode": "explicit-selection",
-            "atlas_snapshot": str(snapshot.resolve()),
+            "generation_mode": generation_mode,
             "status": "created", "artifacts": {},
         }
+        if generation_mode == "with_corpus":
+            if snapshot is None:
+                raise ValueError("Corpus-grounded runs require an atlas snapshot.")
+            manifest.update(
+                corpus_source="atlas_snapshot",
+                materials_mode="explicit-selection",
+                atlas_snapshot=str(snapshot.resolve()),
+            )
         if brief.get("reference_mode"):
             manifest.update(
                 reference_mode=brief["reference_mode"],

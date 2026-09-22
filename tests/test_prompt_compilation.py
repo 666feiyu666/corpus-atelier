@@ -11,12 +11,13 @@ class PromptTests(unittest.TestCase):
     def test_designer_receives_gpt_image_2_authoring_knowledge(self):
         prompt = compile_design_prompt(
             get_profile("rhetoric-poster"), {"topic": "x"},
-            {"knowledge": [], "references": []},
+            None,
         )
         self.assertIn("GPT Image 2 authoring knowledge", prompt)
         self.assertIn("image_spec", prompt)
         self.assertIn("own without the design_rationale", prompt)
         self.assertIn("focal subject and supporting elements", prompt)
+        self.assertNotIn("Untrusted selected corpus materials", prompt)
 
     def test_selected_materials_are_labeled_untrusted(self):
         prompt = compile_design_prompt(

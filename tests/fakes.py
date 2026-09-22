@@ -67,6 +67,7 @@ class FakeTextProvider:
 
     def propose(self, prompt: str, *, schema_name: str):
         is_graphic = schema_name == "graphic-design-proposal.schema.json"
+        has_corpus = "# Untrusted selected corpus materials" in prompt
         visible = ["CORPUS ATELIER"] if schema_name.startswith("poster") else [
             "从语料到视觉论证", "Corpus Atelier"
         ]
@@ -97,7 +98,9 @@ class FakeTextProvider:
             "chosen_direction": "Layered archival forms become a clear visual argument.",
             "design_rationale": "The hierarchy connects evidence, transformation, and invitation.",
             "evidence_ids": (
-                self.reference_evidence_ids[:1]
+                []
+                if not has_corpus
+                else self.reference_evidence_ids[:1]
                 if is_graphic
                 else self.reference_evidence_ids[:1] or [
                     "mucha-commercial-lettering-image-integration"

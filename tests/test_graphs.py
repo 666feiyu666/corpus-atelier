@@ -35,6 +35,7 @@ class GraphTests(unittest.TestCase):
         result = app.start(DesignJob(
             profile=profile,
             brief=brief(case),
+            generation_mode="with_corpus",
             snapshot=SNAPSHOT,
             materials=MATERIALS,
         ))
@@ -81,10 +82,15 @@ class GraphTests(unittest.TestCase):
             result = app.start(DesignJob(
                 profile="rhetoric-graphic",
                 brief=design_brief,
-                snapshot=SNAPSHOT,
-                materials={"format_version": 1, "knowledge_ids": [], "reference_ids": []},
+                generation_mode="without_corpus",
             ))
             self.assertEqual(result.status, "awaiting_approval")
+            self.assertNotIn("materials_package", result.artifacts)
+            prompt = Path(result.artifacts["design_prompt"]).read_text(encoding="utf-8")
+            self.assertNotIn("Untrusted selected corpus materials", prompt)
+            manifest = json.loads(Path(result.artifacts["manifest"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["generation_mode"], "without_corpus")
+            self.assertNotIn("atlas_snapshot", manifest)
             canvas = json.loads(Path(result.artifacts["canvas"]).read_text(encoding="utf-8"))
             self.assertEqual(canvas["ratio"], [4, 5])
 
@@ -94,6 +100,40 @@ class GraphTests(unittest.TestCase):
             from PIL import Image
             with Image.open(result.artifacts["image"]) as opened:
                 self.assertEqual(opened.width * 5, opened.height * 4)
+
+    def test_generation_modes_reject_mixed_or_missing_corpus_inputs(self):
+        with TemporaryDirectory() as directory:
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=FakeTextProvider(),
+                image_provider=FakeImageProvider(),
+            )
+            with self.assertRaisesRegex(ValueError, "cannot include a snapshot or materials"):
+                app.start(DesignJob(
+                    profile="rhetoric-poster",
+                    brief=brief("poster-01"),
+                    generation_mode="without_corpus",
+                    snapshot=SNAPSHOT,
+                    materials=MATERIALS,
+                ))
+            with self.assertRaisesRegex(ValueError, "require a snapshot and material selection"):
+                app.start(DesignJob(
+                    profile="rhetoric-poster",
+                    brief=brief("poster-01"),
+                    generation_mode="with_corpus",
+                ))
+            with self.assertRaisesRegex(ValueError, "at least one selected material"):
+                app.start(DesignJob(
+                    profile="rhetoric-poster",
+                    brief=brief("poster-01"),
+                    generation_mode="with_corpus",
+                    snapshot=SNAPSHOT,
+                    materials={
+                        "format_version": 1,
+                        "knowledge_ids": [],
+                        "reference_ids": [],
+                    },
+                ))
 
     def test_rejection_never_calls_image_provider(self):
         with TemporaryDirectory() as directory:
@@ -106,6 +146,7 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
                 brief=brief("poster-01"),
+                generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
                 materials=MATERIALS,
             ))
@@ -124,6 +165,7 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
                 brief=brief("poster-01"),
+                generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
                 materials=MATERIALS,
             ))
@@ -144,6 +186,7 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
                 brief=brief("poster-01"),
+                generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
                 materials=MATERIALS,
             ))
@@ -166,6 +209,7 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
                 brief=brief("poster-01"),
+                generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
                 materials=MATERIALS,
             ))
@@ -187,6 +231,7 @@ class GraphTests(unittest.TestCase):
             result = app.start(DesignJob(
                 profile="rhetoric-poster",
                 brief=brief("poster-01"),
+                generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
                 materials=MATERIALS,
             ))

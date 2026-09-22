@@ -33,7 +33,12 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="Run one review-gated design experiment.")
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
-    run.add_argument("--materials", required=True, type=Path)
+    run.add_argument(
+        "--generation-mode",
+        choices=("without_corpus", "with_corpus"),
+        default="without_corpus",
+    )
+    run.add_argument("--materials", type=Path)
     run.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
 
     preview = commands.add_parser(
@@ -108,11 +113,16 @@ def main(argv=None) -> int:
         return 0
 
     load_dotenv()
+    materials = (
+        _read_object(args.materials, "Material selection")
+        if args.materials is not None else None
+    )
     result = app.start(DesignJob(
         profile=args.profile,
         brief=_read_object(args.brief, "Brief"),
-        snapshot=args.snapshot,
-        materials=_read_object(args.materials, "Material selection"),
+        generation_mode=args.generation_mode,
+        snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
+        materials=materials,
     ))
     while True:
         _print_result(result)

@@ -13,7 +13,7 @@ class ArtifactTests(unittest.TestCase):
             store = ArtifactStore(directory)
             args = dict(
                 brief={"topic": "x"}, profile=get_profile("rhetoric-poster"),
-                snapshot=Path(directory),
+                generation_mode="without_corpus",
             )
             first, first_dir = store.create(**args)
             second, second_dir = store.create(**args)

@@ -51,6 +51,7 @@ class ReferenceModeTests(unittest.TestCase):
         result = app.start(DesignJob(
             profile="rhetoric-poster",
             brief=brief,
+            generation_mode="with_corpus",
             snapshot=SNAPSHOT,
             materials=selection(count),
         ))
@@ -134,7 +135,7 @@ class ReferenceModeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "absent from the snapshot"):
             build_material_package(SNAPSHOT, value)
 
-    def test_material_selection_can_be_empty_for_no_corpus_baseline(self):
+    def test_material_package_builder_can_resolve_an_empty_selection(self):
         package, paths = build_material_package(SNAPSHOT, {
             "format_version": 1,
             "knowledge_ids": [],

@@ -5,26 +5,26 @@
     "status": {"type": "string", "enum": ["ready", "needs_sources", "needs_clarification"], "description": "Ready only when both unresolved arrays are empty and image_spec is complete."},
     "brief_interpretation": {"type": "string"},
     "chosen_direction": {"type": "string"},
-    "design_rationale": {"type": "string"},
+    "design_rationale": {"type": "string", "description": "Concise, human-reviewable explanation of why the design decisions answer the brief; it is not sent to the image renderer."},
     "evidence_ids": {"type": "array", "items": {"type": "string"}},
     "review_criteria": {"type": "array", "items": {"type": "string"}},
     "source_requirements": {"type": "array", "items": {"type": "string"}, "description": "Outstanding sources; must be empty when status is ready."},
     "clarification_questions": {"type": "array", "items": {"type": "string"}, "description": "Blocking questions; must be empty when status is ready."},
     "image_spec": {
-      "description": "Complete specification when ready; null whenever blocked.",
+      "description": "Self-contained, renderer-ready instructions for GPT Image 2 when ready; null whenever blocked. Every decision that must be visible in the generated image must appear here rather than only in design_rationale.",
       "anyOf": [
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "communication_objective": {"type": "string"},
-            "audience_and_context": {"type": "string"},
-            "visible_copy": {"type": "array", "items": {"type": "string"}},
-            "composition": {"type": "string"},
-            "typography": {"type": "string"},
-            "visual_treatment": {"type": "string"},
-            "allowed_variation": {"type": "array", "items": {"type": "string"}},
-            "exclusions": {"type": "array", "items": {"type": "string"}}
+            "communication_objective": {"type": "string", "description": "What the finished image must communicate, stated without claiming an unverified audience effect."},
+            "audience_and_context": {"type": "string", "description": "Who will encounter the image, where it will be used, and the viewing conditions that affect rendering decisions."},
+            "visible_copy": {"type": "array", "description": "Exact strings permitted as visible artwork text. Preserve the user's wording and punctuation and do not propose additional copy.", "items": {"type": "string"}},
+            "composition": {"type": "string", "description": "Concrete GPT Image 2 instructions for focal subject, supporting elements, visible relationships, hierarchy, placement, relative scale, framing, negative space, and crop safety."},
+            "typography": {"type": "string", "description": "Concrete GPT Image 2 instructions for the hierarchy, placement, visual character, contrast, and legibility of visible_copy."},
+            "visual_treatment": {"type": "string", "description": "Concrete GPT Image 2 instructions for visual medium, palette, materials, lighting, texture, imagery, and atmosphere; avoid unsupported abstract style praise."},
+            "allowed_variation": {"type": "array", "description": "Rendering choices GPT Image 2 may vary without changing the design concept.", "items": {"type": "string"}},
+            "exclusions": {"type": "array", "description": "Direct constraints naming content, text, styles, or artifacts that must not appear.", "items": {"type": "string"}}
           },
           "required": ["communication_objective", "audience_and_context", "visible_copy", "composition", "typography", "visual_treatment", "allowed_variation", "exclusions"]
         },

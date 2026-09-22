@@ -8,6 +8,16 @@ from tests.fakes import FakeTextProvider
 
 
 class PromptTests(unittest.TestCase):
+    def test_designer_receives_gpt_image_2_authoring_knowledge(self):
+        prompt = compile_design_prompt(
+            get_profile("rhetoric-poster"), {"topic": "x"},
+            {"knowledge": [], "references": []},
+        )
+        self.assertIn("GPT Image 2 authoring knowledge", prompt)
+        self.assertIn("image_spec", prompt)
+        self.assertIn("own without the design_rationale", prompt)
+        self.assertIn("focal subject and supporting elements", prompt)
+
     def test_selected_materials_are_labeled_untrusted(self):
         prompt = compile_design_prompt(
             get_profile("rhetoric-poster"), {"topic": "x"},
@@ -21,6 +31,8 @@ class PromptTests(unittest.TestCase):
         prompt = compile_generation_prompt(proposal)
         self.assertIn("Approved image specification", prompt)
         self.assertNotIn(proposal["design_rationale"], prompt)
+        self.assertNotIn("GPT Image 2 authoring knowledge", prompt)
+        self.assertIn(proposal["image_spec"]["composition"], prompt)
 
     def test_generation_receives_the_reference_contract(self):
         proposal, _ = FakeTextProvider().propose("", schema_name="poster-proposal.schema.json")

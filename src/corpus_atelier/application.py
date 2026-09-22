@@ -75,7 +75,7 @@ class _Runtime:
         if state["generation_mode"] == "with_corpus":
             binding.update(
                 reference=state["reference_package"],
-                reference_mode=state["brief"]["reference_mode"],
+                reference_mode=state["reference_mode"],
             )
         return binding
 
@@ -89,6 +89,7 @@ class _Runtime:
                 profile,
                 state["brief"],
                 state["reference_package"],
+                state.get("reference_mode"),
                 self.text_provider,
                 [Path(path) for path in state.get("reference_image_paths", [])],
             )
@@ -97,6 +98,7 @@ class _Runtime:
                 "profile": profile.name,
                 "schema": profile.proposal_schema,
                 "references": state.get("reference_package"),
+                "reference_mode": state.get("reference_mode"),
             }
             self.store.json(run_dir, "design/request.json", request)
             self.store.text(run_dir, "design/prompt.md", prompt)
@@ -127,7 +129,7 @@ class _Runtime:
                 }
             self.store.json(run_dir, "generation/canvas.json", canvas)
             generation_prompt = compile_generation_prompt(
-                proposal, state["brief"].get("reference_mode"),
+                proposal, state.get("reference_mode"),
             )
             self.store.text(run_dir, "generation/prompt.md", generation_prompt)
             self.store.register(
@@ -189,7 +191,7 @@ class _Runtime:
                 "reference_selection": str((run_dir / "reference/selection.json").resolve()),
                 "reference_package": str((run_dir / "reference/package.json").resolve()),
             })
-            payload["reference_mode"] = state["brief"]["reference_mode"]
+            payload["reference_mode"] = state["reference_mode"]
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
@@ -325,7 +327,7 @@ class CorpusAtelierApplication:
         if job.generation_mode == "without_corpus":
             if job.snapshot is not None or job.reference is not None:
                 raise ValueError("Without-corpus runs cannot include a snapshot or reference.")
-            if job.brief.get("reference_mode"):
+            if job.reference_mode is not None:
                 raise ValueError("Without-corpus runs cannot include a reference mode.")
             snapshot = None
             reference = None
@@ -333,7 +335,7 @@ class CorpusAtelierApplication:
             if job.snapshot is None or job.reference is None:
                 raise ValueError("With-corpus runs require a snapshot and reference selection.")
             validate(job.reference, "reference-selection.schema.json")
-            if not job.brief.get("reference_mode"):
+            if job.reference_mode not in {"style_grounded", "style_inspired"}:
                 raise ValueError("With-corpus runs require an explicit reference mode.")
             snapshot = Path(job.snapshot).resolve(strict=True)
             reference = job.reference
@@ -342,6 +344,7 @@ class CorpusAtelierApplication:
             brief=job.brief,
             profile=profile,
             generation_mode=job.generation_mode,
+            reference_mode=job.reference_mode,
             snapshot=snapshot,
         )
         config = {"configurable": {"thread_id": run_id}}
@@ -352,6 +355,7 @@ class CorpusAtelierApplication:
             "run_dir": str(run_dir),
             "profile": profile.name,
             "generation_mode": job.generation_mode,
+            "reference_mode": job.reference_mode,
             "brief": job.brief,
             "status": "created",
         }

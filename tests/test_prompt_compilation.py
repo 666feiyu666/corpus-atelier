@@ -43,8 +43,9 @@ class PromptTests(unittest.TestCase):
     def test_selected_reference_adds_only_the_mode_instruction(self):
         prompt = compile_design_prompt(
             get_profile("rhetoric-poster"),
-            {"topic": "x", "reference_mode": "style_inspired"},
+            {"topic": "x"},
             {"reference": {"id": "ref-1", "title": "Example"}},
+            "style_inspired",
         )
         self.assertIn("Style-inspired reference relationship", prompt)
         self.assertNotIn("Untrusted selected visual reference", prompt)

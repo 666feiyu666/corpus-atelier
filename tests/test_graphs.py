@@ -32,13 +32,12 @@ class GraphTests(unittest.TestCase):
             text_provider=text,
             image_provider=image,
         )
-        case_brief = brief(case)
-        case_brief["reference_mode"] = "style_grounded"
         result = app.start(DesignJob(
             case_id=case,
             profile=profile,
-            brief=case_brief,
+            brief=brief(case),
             generation_mode="with_corpus",
+            reference_mode="style_grounded",
             snapshot=SNAPSHOT,
             reference=REFERENCE,
         ))
@@ -65,7 +64,7 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(result.run_dir.parent.name, case)
         manifest = json.loads(Path(result.artifacts["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["case_id"], case)
-        self.assertEqual(manifest["workflow_version"], 6)
+        self.assertEqual(manifest["workflow_version"], 7)
         self.assertNotIn("review", manifest["artifacts"])
         self.assertEqual(
             manifest["artifacts"]["final_decision"],
@@ -136,12 +135,21 @@ class GraphTests(unittest.TestCase):
                     snapshot=SNAPSHOT,
                     reference=REFERENCE,
                 ))
+            with self.assertRaisesRegex(ValueError, "cannot include a reference mode"):
+                app.start(DesignJob(
+                    case_id="poster-01",
+                    profile="rhetoric-poster",
+                    brief=brief("poster-01"),
+                    generation_mode="without_corpus",
+                    reference_mode="style_grounded",
+                ))
             with self.assertRaisesRegex(ValueError, "require a snapshot and reference selection"):
                 app.start(DesignJob(
                     case_id="poster-01",
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="with_corpus",
+                    reference_mode="style_grounded",
                 ))
             with self.assertRaisesRegex(ValueError, "Invalid reference-selection"):
                 app.start(DesignJob(
@@ -149,11 +157,21 @@ class GraphTests(unittest.TestCase):
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="with_corpus",
+                    reference_mode="style_grounded",
                     snapshot=SNAPSHOT,
                     reference={
                         "format_version": 1,
                         "reference_id": "",
                     },
+                ))
+            with self.assertRaisesRegex(ValueError, "explicit reference mode"):
+                app.start(DesignJob(
+                    case_id="poster-01",
+                    profile="rhetoric-poster",
+                    brief=brief("poster-01"),
+                    generation_mode="with_corpus",
+                    snapshot=SNAPSHOT,
+                    reference=REFERENCE,
                 ))
 
     def test_rejection_never_calls_image_provider(self):
@@ -167,8 +185,9 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 case_id="poster-01",
                 profile="rhetoric-poster",
-                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
+                brief=brief("poster-01"),
                 generation_mode="with_corpus",
+                reference_mode="style_grounded",
                 snapshot=SNAPSHOT,
                 reference=REFERENCE,
             ))
@@ -187,8 +206,9 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 case_id="poster-01",
                 profile="rhetoric-poster",
-                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
+                brief=brief("poster-01"),
                 generation_mode="with_corpus",
+                reference_mode="style_grounded",
                 snapshot=SNAPSHOT,
                 reference=REFERENCE,
             ))
@@ -211,8 +231,9 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 case_id="poster-01",
                 profile="rhetoric-poster",
-                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
+                brief=brief("poster-01"),
                 generation_mode="with_corpus",
+                reference_mode="style_grounded",
                 snapshot=SNAPSHOT,
                 reference=REFERENCE,
             ))
@@ -235,8 +256,9 @@ class GraphTests(unittest.TestCase):
             started = app.start(DesignJob(
                 case_id="poster-01",
                 profile="rhetoric-poster",
-                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
+                brief=brief("poster-01"),
                 generation_mode="with_corpus",
+                reference_mode="style_grounded",
                 snapshot=SNAPSHOT,
                 reference=REFERENCE,
             ))
@@ -258,8 +280,9 @@ class GraphTests(unittest.TestCase):
             result = app.start(DesignJob(
                 case_id="poster-01",
                 profile="rhetoric-poster",
-                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
+                brief=brief("poster-01"),
                 generation_mode="with_corpus",
+                reference_mode="style_grounded",
                 snapshot=SNAPSHOT,
                 reference=REFERENCE,
             ))

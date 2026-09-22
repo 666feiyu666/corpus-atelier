@@ -34,15 +34,19 @@ CASES = {
     "慕夏风格女士手表广告": (
         "mucha-watch",
         "rhetoric-poster",
-        ROOT / "experiments/cases/mucha-watch/grounded-brief.json",
+        ROOT / "experiments/cases/mucha-watch/brief.json",
         DEFAULT_REFERENCE,
     ),
     "慕夏启发女士手表广告": (
         "mucha-watch",
         "rhetoric-poster",
-        ROOT / "experiments/cases/mucha-watch/inspired-brief.json",
+        ROOT / "experiments/cases/mucha-watch/brief.json",
         DEFAULT_REFERENCE,
     ),
+}
+CASE_REFERENCE_MODES = {
+    "慕夏风格女士手表广告": "style_grounded",
+    "慕夏启发女士手表广告": "style_inspired",
 }
 TERMINAL_STATUSES = {"completed", "rejected", "discarded", "failed"}
 DESIGN_METHODS = {
@@ -157,7 +161,7 @@ def _change_case() -> None:
     st.session_state.example_generation_mode = (
         "有语料库生成" if has_corpus else "无语料库生成"
     )
-    mode = case_brief.get("reference_mode")
+    mode = CASE_REFERENCE_MODES.get(st.session_state.case_label)
     if mode:
         st.session_state.example_reference_mode = next(
             label for label, value in REFERENCE_MODES.items() if value == mode
@@ -176,7 +180,7 @@ def _reference_field() -> str | None:
     )
 
 
-def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
+def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str | None, str]:
     case_id = st.text_input(
         "Case ID",
         placeholder="例如 reading-group-poster",
@@ -244,17 +248,18 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
         validate_required=False,
     )
     reference_id: str | None = None
+    reference_mode: str | None = None
     if generation_mode == "with_corpus":
         with st.expander("选择参考图", expanded=True):
             reference_id = _reference_field()
         reference_label = st.selectbox(
             "参考图使用策略", list(REFERENCE_MODES), key="general_reference_mode",
         )
-        brief["reference_mode"] = REFERENCE_MODES[reference_label]
-    return DESIGN_METHODS[method], generation_mode, brief, reference_id, case_id
+        reference_mode = REFERENCE_MODES[reference_label]
+    return DESIGN_METHODS[method], generation_mode, brief, reference_id, reference_mode, case_id
 
 
-def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
+def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str | None, str]:
     if "case_label" not in st.session_state:
         st.session_state.case_label = next(iter(CASES))
     if "brief_editor" not in st.session_state:
@@ -270,22 +275,21 @@ def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
         st.text_area("Brief（JSON）", height=280, key="brief_editor")
     brief = parse_brief(st.session_state.brief_editor)
     reference_id: str | None = None
+    reference_mode: str | None = None
     if generation_mode == "with_corpus":
         with st.expander("选择参考图", expanded=True):
             reference_id = _reference_field()
         reference_label = st.selectbox(
             "参考图使用策略", list(REFERENCE_MODES), key="example_reference_mode",
         )
-        brief["reference_mode"] = REFERENCE_MODES[reference_label]
-    else:
-        brief.pop("reference_mode", None)
+        reference_mode = REFERENCE_MODES[reference_label]
     case_id, profile, _, _ = CASES[st.session_state.case_label]
-    return profile, generation_mode, brief, reference_id, case_id
+    return profile, generation_mode, brief, reference_id, reference_mode, case_id
 
 
 def _validate_start_inputs(
     generation_mode: str, brief: dict[str, Any], reference_id: str | None,
-    case_id: str,
+    reference_mode: str | None, case_id: str,
 ) -> None:
     validate_case_id(case_id)
     if "deliverable" in brief:
@@ -300,8 +304,10 @@ def _validate_start_inputs(
             raise ValueError(f"请填写：{'、'.join(missing)}。")
     if generation_mode == "with_corpus" and not reference_id:
         raise ValueError("有语料库生成需要选择一张参考图像。")
-    if brief.get("reference_mode") and not reference_id:
-        raise ValueError("使用参考图模式时，至少选择一张参考图像。")
+    if generation_mode == "with_corpus" and not reference_mode:
+        raise ValueError("有语料库生成需要选择参考图使用策略。")
+    if generation_mode == "without_corpus" and reference_mode is not None:
+        raise ValueError("无语料库生成不能包含参考图使用策略。")
 
 
 def _resume(decision: HumanDecision | FinalDecision, message: str) -> None:
@@ -331,12 +337,18 @@ def _start_page() -> None:
 
     try:
         if start_mode == "新建设计":
-            profile, generation_mode, brief, reference_id, case_id = _new_design_inputs()
+            profile, generation_mode, brief, reference_id, reference_mode, case_id = (
+                _new_design_inputs()
+            )
         else:
-            profile, generation_mode, brief, reference_id, case_id = _example_inputs()
+            profile, generation_mode, brief, reference_id, reference_mode, case_id = (
+                _example_inputs()
+            )
         input_error: Exception | None = None
     except (json.JSONDecodeError, ValueError) as exc:
-        profile, generation_mode, brief, reference_id, case_id = "", "", {}, None, ""
+        profile, generation_mode, brief, reference_id, reference_mode, case_id = (
+            "", "", {}, None, None, ""
+        )
         input_error = exc
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
@@ -344,7 +356,9 @@ def _start_page() -> None:
     try:
         if input_error is not None:
             raise input_error
-        _validate_start_inputs(generation_mode, brief, reference_id, case_id)
+        _validate_start_inputs(
+            generation_mode, brief, reference_id, reference_mode, case_id,
+        )
         reference = None
         snapshot = None
         if generation_mode == "with_corpus":
@@ -361,6 +375,7 @@ def _start_page() -> None:
                 profile=profile,
                 brief=brief,
                 generation_mode=generation_mode,
+                reference_mode=reference_mode,
                 snapshot=snapshot,
                 reference=reference,
             ))

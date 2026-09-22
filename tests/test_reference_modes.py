@@ -16,8 +16,8 @@ REFERENCE_ID = "mucha-poster-124474277"
 REFERENCE = {"format_version": 1, "reference_id": REFERENCE_ID}
 
 
-def load_brief(mode):
-    return json.loads((CASES / f"{mode}-brief.json").read_text(encoding="utf-8"))
+def load_brief():
+    return json.loads((CASES / "brief.json").read_text(encoding="utf-8"))
 
 
 class ReferenceModeTests(unittest.TestCase):
@@ -32,8 +32,9 @@ class ReferenceModeTests(unittest.TestCase):
         result = app.start(DesignJob(
             case_id="mucha-watch",
             profile="rhetoric-poster",
-            brief=load_brief(mode),
+            brief=load_brief(),
             generation_mode="with_corpus",
+            reference_mode=f"style_{mode}",
             snapshot=SNAPSHOT,
             reference=REFERENCE,
         ))
@@ -50,6 +51,10 @@ class ReferenceModeTests(unittest.TestCase):
         self.assertNotIn("evidence_ids", proposal)
         self.assertIn("reference_package", result.artifacts)
         self.assertNotIn("reference_plan", result.artifacts)
+        manifest = json.loads(
+            Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["reference_mode"], "style_grounded")
 
     def test_same_reference_is_used_for_design_and_generation(self):
         app, text, image, result = self._start("grounded")
@@ -64,6 +69,30 @@ class ReferenceModeTests(unittest.TestCase):
             "loose visual inspiration",
             text.design_calls[0]["prompt"],
         )
+
+    def test_without_corpus_uses_the_same_brief_without_reference_instructions(self):
+        with TemporaryDirectory() as directory:
+            text = FakeTextProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=text,
+                image_provider=FakeImageProvider(),
+            )
+            result = app.start(DesignJob(
+                case_id="mucha-watch",
+                profile="rhetoric-poster",
+                brief=load_brief(),
+                generation_mode="without_corpus",
+            ))
+            self.assertEqual(result.status, "awaiting_approval")
+            prompt = text.design_calls[0]["prompt"]
+            self.assertNotIn("reference relationship", prompt.lower())
+            self.assertNotIn("supplied Mucha commercial corpus", prompt)
+            manifest = json.loads(
+                Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["generation_mode"], "without_corpus")
+            self.assertNotIn("reference_mode", manifest)
 
     def test_unknown_reference_id_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "absent from the snapshot"):

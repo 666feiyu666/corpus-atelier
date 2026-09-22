@@ -37,8 +37,13 @@ class StreamlitAppTests(unittest.TestCase):
     def test_bundled_cases_are_available_to_the_page(self):
         poster = load_case("工作坊海报")
         cover = load_case("文章封面")
+        grounded_watch = load_case("慕夏风格女士手表广告")
+        inspired_watch = load_case("慕夏启发女士手表广告")
         self.assertEqual(poster["topic"], "Corpus Atelier")
         self.assertEqual(cover["article_title"], "从语料到视觉修辞")
+        self.assertEqual(grounded_watch, inspired_watch)
+        self.assertNotIn("reference_mode", grounded_watch)
+        self.assertNotIn("corpus", grounded_watch["purpose"].lower())
 
     def test_brief_editor_requires_a_json_object(self):
         self.assertEqual(parse_brief('{"topic": "x"}'), {"topic": "x"})
@@ -111,6 +116,23 @@ class StreamlitAppTests(unittest.TestCase):
             app.selectbox(key="selected_reference_id").value,
             "mucha-poster-124474277",
         )
+        self.assertEqual(
+            app.selectbox(key="example_reference_mode").value,
+            "以共同风格特征为约束",
+        )
+        brief = json.loads(app.text_area(key="brief_editor").value)
+        self.assertNotIn("reference_mode", brief)
+        self.assertNotIn("corpus", brief["purpose"].lower())
+        app.segmented_control(key="example_generation_mode").set_value(
+            "无语料库生成"
+        ).run()
+        self.assertFalse(app.exception)
+        self.assertFalse(any(
+            item.key == "selected_reference_id" for item in app.selectbox
+        ))
+        self.assertFalse(any(
+            item.key == "example_reference_mode" for item in app.selectbox
+        ))
 
     def test_approval_acceptance_flow_renders_each_page_state(self):
         with TemporaryDirectory() as directory:

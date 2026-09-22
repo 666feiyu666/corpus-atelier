@@ -8,12 +8,7 @@
     "setting": {"type": "string"},
     "exact_copy": {"type": "array", "items": {"type": "string"}},
     "constraints": {"type": "array", "items": {"type": "string"}},
-    "preferences": {"type": "array", "items": {"type": "string"}},
-    "reference_mode": {
-      "type": "string",
-      "enum": ["style_grounded", "style_inspired"],
-      "description": "How the designer and image renderer should use the selected image."
-    }
+    "preferences": {"type": "array", "items": {"type": "string"}}
   },
   "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"]
 }

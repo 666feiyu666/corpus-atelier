@@ -24,8 +24,7 @@
         }
       },
       "required": ["aspect_ratio"]
-    },
-    "reference_mode": {"type": "string", "enum": ["style_grounded", "style_inspired"]}
+    }
   },
   "required": ["deliverable", "purpose", "audience", "use_context", "exact_copy", "constraints", "preferences", "canvas"]
 }

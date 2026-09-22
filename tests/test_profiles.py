@@ -76,11 +76,9 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate({"topic": "incomplete"}, profile.brief_schema)
 
-    def test_watch_briefs_are_paired_except_for_reference_mode(self):
+    def test_watch_has_one_mode_independent_brief(self):
         root = Path(__file__).resolve().parents[1] / "experiments/cases/mucha-watch"
-        grounded = json.loads((root / "grounded-brief.json").read_text(encoding="utf-8"))
-        inspired = json.loads((root / "inspired-brief.json").read_text(encoding="utf-8"))
-        self.assertEqual(grounded.pop("reference_mode"), "style_grounded")
-        self.assertEqual(inspired.pop("reference_mode"), "style_inspired")
-        self.assertEqual(grounded, inspired)
-        validate({**grounded, "reference_mode": "style_grounded"}, "poster-brief.schema.json")
+        brief = json.loads((root / "brief.json").read_text(encoding="utf-8"))
+        self.assertNotIn("reference_mode", brief)
+        self.assertNotIn("corpus", brief["purpose"].lower())
+        validate(brief, "poster-brief.schema.json")

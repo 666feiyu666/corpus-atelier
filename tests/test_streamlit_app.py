@@ -7,7 +7,7 @@ from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 from corpus_atelier.streamlit_app import (
-    build_general_brief, delivery_ratio, load_case, parse_brief, review_points,
+    build_general_brief, delivery_ratio, load_case, parse_brief,
 )
 from corpus_atelier.state import RunResult
 
@@ -44,16 +44,6 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(parse_brief('{"topic": "x"}'), {"topic": "x"})
         with self.assertRaisesRegex(ValueError, "JSON 对象"):
             parse_brief("[]")
-
-    def test_review_points_hide_internal_review_structure(self):
-        review = {
-            "observations": ["Title is legible."],
-            "priority_actions": ["Increase spacing."],
-            "interpretations": ["Internal interpretation."],
-        }
-        self.assertEqual(
-            review_points(review), ["Title is legible.", "Increase spacing."],
-        )
 
     def test_general_brief_keeps_delivery_context_open(self):
         brief = build_general_brief(
@@ -130,16 +120,9 @@ class StreamlitAppTests(unittest.TestCase):
                 "chosen_direction": "A restrained editorial composition.",
                 "design_rationale": "Clear hierarchy for a small screen.",
             }), encoding="utf-8")
-            review = run_dir / "review.json"
-            review.write_text(json.dumps({
-                "verdict": "accept", "observations": ["The title is legible."],
-                "priority_actions": [],
-            }), encoding="utf-8")
             image = run_dir / "image.png"
             Image.new("RGB", (12, 18), "white").save(image)
-            artifacts = {
-                "proposal": str(proposal), "review": str(review), "image": str(image),
-            }
+            artifacts = {"proposal": str(proposal), "image": str(image)}
             result = RunResult(
                 run_id="ui-test", status="awaiting_approval", run_dir=run_dir,
                 message="awaiting approval", artifacts=artifacts,
@@ -156,6 +139,9 @@ class StreamlitAppTests(unittest.TestCase):
             app.button[0].click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "查看实验结果")
+            self.assertFalse(any(
+                "自动审查" in caption.value for caption in app.caption
+            ))
 
             app.button[0].click().run()
             self.assertFalse(app.exception)

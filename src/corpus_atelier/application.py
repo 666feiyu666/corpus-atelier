@@ -1,4 +1,4 @@
-"""UI-neutral application service for one review-gated generation experiment."""
+"""UI-neutral application service for one approval-gated generation experiment."""
 
 from __future__ import annotations
 
@@ -14,10 +14,7 @@ from .artifacts.records import write_json
 from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
 from .design.presentation import render
 from .design.canvas import resolve_canvas
-from .design.prompt_compiler import (
-    compile_generation_prompt,
-    compile_review_prompt,
-)
+from .design.prompt_compiler import compile_generation_prompt
 from .design.rendering import normalize_canvas
 from .design.synthesis import synthesize
 from .design.validation import validate, validate_proposal
@@ -274,43 +271,18 @@ class _Runtime:
         )
         self.store.update(
             run_dir,
-            "reviewing",
+            "awaiting_final_decision",
             latest_image=str(image_path),
             image_sha256=digest_file(image_path),
         )
-        return {"image_path": str(image_path), "status": "reviewing"}
-
-    def review(self, state):
-        run_dir = self._dir(state)
-        profile = get_profile(state["profile"])
-        prompt = compile_review_prompt(profile, state["proposal"])
-        self.store.text(run_dir, "review/prompt.md", prompt)
-        self.store.json(run_dir, "review/request.json", {
-            "schema": profile.review_schema,
-            "image": state["image_path"],
-            "image_sha256": digest_file(Path(state["image_path"])),
-        })
-        review, response = self.text_provider.review(
-            Path(state["image_path"]), prompt, schema_name=profile.review_schema,
-        )
-        validate(review, profile.review_schema)
-        self.store.json(run_dir, "review/response.json", response)
-        self.store.json(run_dir, "review/review.json", review)
-        self.store.register(
-            run_dir,
-            review_request="review/request.json",
-            review_prompt="review/prompt.md",
-            review_response="review/response.json",
-            review="review/review.json",
-        )
-        return {"review": review, "status": "awaiting_final_decision"}
+        return {"image_path": str(image_path), "status": "awaiting_final_decision"}
 
     def final_decision(self, state):
         run_dir = self._dir(state)
         payload = {
             "run_id": state["run_id"],
             "image": state["image_path"],
-            "review": state["review"],
+            "image_sha256": digest_file(Path(state["image_path"])),
         }
         self.store.update(run_dir, "awaiting_final_decision", final_decision_request=payload)
         decision = interrupt(payload)
@@ -321,8 +293,8 @@ class _Runtime:
         action = decision["action"]
         record = {**decision, "decided_at": datetime.now(timezone.utc).isoformat()}
         terminal = "completed" if action == "accept" else "discarded"
-        self.store.json(run_dir, "review/final-decision.json", record)
-        self.store.register(run_dir, final_decision="review/final-decision.json")
+        self.store.json(run_dir, "decision/final-decision.json", record)
+        self.store.register(run_dir, final_decision="decision/final-decision.json")
         self.store.update(
             run_dir,
             terminal,

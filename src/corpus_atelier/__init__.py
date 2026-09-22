@@ -1,4 +1,4 @@
-"""Corpus Atelier: review-gated design experiments with optional corpus grounding."""
+"""Corpus Atelier: approval-gated design experiments with optional corpus grounding."""
 
 from .application import CorpusAtelierApplication
 

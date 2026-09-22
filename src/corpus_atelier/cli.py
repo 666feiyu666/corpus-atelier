@@ -29,7 +29,7 @@ def _parser() -> argparse.ArgumentParser:
     validate_cmd.add_argument("--brief", required=True, type=Path)
     validate_cmd.add_argument("--reference", type=Path)
 
-    run = commands.add_parser("run", help="Run one review-gated design experiment.")
+    run = commands.add_parser("run", help="Run one approval-gated design experiment.")
     run.add_argument("--case-id", required=True)
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)

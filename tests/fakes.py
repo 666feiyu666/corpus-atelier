@@ -13,6 +13,7 @@ class FakeTextProvider:
 
     def __init__(self):
         self.design_calls = []
+        self.review_calls = 0
 
     def propose(self, prompt: str, *, schema_name: str,
                 reference_paths: list[Path] | None = None):
@@ -51,6 +52,7 @@ class FakeTextProvider:
         return value, {"status": "completed", "provider": "fake"}
 
     def review(self, image_path: Path, prompt: str, *, schema_name: str):
+        self.review_calls += 1
         return {
             "verdict": "accept",
             "observations": ["The title is dominant and the central motif is visible."],

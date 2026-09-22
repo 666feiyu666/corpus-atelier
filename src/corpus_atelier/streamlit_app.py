@@ -1,4 +1,4 @@
-"""Streamlit adapter for the review-gated, single-generation workflow."""
+"""Streamlit adapter for the approval-gated, single-generation workflow."""
 
 from __future__ import annotations
 
@@ -139,13 +139,6 @@ def read_json_artifact(result: RunResult, name: str) -> dict[str, Any]:
     if not path:
         return {}
     return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def review_points(review: dict[str, Any]) -> list[str]:
-    """Return concise, user-facing review findings."""
-    points = list(review.get("observations", []))
-    points.extend(review.get("priority_actions", []))
-    return points
 
 
 def _reset() -> None:
@@ -324,21 +317,6 @@ def _resume(decision: HumanDecision | FinalDecision, message: str) -> None:
     st.rerun()
 
 
-def _show_review(result: RunResult) -> None:
-    review = read_json_artifact(result, "review")
-    if not review:
-        return
-    verdict = {"accept": "建议接受", "revise": "建议重新实验", "reject": "建议放弃"}.get(
-        review.get("verdict"), "审查完成",
-    )
-    st.caption(f"自动审查：{verdict}")
-    points = review_points(review)
-    if points:
-        with st.expander("查看审查要点"):
-            for point in points:
-                st.write(f"- {point}")
-
-
 def _show_image(result: RunResult) -> None:
     image = result.artifacts.get("image")
     if image:
@@ -422,7 +400,7 @@ def _approval_page(result: RunResult) -> None:
         st.info(f"画布：{ratio[0]}:{ratio[1]} · {canvas['size']} px")
     approve, reject = st.columns(2)
     if approve.button("批准并生成", type="primary", width="stretch"):
-        _resume(HumanDecision(True, reviewer="streamlit-user"), "正在生成并审查图片…")
+        _resume(HumanDecision(True, reviewer="streamlit-user"), "正在生成图片…")
     if reject.button("放弃", width="stretch"):
         _resume(HumanDecision(False, reviewer="streamlit-user"), "正在结束本次实验…")
 
@@ -430,7 +408,6 @@ def _approval_page(result: RunResult) -> None:
 def _final_decision_page(result: RunResult) -> None:
     st.subheader("查看实验结果")
     _show_image(result)
-    _show_review(result)
     accept, discard = st.columns(2)
     if accept.button("接受结果", type="primary", width="stretch"):
         _resume(FinalDecision("accept", reviewer="streamlit-user"), "正在保存决定…")

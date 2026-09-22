@@ -26,9 +26,10 @@ class GraphTests(unittest.TestCase):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         image = FakeImageProvider()
+        text = FakeTextProvider()
         app = CorpusAtelierApplication(
             runs_root=Path(temporary.name),
-            text_provider=FakeTextProvider(),
+            text_provider=text,
             image_provider=image,
         )
         case_brief = brief(case)
@@ -46,8 +47,15 @@ class GraphTests(unittest.TestCase):
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
         self.assertEqual(result.status, "awaiting_final_decision")
         self.assertEqual(image.calls, 1)
+        self.assertEqual(text.review_calls, 0)
         self.assertIn("image", result.artifacts)
-        self.assertIn("review", result.artifacts)
+        self.assertNotIn("review", result.artifacts)
+        pending_manifest = json.loads(
+            Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
+        )
+        self.assertIn("image_sha256", pending_manifest["final_decision_request"])
+        self.assertNotIn("review", pending_manifest["final_decision_request"])
+        self.assertFalse((result.run_dir / "review").exists())
         from PIL import Image
         with Image.open(result.artifacts["image"]) as opened:
             expected = (2, 3) if profile == "rhetoric-poster" else (47, 20)
@@ -58,6 +66,12 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(result.run_dir.parent.name, case)
         manifest = json.loads(Path(result.artifacts["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["case_id"], case)
+        self.assertEqual(manifest["workflow_version"], 6)
+        self.assertNotIn("review", manifest["artifacts"])
+        self.assertEqual(
+            manifest["artifacts"]["final_decision"],
+            "decision/final-decision.json",
+        )
         return result
 
     def test_rhetoric_graph_end_to_end(self):

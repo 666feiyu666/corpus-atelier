@@ -38,13 +38,18 @@ class StreamlitAppTests(unittest.TestCase):
         poster = load_case("工作坊海报")
         cover = load_case("文章封面")
         watch = load_case("AURELIA 女士手表广告")
+        therapy = load_case("Therapy for Desire")
         self.assertEqual(list(CASES), [
             "工作坊海报", "文章封面", "AURELIA 女士手表广告",
+            "Therapy for Desire",
         ])
         self.assertEqual(poster["topic"], "Corpus Atelier")
         self.assertEqual(cover["article_title"], "从语料到视觉修辞")
         self.assertNotIn("reference_mode", watch)
         self.assertNotIn("corpus", watch["purpose"].lower())
+        self.assertEqual(therapy["deliverable"], "微信公众号封面")
+        self.assertEqual(CASES["Therapy for Desire"].case_id, "therapy-for-desire")
+        self.assertEqual(CASES["Therapy for Desire"].profile, "art-graphic")
 
     def test_brief_editor_requires_a_json_object(self):
         self.assertEqual(parse_brief('{"topic": "x"}'), {"topic": "x"})
@@ -104,6 +109,7 @@ class StreamlitAppTests(unittest.TestCase):
         app.segmented_control(key="start_mode").set_value("使用示例").run()
         self.assertEqual(app.selectbox(key="case_label").options, [
             "工作坊海报", "文章封面", "AURELIA 女士手表广告",
+            "Therapy for Desire",
         ])
         app.selectbox(key="case_label").select("文章封面").run()
         self.assertFalse(app.exception)
@@ -136,6 +142,24 @@ class StreamlitAppTests(unittest.TestCase):
         ))
         self.assertFalse(any(
             item.key == "example_reference_mode" for item in app.selectbox
+        ))
+
+    def test_discovered_therapy_case_is_selectable(self):
+        app = AppTest.from_file(
+            str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
+        ).run()
+        app.segmented_control(key="start_mode").set_value("使用示例").run()
+        app.selectbox(key="case_label").select("Therapy for Desire").run()
+
+        self.assertFalse(app.exception)
+        brief = json.loads(app.text_area(key="brief_editor").value)
+        self.assertEqual(brief["deliverable"], "微信公众号封面")
+        self.assertEqual(
+            app.segmented_control(key="example_generation_mode").value,
+            "无语料库生成",
+        )
+        self.assertFalse(any(
+            item.key == "selected_reference_id" for item in app.selectbox
         ))
 
     def test_approval_acceptance_flow_renders_each_page_state(self):

@@ -11,36 +11,14 @@ from dotenv import load_dotenv
 
 from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.artifacts.store import validate_case_id
+from corpus_atelier.cases import discover_cases
 from corpus_atelier.materials import list_references
 from corpus_atelier.state import DesignJob, FinalDecision, HumanDecision, RunResult
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
-DEFAULT_REFERENCE = "mucha-poster-124474277"
-CASES = {
-    "工作坊海报": (
-        "poster-01",
-        "rhetoric-poster",
-        ROOT / "experiments/cases/poster-01/brief.json",
-        None,
-    ),
-    "文章封面": (
-        "article-cover-01",
-        "art-article-cover",
-        ROOT / "experiments/cases/article-cover-01/brief.json",
-        None,
-    ),
-    "AURELIA 女士手表广告": (
-        "mucha-watch",
-        "rhetoric-poster",
-        ROOT / "experiments/cases/mucha-watch/brief.json",
-        DEFAULT_REFERENCE,
-    ),
-}
-CASE_REFERENCE_MODES = {
-    "AURELIA 女士手表广告": "style_grounded",
-}
+CASES = discover_cases(ROOT / "experiments/cases")
 TERMINAL_STATUSES = {"completed", "rejected", "discarded", "failed"}
 DESIGN_METHODS = {
     "修辞导向": "rhetoric-graphic",
@@ -72,7 +50,7 @@ GENERATION_MODES = {
 
 def load_case(label: str) -> dict[str, Any]:
     """Load one bundled example brief."""
-    return json.loads(CASES[label][2].read_text(encoding="utf-8"))
+    return json.loads(CASES[label].brief_path.read_text(encoding="utf-8"))
 
 
 @st.cache_data(max_entries=4)
@@ -151,17 +129,17 @@ def _reset() -> None:
 
 
 def _change_case() -> None:
-    _, _, _, defaults = CASES[st.session_state.case_label]
+    selected = CASES[st.session_state.case_label]
     case_brief = load_case(st.session_state.case_label)
     st.session_state.brief_editor = json.dumps(
         case_brief, ensure_ascii=False, indent=2,
     )
-    st.session_state.selected_reference_id = defaults
-    has_corpus = defaults is not None
+    st.session_state.selected_reference_id = selected.default_reference_id
+    has_corpus = selected.default_reference_id is not None
     st.session_state.example_generation_mode = (
         "有语料库生成" if has_corpus else "无语料库生成"
     )
-    mode = CASE_REFERENCE_MODES.get(st.session_state.case_label)
+    mode = selected.default_reference_mode
     if mode:
         st.session_state.example_reference_mode = next(
             label for label, value in REFERENCE_MODES.items() if value == mode
@@ -260,7 +238,7 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str | No
 
 
 def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str | None, str]:
-    if "case_label" not in st.session_state:
+    if st.session_state.get("case_label") not in CASES:
         st.session_state.case_label = next(iter(CASES))
     if "brief_editor" not in st.session_state:
         _change_case()
@@ -283,8 +261,15 @@ def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str | None,
             "参考图使用策略", list(REFERENCE_MODES), key="example_reference_mode",
         )
         reference_mode = REFERENCE_MODES[reference_label]
-    case_id, profile, _, _ = CASES[st.session_state.case_label]
-    return profile, generation_mode, brief, reference_id, reference_mode, case_id
+    selected = CASES[st.session_state.case_label]
+    return (
+        selected.profile,
+        generation_mode,
+        brief,
+        reference_id,
+        reference_mode,
+        selected.case_id,
+    )
 
 
 def _validate_start_inputs(

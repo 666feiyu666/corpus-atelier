@@ -9,10 +9,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .application import CorpusAtelierApplication
-from .artifacts.records import write_json, write_text
-from .design.prompt_compiler import compile_reference_plan_prompt
+from .artifacts.records import write_json
 from .design.validation import validate
-from .materials import build_material_package
+from .materials import build_reference_package
 from .registry import PROFILES, get_profile
 from .state import DesignJob, FinalDecision, HumanDecision
 
@@ -28,7 +27,7 @@ def _parser() -> argparse.ArgumentParser:
     validate_cmd = commands.add_parser("validate", help="Validate inputs without model calls.")
     validate_cmd.add_argument("--profile", required=True, choices=PROFILES)
     validate_cmd.add_argument("--brief", required=True, type=Path)
-    validate_cmd.add_argument("--materials", type=Path)
+    validate_cmd.add_argument("--reference", type=Path)
 
     run = commands.add_parser("run", help="Run one review-gated design experiment.")
     run.add_argument("--profile", required=True, choices=PROFILES)
@@ -38,14 +37,13 @@ def _parser() -> argparse.ArgumentParser:
         choices=("without_corpus", "with_corpus"),
         default="without_corpus",
     )
-    run.add_argument("--materials", type=Path)
+    run.add_argument("--reference", type=Path)
     run.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
 
     preview = commands.add_parser(
-        "preview-materials", help="Resolve selected materials without provider calls.",
+        "preview-reference", help="Resolve one selected reference without provider calls.",
     )
-    preview.add_argument("--brief", required=True, type=Path)
-    preview.add_argument("--materials", required=True, type=Path)
+    preview.add_argument("--reference", required=True, type=Path)
     preview.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
     preview.add_argument("--output", required=True, type=Path)
 
@@ -80,28 +78,21 @@ def main(argv=None) -> int:
     if args.command == "validate":
         profile = get_profile(args.profile)
         validate(_read_object(args.brief, "Brief"), profile.brief_schema)
-        if args.materials:
+        if args.reference:
             validate(
-                _read_object(args.materials, "Material selection"),
-                "material-selection.schema.json",
+                _read_object(args.reference, "Reference selection"),
+                "reference-selection.schema.json",
             )
         print(f"Valid {profile.name} brief: {args.brief.resolve()}")
         return 0
 
-    if args.command == "preview-materials":
-        brief = _read_object(args.brief, "Brief")
-        selection = _read_object(args.materials, "Material selection")
-        package, _ = build_material_package(args.snapshot, selection)
+    if args.command == "preview-reference":
+        selection = _read_object(args.reference, "Reference selection")
+        package, _ = build_reference_package(args.snapshot, selection)
         output = args.output.resolve()
-        write_json(output / "material-selection.json", selection)
-        write_json(output / "material-package.json", package)
-        mode = brief.get("reference_mode")
-        if mode:
-            prompt = compile_reference_plan_prompt(
-                mode=mode, brief=brief, materials=package,
-            )
-            write_text(output / "reference-plan-prompt.md", prompt)
-        print(f"Material preview: {output}")
+        write_json(output / "reference-selection.json", selection)
+        write_json(output / "reference-package.json", package)
+        print(f"Reference preview: {output}")
         return 0
 
     app = CorpusAtelierApplication(
@@ -113,16 +104,16 @@ def main(argv=None) -> int:
         return 0
 
     load_dotenv()
-    materials = (
-        _read_object(args.materials, "Material selection")
-        if args.materials is not None else None
+    reference = (
+        _read_object(args.reference, "Reference selection")
+        if args.reference is not None else None
     )
     result = app.start(DesignJob(
         profile=args.profile,
         brief=_read_object(args.brief, "Brief"),
         generation_mode=args.generation_mode,
         snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
-        materials=materials,
+        reference=reference,
     ))
     while True:
         _print_result(result)

@@ -16,6 +16,5 @@ own without the design_rationale.
   texture, imagery, and atmosphere needed to realize the design.
 - Write allowed_variation and exclusions as direct rendering constraints. Make clear what may
   change and what must not appear.
-- When a reference plan is supplied, translate its approved relationships into visible design
-  choices. Do not assume that evidence IDs or analytical claims alone tell the renderer what
-  to draw.
+- When a reference image is supplied, make image_spec describe the intended new image rather
+  than an analysis of the reference.

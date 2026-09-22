@@ -11,10 +11,9 @@ from tests.fakes import FakeImageProvider, FakeTextProvider
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
 CASES = ROOT / "experiments/cases"
-MATERIALS = {
+REFERENCE = {
     "format_version": 1,
-    "knowledge_ids": ["mucha-commercial-lettering-image-integration"],
-    "reference_ids": [],
+    "reference_id": "mucha-poster-124474277",
 }
 
 
@@ -32,12 +31,14 @@ class GraphTests(unittest.TestCase):
             text_provider=FakeTextProvider(),
             image_provider=image,
         )
+        case_brief = brief(case)
+        case_brief["reference_mode"] = "style_grounded"
         result = app.start(DesignJob(
             profile=profile,
-            brief=brief(case),
+            brief=case_brief,
             generation_mode="with_corpus",
             snapshot=SNAPSHOT,
-            materials=MATERIALS,
+            reference=REFERENCE,
         ))
         self.assertEqual(result.status, "awaiting_approval")
         self.assertEqual(image.calls, 0)
@@ -61,7 +62,7 @@ class GraphTests(unittest.TestCase):
     def test_artistic_profile_end_to_end(self):
         self._run("art-article-cover", "article-cover-01")
 
-    def test_open_graphic_profile_uses_designer_canvas_without_corpus(self):
+    def test_open_graphic_profile_uses_brief_canvas_without_corpus(self):
         with TemporaryDirectory() as directory:
             image = FakeImageProvider()
             app = CorpusAtelierApplication(
@@ -77,7 +78,7 @@ class GraphTests(unittest.TestCase):
                 "exact_copy": ["Design for context"],
                 "constraints": [],
                 "preferences": [],
-                "canvas": {"mode": "auto"},
+                "canvas": {"aspect_ratio": {"width": 4, "height": 5}},
             }
             result = app.start(DesignJob(
                 profile="rhetoric-graphic",
@@ -85,9 +86,9 @@ class GraphTests(unittest.TestCase):
                 generation_mode="without_corpus",
             ))
             self.assertEqual(result.status, "awaiting_approval")
-            self.assertNotIn("materials_package", result.artifacts)
+            self.assertNotIn("reference_package", result.artifacts)
             prompt = Path(result.artifacts["design_prompt"]).read_text(encoding="utf-8")
-            self.assertNotIn("Untrusted selected corpus materials", prompt)
+            self.assertNotIn("Untrusted selected visual reference", prompt)
             manifest = json.loads(Path(result.artifacts["manifest"]).read_text(encoding="utf-8"))
             self.assertEqual(manifest["generation_mode"], "without_corpus")
             self.assertNotIn("atlas_snapshot", manifest)
@@ -108,30 +109,29 @@ class GraphTests(unittest.TestCase):
                 text_provider=FakeTextProvider(),
                 image_provider=FakeImageProvider(),
             )
-            with self.assertRaisesRegex(ValueError, "cannot include a snapshot or materials"):
+            with self.assertRaisesRegex(ValueError, "cannot include a snapshot or reference"):
                 app.start(DesignJob(
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="without_corpus",
                     snapshot=SNAPSHOT,
-                    materials=MATERIALS,
+                    reference=REFERENCE,
                 ))
-            with self.assertRaisesRegex(ValueError, "require a snapshot and material selection"):
+            with self.assertRaisesRegex(ValueError, "require a snapshot and reference selection"):
                 app.start(DesignJob(
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="with_corpus",
                 ))
-            with self.assertRaisesRegex(ValueError, "at least one selected material"):
+            with self.assertRaisesRegex(ValueError, "Invalid reference-selection"):
                 app.start(DesignJob(
                     profile="rhetoric-poster",
                     brief=brief("poster-01"),
                     generation_mode="with_corpus",
                     snapshot=SNAPSHOT,
-                    materials={
+                    reference={
                         "format_version": 1,
-                        "knowledge_ids": [],
-                        "reference_ids": [],
+                        "reference_id": "",
                     },
                 ))
 
@@ -145,10 +145,10 @@ class GraphTests(unittest.TestCase):
             )
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
-                brief=brief("poster-01"),
+                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
-                materials=MATERIALS,
+                reference=REFERENCE,
             ))
             result = app.resume(started.run_id, HumanDecision(False, reviewer="test"))
             self.assertEqual(result.status, "rejected")
@@ -164,10 +164,10 @@ class GraphTests(unittest.TestCase):
             )
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
-                brief=brief("poster-01"),
+                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
-                materials=MATERIALS,
+                reference=REFERENCE,
             ))
             with self.assertRaises(RuntimeError):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
@@ -185,10 +185,10 @@ class GraphTests(unittest.TestCase):
             )
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
-                brief=brief("poster-01"),
+                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
-                materials=MATERIALS,
+                reference=REFERENCE,
             ))
             prompt = started.run_dir / "generation/prompt.md"
             prompt.write_text(
@@ -198,7 +198,7 @@ class GraphTests(unittest.TestCase):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 0)
 
-    def test_edited_material_package_invalidates_approval(self):
+    def test_edited_reference_package_invalidates_approval(self):
         with TemporaryDirectory() as directory:
             image = FakeImageProvider()
             app = CorpusAtelierApplication(
@@ -208,14 +208,14 @@ class GraphTests(unittest.TestCase):
             )
             started = app.start(DesignJob(
                 profile="rhetoric-poster",
-                brief=brief("poster-01"),
+                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
-                materials=MATERIALS,
+                reference=REFERENCE,
             ))
-            package = Path(started.artifacts["materials_package"])
+            package = Path(started.artifacts["reference_package"])
             value = json.loads(package.read_text(encoding="utf-8"))
-            value["knowledge"][0]["title"] = "changed"
+            value["reference"]["title"] = "changed"
             package.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "changed after preview"):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
@@ -230,10 +230,10 @@ class GraphTests(unittest.TestCase):
             )
             result = app.start(DesignJob(
                 profile="rhetoric-poster",
-                brief=brief("poster-01"),
+                brief={**brief("poster-01"), "reference_mode": "style_grounded"},
                 generation_mode="with_corpus",
                 snapshot=SNAPSHOT,
-                materials=MATERIALS,
+                reference=REFERENCE,
             ))
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
             result = app.resume(result.run_id, FinalDecision("discard", reviewer="test"))

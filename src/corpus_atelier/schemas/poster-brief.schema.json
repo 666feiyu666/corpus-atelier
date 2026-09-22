@@ -12,24 +12,8 @@
     "reference_mode": {
       "type": "string",
       "enum": ["style_grounded", "style_inspired"],
-      "description": "Explicit reference relationship. Routing is deterministic when present."
-    },
-    "reference_scope": {
-      "type": "string",
-      "enum": ["selected_snapshot_images", "retrieved_snapshot_images"],
-      "description": "Complete visual references explicitly selected from the snapshot. The retrieved value is accepted for archived briefs."
-    },
-    "reference_count": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 3,
-      "description": "Number of explicitly selected reference images used for planning and generation."
+      "description": "How the designer and image renderer should use the selected image."
     }
   },
-  "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"],
-  "dependentRequired": {
-    "reference_mode": ["reference_scope", "reference_count"],
-    "reference_scope": ["reference_mode", "reference_count"],
-    "reference_count": ["reference_mode", "reference_scope"]
-  }
+  "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"]
 }

@@ -16,14 +16,13 @@ from .design.presentation import render
 from .design.canvas import resolve_canvas
 from .design.prompt_compiler import (
     compile_generation_prompt,
-    compile_reference_plan_prompt,
     compile_review_prompt,
 )
 from .design.rendering import normalize_canvas
 from .design.synthesis import synthesize
-from .design.validation import validate, validate_proposal, validate_reference_plan
+from .design.validation import validate, validate_proposal
 from .graphs import build_graph
-from .materials import build_material_package, load_snapshot
+from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
 from .state import DesignJob, RunResult, RunSummary
@@ -44,85 +43,27 @@ class _Runtime:
         self.store.update(run_dir, "preparing_inputs")
         if state["generation_mode"] == "without_corpus":
             return {
-                "materials_package": None,
+                "reference_package": None,
                 "reference_image_paths": [],
                 "status": "designing",
             }
 
-        self.store.update(run_dir, "loading_materials")
-        package, paths = build_material_package(
-            Path(state["snapshot"]), state["materials_selection"],
+        self.store.update(run_dir, "loading_reference")
+        package, path = build_reference_package(
+            Path(state["snapshot"]), state["reference_selection"],
         )
-        reference_mode = state["brief"].get("reference_mode")
-        expected_count = state["brief"].get("reference_count", 0)
-        actual_count = len(package["references"])
-        if reference_mode and actual_count != expected_count:
-            raise ValueError(
-                "The explicit reference selection must match brief.reference_count."
-            )
-        if not reference_mode and actual_count:
-            raise ValueError("Reference images require an explicit reference_mode in the brief.")
-        self.store.json(run_dir, "materials/selection.json", state["materials_selection"])
-        self.store.json(run_dir, "materials/package.json", package)
+        self.store.json(run_dir, "reference/selection.json", state["reference_selection"])
+        self.store.json(run_dir, "reference/package.json", package)
         self.store.register(
             run_dir,
-            materials_selection="materials/selection.json",
-            materials_package="materials/package.json",
+            reference_selection="reference/selection.json",
+            reference_package="reference/package.json",
         )
         return {
-            "materials_package": package,
-            "reference_image_paths": [str(path) for path in paths],
-            "status": "planning_references" if reference_mode else "designing",
+            "reference_package": package,
+            "reference_image_paths": [str(path)],
+            "status": "designing",
         }
-
-    def plan_references(self, state):
-        mode = state["brief"].get("reference_mode")
-        schemas = {
-            "style_grounded": "style-grounded-plan.schema.json",
-            "style_inspired": "style-inspired-plan.schema.json",
-        }
-        if mode not in schemas:
-            raise ValueError(f"Unsupported reference mode: {mode!r}.")
-        run_dir = self._dir(state)
-        self.store.update(run_dir, "planning_references")
-        schema = schemas[mode]
-        prompt = compile_reference_plan_prompt(
-            mode=mode, brief=state["brief"], materials=state["materials_package"],
-        )
-        request = {
-            "model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
-            "schema": schema,
-            "reference_mode": mode,
-            "references": [
-                {"id": row["id"], "sha256": row["sha256"]}
-                for row in state["materials_package"]["references"]
-            ],
-        }
-        self.store.json(run_dir, "reference/request.json", request)
-        self.store.text(run_dir, "reference/prompt.md", prompt)
-        plan, response = self.text_provider.plan_references(
-            prompt,
-            [Path(path) for path in state["reference_image_paths"]],
-            schema_name=schema,
-        )
-        self.store.json(run_dir, "reference/response.json", response)
-        self.store.json(run_dir, "reference/plan.json", plan)
-        available_ids = {
-            row["id"]
-            for kind in ("references", "knowledge")
-            for row in state["materials_package"][kind]
-        }
-        validate_reference_plan(
-            plan, schema_name=schema, mode=mode, available_ids=available_ids,
-        )
-        self.store.register(
-            run_dir,
-            reference_request="reference/request.json",
-            reference_prompt="reference/prompt.md",
-            reference_response="reference/response.json",
-            reference_plan="reference/plan.json",
-        )
-        return {"reference_plan_prompt": prompt, "reference_plan": plan, "status": "designing"}
 
     @staticmethod
     def _generation_binding(state, *, proposal, prompt):
@@ -135,11 +76,9 @@ class _Runtime:
             "canvas": state["canvas"],
         }
         if state["generation_mode"] == "with_corpus":
-            binding["materials"] = state["materials_package"]
-        if state.get("reference_plan") is not None:
             binding.update(
+                reference=state["reference_package"],
                 reference_mode=state["brief"]["reference_mode"],
-                reference_plan=state["reference_plan"],
             )
         return binding
 
@@ -152,31 +91,21 @@ class _Runtime:
             prompt, proposal, response = synthesize(
                 profile,
                 state["brief"],
-                state["materials_package"],
+                state["reference_package"],
                 self.text_provider,
-                state.get("reference_plan"),
+                [Path(path) for path in state.get("reference_image_paths", [])],
             )
             request = {
                 "model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
                 "profile": profile.name,
                 "schema": profile.proposal_schema,
+                "references": state.get("reference_package"),
             }
             self.store.json(run_dir, "design/request.json", request)
             self.store.text(run_dir, "design/prompt.md", prompt)
             self.store.json(run_dir, "design/response.json", response)
             self.store.json(run_dir, "design/proposal.json", proposal)
             proposal = validate_proposal(proposal, profile.proposal_schema)
-            materials = state.get("materials_package")
-            available_ids = {
-                row["id"]
-                for kind in ("references", "knowledge")
-                for row in (materials or {}).get(kind, [])
-            }
-            if state["generation_mode"] == "without_corpus" and proposal["evidence_ids"]:
-                raise ValueError("A without-corpus proposal cannot cite corpus evidence.")
-            unknown = sorted(set(proposal["evidence_ids"]) - available_ids)
-            if unknown:
-                raise ValueError(f"Design proposal cites unavailable evidence IDs: {unknown}.")
             self.store.text(run_dir, "design/presentation.md", render(proposal))
             self.store.register(
                 run_dir,
@@ -190,9 +119,7 @@ class _Runtime:
                 self.store.update(run_dir, proposal["status"])
                 raise ValueError(f"Design proposal is blocked: {proposal['status']}.")
             if profile.deliverable == "graphic-design.v1":
-                generation_size, output_ratio, canvas = resolve_canvas(
-                    proposal["image_spec"], state["brief"],
-                )
+                generation_size, output_ratio, canvas = resolve_canvas(state["brief"])
             else:
                 generation_size = profile.default_size
                 output_ratio = profile.output_ratio
@@ -203,7 +130,7 @@ class _Runtime:
                 }
             self.store.json(run_dir, "generation/canvas.json", canvas)
             generation_prompt = compile_generation_prompt(
-                proposal, state.get("reference_plan"),
+                proposal, state["brief"].get("reference_mode"),
             )
             self.store.text(run_dir, "generation/prompt.md", generation_prompt)
             self.store.register(
@@ -262,15 +189,10 @@ class _Runtime:
         }
         if state["generation_mode"] == "with_corpus":
             payload["artifacts"].update({
-                "materials_selection": str((run_dir / "materials/selection.json").resolve()),
-                "materials_package": str((run_dir / "materials/package.json").resolve()),
+                "reference_selection": str((run_dir / "reference/selection.json").resolve()),
+                "reference_package": str((run_dir / "reference/package.json").resolve()),
             })
-        if state.get("reference_plan") is not None:
             payload["reference_mode"] = state["brief"]["reference_mode"]
-            payload["artifacts"].update({
-                "reference_plan": str((run_dir / "reference/plan.json").resolve()),
-                "reference_prompt": str((run_dir / "reference/prompt.md").resolve()),
-            })
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
@@ -304,23 +226,17 @@ class _Runtime:
             raise ValueError("Reviewed generation artifacts changed after preview.")
         if state["generation_mode"] == "with_corpus":
             saved_selection = json.loads(
-                (run_dir / "materials/selection.json").read_text(encoding="utf-8")
+                (run_dir / "reference/selection.json").read_text(encoding="utf-8")
             )
-            saved_materials = json.loads(
-                (run_dir / "materials/package.json").read_text(encoding="utf-8")
+            saved_reference = json.loads(
+                (run_dir / "reference/package.json").read_text(encoding="utf-8")
             )
             if (
-                saved_selection != state["materials_selection"]
-                or saved_materials != state["materials_package"]
+                saved_selection != state["reference_selection"]
+                or saved_reference != state["reference_package"]
             ):
                 raise ValueError("Reviewed generation artifacts changed after preview.")
             load_snapshot(Path(state["snapshot"]))
-        if state.get("reference_plan") is not None:
-            saved_plan = json.loads(
-                (run_dir / "reference/plan.json").read_text(encoding="utf-8")
-            )
-            if saved_plan != state["reference_plan"]:
-                raise ValueError("Reviewed reference artifacts changed after preview.")
         actual = digest_json(self._generation_binding(
             state, proposal=state["proposal"], prompt=state["generation_prompt"],
         ))
@@ -435,20 +351,20 @@ class CorpusAtelierApplication:
         if job.generation_mode not in {"without_corpus", "with_corpus"}:
             raise ValueError(f"Unsupported generation mode: {job.generation_mode!r}.")
         if job.generation_mode == "without_corpus":
-            if job.snapshot is not None or job.materials is not None:
-                raise ValueError("Without-corpus runs cannot include a snapshot or materials.")
+            if job.snapshot is not None or job.reference is not None:
+                raise ValueError("Without-corpus runs cannot include a snapshot or reference.")
             if job.brief.get("reference_mode"):
                 raise ValueError("Without-corpus runs cannot include a reference mode.")
             snapshot = None
-            materials = None
+            reference = None
         else:
-            if job.snapshot is None or job.materials is None:
-                raise ValueError("With-corpus runs require a snapshot and material selection.")
-            validate(job.materials, "material-selection.schema.json")
-            if not job.materials["knowledge_ids"] and not job.materials["reference_ids"]:
-                raise ValueError("With-corpus runs require at least one selected material.")
+            if job.snapshot is None or job.reference is None:
+                raise ValueError("With-corpus runs require a snapshot and reference selection.")
+            validate(job.reference, "reference-selection.schema.json")
+            if not job.brief.get("reference_mode"):
+                raise ValueError("With-corpus runs require an explicit reference mode.")
             snapshot = Path(job.snapshot).resolve(strict=True)
-            materials = job.materials
+            reference = job.reference
         run_id, run_dir = self.store.create(
             brief=job.brief,
             profile=profile,
@@ -465,10 +381,10 @@ class CorpusAtelierApplication:
             "brief": job.brief,
             "status": "created",
         }
-        if snapshot is not None and materials is not None:
+        if snapshot is not None and reference is not None:
             state.update(
                 snapshot=str(snapshot),
-                materials_selection=materials,
+                reference_selection=reference,
             )
         try:
             self.graph.invoke(state, config=config)
@@ -523,8 +439,8 @@ class CorpusAtelierApplication:
             "review": summary.run_dir / registered.get("review", "review/review.json"),
         }
         for name in (
-            "materials_selection",
-            "materials_package",
+            "reference_selection",
+            "reference_package",
             "reference_prompt",
             "reference_plan",
             "final_decision",
@@ -536,12 +452,15 @@ class CorpusAtelierApplication:
         for name, relative in registered.items():
             paths.setdefault(name, summary.run_dir / relative)
 
-        package_path = paths.get("materials_package") or paths.get("reference_package")
+        package_path = paths.get("reference_package") or paths.get("materials_package")
         if package_path and package_path.is_file():
             package = json.loads(package_path.read_text(encoding="utf-8"))
             snapshot = Path(summary.manifest["atlas_snapshot"])
-            for index, row in enumerate(package.get("references", []), start=1):
-                paths[f"reference_image_{index:02d}"] = snapshot / row["file"]
+            if "reference" in package:
+                paths["reference_image"] = snapshot / package["reference"]["file"]
+            else:
+                for index, row in enumerate(package.get("references", []), start=1):
+                    paths[f"reference_image_{index:02d}"] = snapshot / row["file"]
 
         artifacts = {
             name: str(path.resolve())

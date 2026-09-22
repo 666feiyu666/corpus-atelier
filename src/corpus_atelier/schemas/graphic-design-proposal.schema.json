@@ -6,7 +6,6 @@
     "brief_interpretation": {"type": "string"},
     "chosen_direction": {"type": "string"},
     "design_rationale": {"type": "string", "description": "Concise, human-reviewable explanation; it is not sent to the image renderer."},
-    "evidence_ids": {"type": "array", "items": {"type": "string"}, "description": "IDs of selected corpus records actually used; empty when no corpus evidence is used."},
     "review_criteria": {"type": "array", "items": {"type": "string"}},
     "source_requirements": {"type": "array", "items": {"type": "string"}},
     "clarification_questions": {"type": "array", "items": {"type": "string"}},
@@ -17,27 +16,6 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "canvas_plan": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "format": {"type": "string", "description": "The graphic deliverable being designed."},
-                "orientation": {"type": "string", "enum": ["portrait", "landscape", "square"]},
-                "aspect_ratio": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "width": {"type": "integer", "minimum": 1, "maximum": 100},
-                    "height": {"type": "integer", "minimum": 1, "maximum": 100}
-                  },
-                  "required": ["width", "height"]
-                },
-                "viewing_context": {"type": "string"},
-                "safe_area": {"type": "string"},
-                "size_rationale": {"type": "string"}
-              },
-              "required": ["format", "orientation", "aspect_ratio", "viewing_context", "safe_area", "size_rationale"]
-            },
             "communication_objective": {"type": "string"},
             "audience_and_context": {"type": "string"},
             "visible_copy": {"type": "array", "items": {"type": "string"}},
@@ -47,11 +25,11 @@
             "allowed_variation": {"type": "array", "items": {"type": "string"}},
             "exclusions": {"type": "array", "items": {"type": "string"}}
           },
-          "required": ["canvas_plan", "communication_objective", "audience_and_context", "visible_copy", "composition", "typography", "visual_treatment", "allowed_variation", "exclusions"]
+          "required": ["communication_objective", "audience_and_context", "visible_copy", "composition", "typography", "visual_treatment", "allowed_variation", "exclusions"]
         },
         {"type": "null"}
       ]
     }
   },
-  "required": ["status", "brief_interpretation", "chosen_direction", "design_rationale", "evidence_ids", "review_criteria", "source_requirements", "clarification_questions", "image_spec"]
+  "required": ["status", "brief_interpretation", "chosen_direction", "design_rationale", "review_criteria", "source_requirements", "clarification_questions", "image_spec"]
 }

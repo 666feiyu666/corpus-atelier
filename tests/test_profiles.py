@@ -14,9 +14,7 @@ class ProfileTests(unittest.TestCase):
         } | {
             profile.review_schema for profile in PROFILES.values()
         } | {
-            "style-grounded-plan.schema.json",
-            "style-inspired-plan.schema.json",
-            "material-selection.schema.json",
+            "reference-selection.schema.json",
         }
 
         def check_node(node, path):
@@ -38,9 +36,7 @@ class ProfileTests(unittest.TestCase):
         } | {
             profile.review_schema for profile in PROFILES.values()
         } | {
-            "style-grounded-plan.schema.json",
-            "style-inspired-plan.schema.json",
-            "material-selection.schema.json",
+            "reference-selection.schema.json",
         }
 
         def check_node(node, path):
@@ -55,37 +51,6 @@ class ProfileTests(unittest.TestCase):
         for schema_name in schema_names:
             check_node(_schema_for_openai(schema_name), schema_name)
 
-        local_schema = load_schema("style-grounded-plan.schema.json")
-        local_evidence_ids = local_schema["properties"]["style_invariants"][
-            "items"
-        ]["properties"]["evidence_ids"]
-        self.assertTrue(local_evidence_ids["uniqueItems"])
-
-    def test_local_validation_still_rejects_duplicate_evidence_ids(self):
-        plan = {
-            "mode": "style_grounded",
-            "summary": "A cross-reference style system.",
-            "style_invariants": [
-                {
-                    "claim": "Repeated framing pattern.",
-                    "evidence_ids": ["same-reference", "same-reference"],
-                    "application": "Use a new framing system.",
-                },
-                {
-                    "claim": "Repeated lettering pattern.",
-                    "evidence_ids": ["reference-a", "reference-b"],
-                    "application": "Integrate lettering into the composition.",
-                },
-            ],
-            "allowed_variations": ["Vary the product composition."],
-            "content_mapping_rules": ["Map the focal hierarchy to the new subject."],
-            "work_specific_features_to_exclude": ["Do not copy a complete layout."],
-            "human_review_questions": ["Is the pattern supported by multiple works?"],
-        }
-
-        with self.assertRaises(ValueError):
-            validate(plan, "style-grounded-plan.schema.json")
-
     def test_expected_profiles_are_registered(self):
         self.assertEqual(set(PROFILES), {
             "rhetoric-poster", "art-article-cover", "rhetoric-graphic", "art-graphic",
@@ -95,7 +60,7 @@ class ProfileTests(unittest.TestCase):
             get_profile("art-article-cover").objective,
         )
 
-    def test_general_graphic_brief_accepts_open_delivery_and_auto_canvas(self):
+    def test_general_graphic_brief_accepts_open_delivery_and_explicit_canvas(self):
         brief = {
             "deliverable": "museum ticket graphic",
             "purpose": "Help visitors identify the evening program.",
@@ -104,7 +69,7 @@ class ProfileTests(unittest.TestCase):
             "exact_copy": ["NIGHT COLLECTION"],
             "constraints": [],
             "preferences": [],
-            "canvas": {"mode": "auto"},
+            "canvas": {"aspect_ratio": {"width": 4, "height": 5}},
         }
         self.assertEqual(
             validate(brief, get_profile("rhetoric-graphic").brief_schema), brief,

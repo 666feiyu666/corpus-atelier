@@ -6,7 +6,6 @@
     "brief_interpretation": {"type": "string"},
     "chosen_direction": {"type": "string"},
     "design_rationale": {"type": "string", "description": "Concise, human-reviewable explanation of why the design decisions answer the brief; it is not sent to the image renderer."},
-    "evidence_ids": {"type": "array", "items": {"type": "string"}},
     "review_criteria": {"type": "array", "items": {"type": "string"}},
     "source_requirements": {"type": "array", "items": {"type": "string"}, "description": "Outstanding sources; must be empty when status is ready."},
     "clarification_questions": {"type": "array", "items": {"type": "string"}, "description": "Blocking questions; must be empty when status is ready."},
@@ -32,5 +31,5 @@
       ]
     }
   },
-  "required": ["status", "brief_interpretation", "chosen_direction", "design_rationale", "evidence_ids", "review_criteria", "source_requirements", "clarification_questions", "image_spec"]
+  "required": ["status", "brief_interpretation", "chosen_direction", "design_rationale", "review_criteria", "source_requirements", "clarification_questions", "image_spec"]
 }

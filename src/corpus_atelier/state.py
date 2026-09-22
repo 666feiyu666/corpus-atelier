@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
-    "created", "preparing_inputs", "loading_materials", "planning_references", "designing",
+    "created", "preparing_inputs", "loading_reference", "designing",
     "awaiting_approval", "rejected", "generating", "reviewing",
     "awaiting_final_decision", "completed", "discarded", "failed",
 ]
@@ -21,7 +21,7 @@ class DesignJob:
     brief: dict[str, Any]
     generation_mode: GenerationMode
     snapshot: Path | None = None
-    materials: dict[str, Any] | None = None
+    reference: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -68,11 +68,9 @@ class AtelierState(TypedDict, total=False):
     generation_mode: GenerationMode
     brief: dict[str, Any]
     snapshot: str
-    materials_selection: dict[str, Any]
-    materials_package: dict[str, Any] | None
+    reference_selection: dict[str, Any]
+    reference_package: dict[str, Any] | None
     reference_image_paths: list[str]
-    reference_plan_prompt: str
-    reference_plan: dict[str, Any]
     design_prompt: str
     proposal: dict[str, Any]
     generation_prompt: str

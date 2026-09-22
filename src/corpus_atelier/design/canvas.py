@@ -44,31 +44,18 @@ def resolve_image_size(ratio: tuple[int, int]) -> tuple[str, tuple[int, int]]:
     return f"{width}x{height}", (x_ratio, y_ratio)
 
 
-def resolve_canvas(image_spec: dict, brief: dict) -> tuple[str, tuple[int, int], dict]:
-    """Validate a model-proposed canvas and enforce any user-fixed ratio."""
+def resolve_canvas(brief: dict) -> tuple[str, tuple[int, int], dict]:
+    """Resolve the user-specified brief ratio to a supported image size."""
     try:
-        plan = image_spec["canvas_plan"]
-        proposed = plan["aspect_ratio"]
-        ratio = reduce_ratio(proposed["width"], proposed["height"])
+        requested = brief["canvas"]["aspect_ratio"]
+        ratio = reduce_ratio(requested["width"], requested["height"])
     except (KeyError, TypeError) as exc:
-        raise ValueError("A ready general graphic proposal requires canvas_plan.") from exc
-
-    requested = brief["canvas"]
-    if requested["mode"] == "fixed":
-        fixed = requested["aspect_ratio"]
-        fixed_ratio = reduce_ratio(fixed["width"], fixed["height"])
-        if ratio != fixed_ratio:
-            raise ValueError("The proposed canvas ratio does not match the user-fixed ratio.")
+        raise ValueError("A general graphic brief requires a canvas aspect ratio.") from exc
 
     size, ratio = resolve_image_size(ratio)
     record = {
         "size": size,
         "ratio": list(ratio),
-        "mode": requested["mode"],
-        "format": plan["format"],
-        "orientation": plan["orientation"],
-        "viewing_context": plan["viewing_context"],
-        "safe_area": plan["safe_area"],
-        "size_rationale": plan["size_rationale"],
+        "source": "brief",
     }
     return size, ratio, record

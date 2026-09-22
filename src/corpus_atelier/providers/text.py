@@ -29,9 +29,8 @@ def _schema_for_openai(schema_name: str) -> dict:
 
 
 class TextProvider(Protocol):
-    def propose(self, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
-    def plan_references(self, prompt: str, image_paths: list[Path], *,
-                        schema_name: str) -> tuple[dict, dict]: ...
+    def propose(self, prompt: str, *, schema_name: str,
+                reference_paths: list[Path] | None = None) -> tuple[dict, dict]: ...
     def review(self, image_path: Path, prompt: str, *, schema_name: str) -> tuple[dict, dict]: ...
 
 
@@ -73,13 +72,13 @@ class OpenAITextProvider:
             if owned:
                 client.close()
 
-    def propose(self, prompt: str, *, schema_name: str) -> tuple[dict, dict]:
-        return self._call(prompt, schema_name)
-
-    def plan_references(self, prompt: str, image_paths: list[Path], *,
-                        schema_name: str) -> tuple[dict, dict]:
+    def propose(self, prompt: str, *, schema_name: str,
+                reference_paths: list[Path] | None = None) -> tuple[dict, dict]:
+        reference_paths = list(reference_paths or [])
+        if not reference_paths:
+            return self._call(prompt, schema_name)
         content = [{"type": "input_text", "text": prompt}]
-        for index, path in enumerate(image_paths, start=1):
+        for index, path in enumerate(reference_paths, start=1):
             encoded = base64.b64encode(path.read_bytes()).decode("ascii")
             suffix = path.suffix.lower().lstrip(".")
             media_type = "jpeg" if suffix in {"jpg", "jpeg"} else suffix

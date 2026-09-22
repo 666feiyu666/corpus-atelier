@@ -7,7 +7,7 @@ from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 from corpus_atelier.streamlit_app import (
-    build_general_brief, load_case, parse_brief, review_points,
+    build_general_brief, delivery_ratio, load_case, parse_brief, review_points,
 )
 from corpus_atelier.state import RunResult
 
@@ -64,11 +64,22 @@ class StreamlitAppTests(unittest.TestCase):
             exact_copy="第一展区\n夜间开放",
             constraints="不可使用荧光色",
             preferences="克制",
-            canvas_mode="auto",
+            ratio_width=4,
+            ratio_height=5,
         )
         self.assertEqual(brief["deliverable"], "展览导览卡")
         self.assertEqual(brief["exact_copy"], ["第一展区", "夜间开放"])
-        self.assertEqual(brief["canvas"], {"mode": "auto"})
+        self.assertEqual(
+            brief["canvas"], {"aspect_ratio": {"width": 4, "height": 5}},
+        )
+
+    def test_known_delivery_contexts_own_their_canvas_ratios(self):
+        self.assertEqual(delivery_ratio("手机阅读海报"), (4, 5))
+        self.assertEqual(delivery_ratio("张贴或印刷海报"), (2, 3))
+        self.assertEqual(delivery_ratio("小红书配图"), (3, 4))
+        self.assertEqual(delivery_ratio("文章内插图"), (16, 9))
+        self.assertEqual(delivery_ratio("微信公众号封面"), (47, 20))
+        self.assertIsNone(delivery_ratio("自定义展览屏幕"))
 
     def test_streamlit_source_does_not_expose_protocol_details(self):
         source = ROOT / "src/corpus_atelier/streamlit_app.py"
@@ -89,22 +100,25 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(len(app.multiselect), 0)
         app.segmented_control(key="new_generation_mode").set_value("有语料库生成").run()
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.multiselect), 2)
+        self.assertEqual(
+            app.selectbox(key="selected_reference_id").value,
+            "mucha-poster-124474229",
+        )
         app.segmented_control(key="start_mode").set_value("使用示例").run()
         app.selectbox(key="case_label").select("文章封面").run()
         self.assertFalse(app.exception)
         self.assertIn("从语料到视觉修辞", app.text_area[0].value)
 
-    def test_reference_example_uses_explicit_material_selection(self):
+    def test_reference_example_uses_explicit_reference_selection(self):
         app = AppTest.from_file(
             str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
         ).run()
         app.segmented_control(key="start_mode").set_value("使用示例").run()
         app.selectbox(key="case_label").select("慕夏风格女士手表广告").run()
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.multiselect), 2)
         self.assertEqual(
-            app.multiselect[1].value, ["mucha-poster-124474277"],
+            app.selectbox(key="selected_reference_id").value,
+            "mucha-poster-124474277",
         )
 
     def test_approval_acceptance_flow_renders_each_page_state(self):

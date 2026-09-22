@@ -10,38 +10,33 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.materials import list_materials
+from corpus_atelier.materials import list_references
 from corpus_atelier.state import DesignJob, FinalDecision, HumanDecision, RunResult
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
-DEFAULT_KNOWLEDGE = [
-    "mucha-commercial-color-print-character",
-    "mucha-commercial-product-rhetoric",
-    "mucha-commercial-vertical-figure-organization",
-]
-DEFAULT_REFERENCES = ["mucha-poster-124474277"]
+DEFAULT_REFERENCE = "mucha-poster-124474277"
 CASES = {
     "工作坊海报": (
         "rhetoric-poster",
         ROOT / "experiments/cases/poster-01/brief.json",
-        {"knowledge_ids": ["mucha-commercial-lettering-image-integration"], "reference_ids": []},
+        None,
     ),
     "文章封面": (
         "art-article-cover",
         ROOT / "experiments/cases/article-cover-01/brief.json",
-        {"knowledge_ids": ["mucha-commercial-lettering-image-integration"], "reference_ids": []},
+        None,
     ),
     "慕夏风格女士手表广告": (
         "rhetoric-poster",
         ROOT / "experiments/cases/mucha-watch/grounded-brief.json",
-        {"knowledge_ids": DEFAULT_KNOWLEDGE, "reference_ids": DEFAULT_REFERENCES},
+        DEFAULT_REFERENCE,
     ),
     "慕夏启发女士手表广告": (
         "rhetoric-poster",
         ROOT / "experiments/cases/mucha-watch/inspired-brief.json",
-        {"knowledge_ids": DEFAULT_KNOWLEDGE, "reference_ids": DEFAULT_REFERENCES},
+        DEFAULT_REFERENCE,
     ),
 }
 TERMINAL_STATUSES = {"completed", "rejected", "discarded", "failed"}
@@ -56,6 +51,13 @@ DELIVERY_CONTEXTS = [
     "文章内插图",
     "微信公众号封面",
 ]
+DELIVERY_RATIOS = {
+    "手机阅读海报": (4, 5),
+    "张贴或印刷海报": (2, 3),
+    "小红书配图": (3, 4),
+    "文章内插图": (16, 9),
+    "微信公众号封面": (47, 20),
+}
 REFERENCE_MODES = {
     "以共同风格特征为约束": "style_grounded",
     "仅作为创意启发": "style_inspired",
@@ -72,9 +74,9 @@ def load_case(label: str) -> dict[str, Any]:
 
 
 @st.cache_data(max_entries=4)
-def load_material_choices(snapshot: str) -> list[dict[str, str]]:
-    """Load verified material labels once per snapshot path."""
-    return list_materials(snapshot)
+def load_reference_choices(snapshot: str) -> list[dict[str, str]]:
+    """Load verified reference labels once per snapshot path."""
+    return list_references(snapshot)
 
 
 def parse_brief(value: str) -> dict[str, Any]:
@@ -90,10 +92,15 @@ def split_lines(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
 
 
+def delivery_ratio(deliverable: str) -> tuple[int, int] | None:
+    """Return the UI-owned ratio for a known delivery context."""
+    return DELIVERY_RATIOS.get(deliverable)
+
+
 def build_general_brief(
     *, deliverable: str, purpose: str, audience: str, use_context: str,
     exact_copy: str, constraints: str, preferences: str,
-    canvas_mode: str, ratio_width: int = 1, ratio_height: int = 1,
+    ratio_width: int, ratio_height: int,
     validate_required: bool = True,
 ) -> dict[str, Any]:
     """Build the open graphic-design brief without UI or model side effects."""
@@ -106,11 +113,6 @@ def build_general_brief(
     missing = [label for label, value in required.items() if not value.strip()]
     if validate_required and missing:
         raise ValueError(f"请填写：{'、'.join(missing)}。")
-    canvas: dict[str, Any] = {"mode": canvas_mode}
-    if canvas_mode == "fixed":
-        canvas["aspect_ratio"] = {
-            "width": int(ratio_width), "height": int(ratio_height),
-        }
     return {
         "deliverable": deliverable.strip(),
         "purpose": purpose.strip(),
@@ -119,7 +121,11 @@ def build_general_brief(
         "exact_copy": split_lines(exact_copy),
         "constraints": split_lines(constraints),
         "preferences": split_lines(preferences),
-        "canvas": canvas,
+        "canvas": {
+            "aspect_ratio": {
+                "width": int(ratio_width), "height": int(ratio_height),
+            },
+        },
     }
 
 
@@ -148,9 +154,8 @@ def _change_case() -> None:
     st.session_state.brief_editor = json.dumps(
         case_brief, ensure_ascii=False, indent=2,
     )
-    st.session_state.selected_knowledge_ids = list(defaults["knowledge_ids"])
-    st.session_state.selected_reference_ids = list(defaults["reference_ids"])
-    has_corpus = bool(defaults["knowledge_ids"] or defaults["reference_ids"])
+    st.session_state.selected_reference_id = defaults
+    has_corpus = defaults is not None
     st.session_state.example_generation_mode = (
         "有语料库生成" if has_corpus else "无语料库生成"
     )
@@ -161,28 +166,19 @@ def _change_case() -> None:
         )
 
 
-def _material_fields(*, show_references: bool) -> None:
-    choices = load_material_choices(str(SNAPSHOT))
-    knowledge = [item["id"] for item in choices if item["kind"] == "knowledge"]
-    references = [item["id"] for item in choices if item["kind"] == "reference"]
+def _reference_field() -> str | None:
+    choices = load_reference_choices(str(SNAPSHOT))
+    references = [item["id"] for item in choices]
     titles = {item["id"]: item["title"] for item in choices}
-    st.multiselect(
-        "知识材料（可留空，以测试无语料基线）",
-        knowledge,
-        key="selected_knowledge_ids",
-        format_func=lambda material_id: titles[material_id],
+    return st.selectbox(
+        "参考图像",
+        references,
+        key="selected_reference_id",
+        format_func=lambda reference_id: titles[reference_id],
     )
-    if show_references:
-        st.multiselect(
-            "参考图像",
-            references,
-            key="selected_reference_ids",
-            max_selections=3,
-            format_func=lambda material_id: titles[material_id],
-        )
 
 
-def _new_design_inputs() -> tuple[str, str, dict[str, Any], list[str]]:
+def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None]:
     method = st.segmented_control(
         "设计方法", list(DESIGN_METHODS), default=list(DESIGN_METHODS)[0],
         key="design_method",
@@ -215,12 +211,12 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], list[str]]:
         constraints = st.text_area("硬性限制（每行一项）", key="general_constraints")
         preferences = st.text_area("设计偏好（每行一项）", key="general_preferences")
 
-    canvas_choice = st.segmented_control(
-        "画布比例", ["由设计师决定", "指定比例"], default="由设计师决定",
-        key="canvas_choice",
-    )
-    ratio_width, ratio_height = 1, 1
-    if canvas_choice == "指定比例":
+    fixed_ratio = delivery_ratio(deliverable or "")
+    if fixed_ratio is not None:
+        ratio_width, ratio_height = fixed_ratio
+        st.caption(f"画布比例：{ratio_width}:{ratio_height}（由交付类型确定）")
+    else:
+        st.caption("自定义交付类型的画布比例")
         ratio_columns = st.columns(2)
         ratio_width = ratio_columns[0].number_input(
             "宽度比例", min_value=1, max_value=100, value=4, step=1,
@@ -230,8 +226,6 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], list[str]]:
             "高度比例", min_value=1, max_value=100, value=5, step=1,
             key="ratio_height",
         )
-    else:
-        st.caption("设计师会依据交付类型、观看场景和内容层级提出比例，并说明理由。")
 
     brief = build_general_brief(
         deliverable=deliverable or "",
@@ -241,29 +235,22 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], list[str]]:
         exact_copy=exact_copy,
         constraints=constraints,
         preferences=preferences,
-        canvas_mode="fixed" if canvas_choice == "指定比例" else "auto",
         ratio_width=int(ratio_width),
         ratio_height=int(ratio_height),
         validate_required=False,
     )
-    reference_ids: list[str] = []
+    reference_id: str | None = None
     if generation_mode == "with_corpus":
-        with st.expander("选择语料材料", expanded=True):
-            _material_fields(show_references=True)
-        reference_ids = list(st.session_state.get("selected_reference_ids", []))
-        if reference_ids:
-            reference_label = st.selectbox(
-                "参考图使用策略", list(REFERENCE_MODES), key="general_reference_mode",
-            )
-            brief.update(
-                reference_mode=REFERENCE_MODES[reference_label],
-                reference_scope="selected_snapshot_images",
-                reference_count=len(reference_ids),
-            )
-    return DESIGN_METHODS[method], generation_mode, brief, reference_ids
+        with st.expander("选择参考图", expanded=True):
+            reference_id = _reference_field()
+        reference_label = st.selectbox(
+            "参考图使用策略", list(REFERENCE_MODES), key="general_reference_mode",
+        )
+        brief["reference_mode"] = REFERENCE_MODES[reference_label]
+    return DESIGN_METHODS[method], generation_mode, brief, reference_id
 
 
-def _example_inputs() -> tuple[str, str, dict[str, Any], list[str]]:
+def _example_inputs() -> tuple[str, str, dict[str, Any], str | None]:
     if "case_label" not in st.session_state:
         st.session_state.case_label = next(iter(CASES))
     if "brief_editor" not in st.session_state:
@@ -278,28 +265,21 @@ def _example_inputs() -> tuple[str, str, dict[str, Any], list[str]]:
     with st.expander("编辑内容", expanded=False):
         st.text_area("Brief（JSON）", height=280, key="brief_editor")
     brief = parse_brief(st.session_state.brief_editor)
-    reference_ids: list[str] = []
+    reference_id: str | None = None
     if generation_mode == "with_corpus":
-        with st.expander("选择语料材料", expanded=True):
-            _material_fields(show_references=True)
-        reference_ids = list(st.session_state.get("selected_reference_ids", []))
-    if generation_mode == "with_corpus" and reference_ids:
+        with st.expander("选择参考图", expanded=True):
+            reference_id = _reference_field()
         reference_label = st.selectbox(
             "参考图使用策略", list(REFERENCE_MODES), key="example_reference_mode",
         )
-        brief.update(
-            reference_mode=REFERENCE_MODES[reference_label],
-            reference_count=len(reference_ids),
-            reference_scope="selected_snapshot_images",
-        )
+        brief["reference_mode"] = REFERENCE_MODES[reference_label]
     else:
-        for field in ("reference_mode", "reference_count", "reference_scope"):
-            brief.pop(field, None)
-    return CASES[st.session_state.case_label][0], generation_mode, brief, reference_ids
+        brief.pop("reference_mode", None)
+    return CASES[st.session_state.case_label][0], generation_mode, brief, reference_id
 
 
 def _validate_start_inputs(
-    generation_mode: str, brief: dict[str, Any], reference_ids: list[str],
+    generation_mode: str, brief: dict[str, Any], reference_id: str | None,
 ) -> None:
     if "deliverable" in brief:
         required = {
@@ -311,11 +291,9 @@ def _validate_start_inputs(
         missing = [label for label, value in required.items() if not value.strip()]
         if missing:
             raise ValueError(f"请填写：{'、'.join(missing)}。")
-    if generation_mode == "with_corpus" and not (
-        st.session_state.get("selected_knowledge_ids") or reference_ids
-    ):
-        raise ValueError("有语料库生成至少需要选择一项语料材料。")
-    if brief.get("reference_mode") and not reference_ids:
+    if generation_mode == "with_corpus" and not reference_id:
+        raise ValueError("有语料库生成需要选择一张参考图像。")
+    if brief.get("reference_mode") and not reference_id:
         raise ValueError("使用参考图模式时，至少选择一张参考图像。")
 
 
@@ -361,12 +339,12 @@ def _start_page() -> None:
 
     try:
         if start_mode == "新建设计":
-            profile, generation_mode, brief, reference_ids = _new_design_inputs()
+            profile, generation_mode, brief, reference_id = _new_design_inputs()
         else:
-            profile, generation_mode, brief, reference_ids = _example_inputs()
+            profile, generation_mode, brief, reference_id = _example_inputs()
         input_error: Exception | None = None
     except (json.JSONDecodeError, ValueError) as exc:
-        profile, generation_mode, brief, reference_ids = "", "", {}, []
+        profile, generation_mode, brief, reference_id = "", "", {}, None
         input_error = exc
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
@@ -374,14 +352,13 @@ def _start_page() -> None:
     try:
         if input_error is not None:
             raise input_error
-        _validate_start_inputs(generation_mode, brief, reference_ids)
-        materials = None
+        _validate_start_inputs(generation_mode, brief, reference_id)
+        reference = None
         snapshot = None
         if generation_mode == "with_corpus":
-            materials = {
+            reference = {
                 "format_version": 1,
-                "knowledge_ids": list(st.session_state.get("selected_knowledge_ids", [])),
-                "reference_ids": reference_ids,
+                "reference_id": reference_id,
             }
             snapshot = SNAPSHOT
         load_dotenv(ROOT / ".env")
@@ -392,7 +369,7 @@ def _start_page() -> None:
                 brief=brief,
                 generation_mode=generation_mode,
                 snapshot=snapshot,
-                materials=materials,
+                reference=reference,
             ))
         st.session_state.atelier_app = app
         st.session_state.result = result
@@ -415,35 +392,19 @@ def _approval_page(result: RunResult) -> None:
     }.get(manifest.get("generation_mode"))
     if mode_label:
         st.caption(f"研究模式：{mode_label}")
-    reference_plan = read_json_artifact(result, "reference_plan")
-    if reference_plan:
-        package = read_json_artifact(result, "materials_package")
-        count = len(package.get("references", []))
-        st.caption(
-            f"参考关系：{reference_plan.get('mode', 'unknown')} · 已选 {count} 张参考图"
-        )
-        with st.expander("查看参考使用提案"):
-            st.json(reference_plan)
-        images = sorted(
-            (name, path) for name, path in result.artifacts.items()
-            if name.startswith("reference_image_")
-        )
-        if images:
-            with st.expander("查看所选参考图"):
-                columns = st.columns(3)
-                for index, (_, path) in enumerate(images):
-                    columns[index % 3].image(path, width="stretch")
+    reference_image = result.artifacts.get("reference_image")
+    if reference_image:
+        st.caption(f"参考关系：{manifest.get('reference_mode', 'unknown')}")
+        with st.expander("查看所选参考图"):
+            st.image(reference_image, width="stretch")
     st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))
     rationale = proposal.get("design_rationale")
     if rationale:
         st.caption(rationale)
-    canvas_plan = (proposal.get("image_spec") or {}).get("canvas_plan")
-    if canvas_plan:
-        ratio = canvas_plan["aspect_ratio"]
-        st.info(
-            f"画布：{canvas_plan['format']} · {ratio['width']}:{ratio['height']} · "
-            f"{canvas_plan['orientation']}\n\n{canvas_plan['size_rationale']}"
-        )
+    canvas = read_json_artifact(result, "canvas")
+    if canvas:
+        ratio = canvas["ratio"]
+        st.info(f"画布：{ratio[0]}:{ratio[1]} · {canvas['size']} px")
     approve, reject = st.columns(2)
     if approve.button("批准并生成", type="primary", width="stretch"):
         _resume(HumanDecision(True, reviewer="streamlit-user"), "正在生成并审查图片…")

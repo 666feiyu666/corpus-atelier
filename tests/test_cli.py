@@ -28,26 +28,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Valid rhetoric-poster brief", stream.getvalue())
 
-    def test_material_preview_compiles_without_provider_calls(self):
+    def test_reference_preview_resolves_without_provider_calls(self):
         with TemporaryDirectory() as directory:
             selection = Path(directory) / "selection.json"
             selection.write_text(json.dumps({
                 "format_version": 1,
-                "knowledge_ids": ["mucha-commercial-color-print-character"],
-                "reference_ids": ["mucha-poster-124474277"],
+                "reference_id": "mucha-poster-124474277",
             }), encoding="utf-8")
             output = Path(directory) / "output"
             stream = io.StringIO()
             with patch("sys.stdout", stream):
                 code = main([
-                    "preview-materials",
-                    "--brief", str(ROOT / "experiments/cases/mucha-watch/grounded-brief.json"),
-                    "--materials", str(selection),
+                    "preview-reference",
+                    "--reference", str(selection),
                     "--snapshot", str(ROOT / "experiments/atlas-snapshot/mucha-commercial"),
                     "--output", str(output),
                 ])
             self.assertEqual(code, 0)
-            self.assertTrue((output / "reference-plan-prompt.md").is_file())
+            self.assertTrue((output / "reference-selection.json").is_file())
             package = json.loads(
-                (output / "material-package.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(package["references"]), 1)
+                (output / "reference-package.json").read_text(encoding="utf-8"))
+            self.assertEqual(package["reference"]["id"], "mucha-poster-124474277")
+            self.assertNotIn("knowledge", package)

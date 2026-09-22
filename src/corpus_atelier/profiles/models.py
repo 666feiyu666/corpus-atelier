@@ -13,7 +13,7 @@ class DesignProfile:
     review_schema: str
     description: str
     objective_prompt: str
-    deliverable_prompt: str
+    deliverable_prompts: tuple[str, ...]
     review_prompt: str
     default_size: str
     output_ratio: tuple[int, int]

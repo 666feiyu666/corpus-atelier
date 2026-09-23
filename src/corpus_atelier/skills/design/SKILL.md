@@ -53,6 +53,10 @@ do not load unrelated objective or deliverable variants.
 - Design the image; do not write an image-model prompt or `image_spec`.
 - Do not optimize wording for GPT Image or any other renderer.
 - Preserve required subjects, exact visible copy, constraints, and the user's chosen purpose.
+- Treat `exact_copy` as the exhaustive list of readable wording. Do not add headings, labels,
+  captions, signs, symbols made from letters, or other visible wording that is absent from that
+  list. If a constraint requires readable wording that `exact_copy` does not supply, return
+  `needs_clarification` and identify the missing copy instead of inventing it.
 - Reference material provides visual knowledge, not additional user requirements.
 - Distinguish transferable design knowledge from work-specific content that should not be copied.
 - Keep the rationale concise and human-reviewable. Put visible decisions in

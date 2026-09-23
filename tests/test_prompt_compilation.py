@@ -36,6 +36,8 @@ class PromptTests(unittest.TestCase):
         )
         self.assertIn("coherent mental image", prompt)
         self.assertIn("design_description", prompt)
+        self.assertIn("exhaustive list of readable wording", prompt)
+        self.assertIn("needs_clarification", prompt)
         self.assertNotIn("GPT Image 2 compilation guidance", prompt)
         self.assertNotIn("Untrusted selected visual reference", prompt)
         for unrelated_example_term in ("Mucha", "watch", "wrist"):
@@ -66,6 +68,20 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn(proposal["design_rationale"], prompt)
         self.assertIn(spec["subject_and_scene"], prompt)
         self.assertIn("Visual-semantic failure reference", compiler_prompt)
+
+    def test_image_spec_compiler_makes_exact_copy_exhaustive(self):
+        provider = FakeTextProvider()
+        proposal, _ = provider.propose("", schema_name="poster-proposal.schema.json")
+        compiler_prompt = compile_image_spec_prompt(
+            proposal,
+            brief={"exact_copy": ["Approved title", "Approved label"]},
+            canvas={"size": "1024x1536", "ratio": [2, 3]},
+            provider_profile="gpt-image-2",
+        )
+
+        self.assertIn("# Exact-copy invariant", compiler_prompt)
+        self.assertIn("preserving every string and its order", compiler_prompt)
+        self.assertIn("Any additional wording", compiler_prompt)
 
     def test_image_spec_compiler_does_not_inject_example_scene_content(self):
         provider = FakeTextProvider()

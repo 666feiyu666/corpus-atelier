@@ -7,6 +7,34 @@ from corpus_atelier.cases import discover_cases
 
 
 class CaseCatalogTests(unittest.TestCase):
+    def test_poster_02_declares_all_required_visible_copy(self):
+        brief_path = (
+            Path(__file__).parents[1]
+            / "experiments"
+            / "cases"
+            / "poster-02"
+            / "brief.json"
+        )
+        brief = json.loads(brief_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            brief["exact_copy"],
+            [
+                "C306音乐之夜",
+                "今晚晚会结束后欢迎来C306房间",
+                "11点前结束",
+                "无酒精",
+                "仅限内部熟人",
+                "活动可能随时取消",
+                "一时兴起，纯属瞎搞",
+                "若有冒犯，敬请谅解",
+            ],
+        )
+        self.assertIn(
+            "不得添加exact_copy之外的任何可读文字",
+            brief["constraints"],
+        )
+
     def test_discovers_and_validates_a_new_case_directory(self):
         with TemporaryDirectory() as directory:
             case_dir = Path(directory) / "new-case"

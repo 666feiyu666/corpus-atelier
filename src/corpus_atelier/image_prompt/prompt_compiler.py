@@ -21,6 +21,11 @@ def compile_image_spec_prompt(
             )
         )
     sections.extend([
+        "# Exact-copy invariant\n\n"
+        "Set `visible_copy` to the compilation target's `exact_copy` array exactly, preserving "
+        "every string and its order. Treat that array as exhaustive. Any additional wording "
+        "mentioned in the proposal is not approved visible copy: omit it rather than adding, "
+        "rewriting, combining, splitting, or translating text.",
         "# Compilation target\n\n" + json.dumps({
             "provider_profile": provider_profile,
             "canvas": canvas,

@@ -11,8 +11,12 @@ another skill translates it for an image model.
 ## Completion standard
 
 The `design_description` is the primary deliverable. Write it so that a reader can form a
-coherent mental image of the finished work without seeing a rendering. After reading it, the
-reader should be able to picture:
+coherent mental image of the finished work without seeing a rendering. Resolve the decisions
+that carry the concept, protect the requirements, or keep the image physically and perceptually
+coherent. Do not mechanically fill every possible category or invent details merely to make the
+description longer.
+
+As relevant to the work, make clear:
 
 - the canvas and overall arrangement;
 - every important subject and supporting element;
@@ -27,12 +31,16 @@ Abstract qualities such as elegant, premium, dynamic, or refined do not make a d
 Whenever they matter, realize them through concrete visual decisions. Make entity identity and
 part-whole relationships explicit when a different reading would produce a different image.
 
-Before finishing, perform a physical and viewpoint consistency pass. Every spatial, anatomical,
-material, lighting, and camera statement must be mutually compatible. For example, the named side
-of a hand or wrist must agree with the visible nails, palm, watch face, and camera angle; an object
-cannot be simultaneously behind and in front of the same element; and contact or attachment must
-remain possible in the described pose. Revise contradictory details instead of expecting the
-renderer to choose which instruction to ignore.
+Before finishing, perform a physical and viewpoint consistency pass. Check that entity identity
+and count remain stable; parts belong to the intended wholes; depth, overlap, contact, attachment,
+pose, and orientation can coexist; the stated viewpoint agrees with the surfaces that are visible;
+and material and lighting statements describe one scene. Revise contradictory details instead of
+expecting the renderer to choose which instruction to ignore.
+
+Preserve controlled freedom where the concept does not depend on a choice. Do not fix an arbitrary
+side, count, coordinate, camera setting, material, or decorative feature solely because it could be
+specified. A complete design resolves what matters and identifies meaningful latitude; it does not
+turn every optional detail into a requirement.
 
 ## Context references
 

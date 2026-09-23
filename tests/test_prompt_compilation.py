@@ -38,6 +38,8 @@ class PromptTests(unittest.TestCase):
         self.assertIn("design_description", prompt)
         self.assertNotIn("GPT Image 2 compilation guidance", prompt)
         self.assertNotIn("Untrusted selected visual reference", prompt)
+        for unrelated_example_term in ("Mucha", "watch", "wrist"):
+            self.assertNotIn(unrelated_example_term.lower(), prompt.lower())
 
     def test_design_prompt_has_no_predefined_reference_relationship(self):
         prompt = compile_design_prompt(
@@ -64,7 +66,23 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn(proposal["design_rationale"], prompt)
         self.assertIn(spec["subject_and_scene"], prompt)
         self.assertIn("Visual-semantic failure reference", compiler_prompt)
-        self.assertIn("detached foreground hand", compiler_prompt)
+
+    def test_image_spec_compiler_does_not_inject_example_scene_content(self):
+        provider = FakeTextProvider()
+        proposal, _ = provider.propose(
+            "", schema_name="graphic-design-proposal.schema.json",
+        )
+        compiler_prompt = compile_image_spec_prompt(
+            proposal,
+            brief={"exact_copy": ["Design for context"]},
+            canvas={"size": "1536x1024", "ratio": [3, 2]},
+            provider_profile="gpt-image-2",
+        )
+
+        for unrelated_example_term in (
+            "Mucha", "woman", "watch", "wrist", "detached display hand",
+        ):
+            self.assertNotIn(unrelated_example_term.lower(), compiler_prompt.lower())
 
     def test_generation_prompt_has_no_predefined_reference_relationship(self):
         provider = FakeTextProvider()

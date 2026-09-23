@@ -1,43 +1,44 @@
 # Visual semantic disambiguation
 
-## Failure patterns
+Use this as a diagnostic checklist, not as a source of scene content. Apply a rule only when the
+approved design contains the relevant relation and a different interpretation would materially
+change the image.
 
-### Entity splitting
+## Stable identity and count
 
-Separately introduced noun phrases are often rendered as separate entities. Reuse a stable
-identity and state ownership directly: `the same woman`, `her anatomically connected right arm`,
-`the watch worn on that wrist`.
+Assign a stable label to each important entity and reuse it. Do not rename one entity in ways that
+make it sound like several, and do not merge distinct entities through vague pronouns. State an
+exact count only when the design requires it or duplication would change the result.
 
-### Part-whole discontinuity
+## Ownership and continuity
 
-When a design depends on a body part or connected structure, name the visible connection. Do not
-leave a hand, limb, handle, strap, cable, branch, or architectural extension as a free-floating
-object unless the design intends that result.
+When the image depends on a part-whole, worn-by, held-by, attached-to, or connected-to relation,
+name the relation directly. Describe enough of the connection to keep the structure continuous,
+but do not add unseen parts or construction details that the design does not need.
 
-### Focal emphasis through the wrong proxy
+## Spatial and viewpoint consistency
 
-If a product worn or held by a person is primary, emphasize the product through local detail,
-contrast, lighting, placement, and clear visibility. Do not let the model satisfy the hierarchy by
-making the entire hand, arm, or person an unrelated oversized foreground subject.
+Keep pose, orientation, contact, depth, overlap, occlusion, and visible surfaces mutually
+compatible. Express relative relationships before coordinates. Do not preserve two low-level
+details that require contradictory viewpoints or impossible geometry; reconcile them in favor of
+the approved whole with the smallest necessary change.
 
-### Mixed-representation collage
+## Focal hierarchy without proxy distortion
 
-If one element is rendered with more product detail than its surroundings, explicitly preserve
-spatial and material integration. Differences in detail must not turn connected elements into
-separate pasted layers.
+Translate emphasis into the visual means appropriate to the design, such as placement, local
+contrast, lighting, sharpness, detail, or negative space. Do not enlarge, detach, duplicate, or
+otherwise distort a related carrier or context element merely to make the focal element prominent.
 
-## Mucha watch example
+## Representation and material integration
 
-The design intent is one woman wearing one watch, with the watch as the commercial focal point.
-The ambiguous formulation `a watch worn on a feminine wrist and hand, with a woman behind the
-product` can become a detached foreground hand plus a second background woman.
+When connected elements intentionally use different levels of realism, detail, or medium, preserve
+their shared space, lighting logic, contact, and material relationship. Do not let a difference in
+treatment turn an integrated design into unrelated pasted layers unless collage separation is the
+approved intent.
 
-Compile the intended relation instead:
+## Copy and exclusions
 
-`Depict exactly one woman. Her visible forearm, wrist, and hand are anatomically continuous parts
-of the same figure. Place exactly one watch on that wrist. Emphasize the watch through local
-sharpness, contrast, and material detail without enlarging the hand into a separate foreground
-subject. Do not introduce a detached display hand or a second woman.`
-
-Treat this as an example of identity, ownership, continuity, and focal hierarchy—not as a required
-composition for unrelated designs.
+Carry exact visible copy verbatim and distinguish it from instructions, labels, metadata, and
+rationale. Add exclusions only for plausible misreadings of this design. Each exclusion should
+protect a stated identity, relation, hierarchy, copy requirement, or physical invariant; never use
+a generic defect catalogue or an exclusion inherited from another task.

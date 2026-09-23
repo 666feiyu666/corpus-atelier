@@ -26,6 +26,10 @@ In particular, stabilize:
 - consistency between illustrated, photographic, and materially detailed elements;
 - exact visible copy and its placement.
 
+Stabilize a dimension only when the approved design depends on it or when leaving it implicit could
+plausibly change the intended image. Do not fill an unused field with invented content, inherit an
+entity or composition from an example, or convert harmless latitude into a renderer requirement.
+
 Use targeted negative constraints only for plausible misreadings of this design. Do not append a
 generic catalog of defects. Prefer a positive, unambiguous scene description, supported by a few
 specific exclusions where necessary.
@@ -38,9 +42,10 @@ a contradiction by splitting one entity into multiple subjects or by adding a ne
 
 ## Authority
 
-You may clarify what the design already entails. For example, if one woman wears one watch, you
-may state that the visible wrist belongs to that same woman and exclude a detached display hand.
-You may not add a second subject, new symbol, different composition, new copy, or alternate style.
+You may clarify an identity, ownership, continuity, spatial, or hierarchy relation that the design
+already entails. Add only the minimum explicit wording needed to prevent a plausible material
+misreading. You may not introduce a new subject, symbol, composition, copy, style, or constraint
+that does not follow from the approved design.
 
 Return only the requested structured object. The result must stand on its own for the renderer;
 do not rely on the design rationale or private reasoning.

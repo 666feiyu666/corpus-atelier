@@ -172,11 +172,23 @@ class StreamlitAppTests(unittest.TestCase):
             )
             prompt = run_dir / "generation-prompt.md"
             prompt.write_text(generation_prompt, encoding="utf-8")
+            request_preview = run_dir / "generation-request-preview.json"
+            request_preview.write_text(json.dumps({
+                "prompt": generation_prompt,
+                "model": "gpt-image-2",
+                "quality": "medium",
+                "size": "1024x1536",
+                "output_format": "png",
+                "n": 1,
+                "operation": "generation",
+                "references": [],
+            }), encoding="utf-8")
             image = run_dir / "image.png"
             Image.new("RGB", (12, 18), "white").save(image)
             artifacts = {
                 "proposal": str(proposal),
                 "generation_prompt": str(prompt),
+                "generation_request_preview": str(request_preview),
                 "image": str(image),
             }
             result = RunResult(
@@ -190,10 +202,13 @@ class StreamlitAppTests(unittest.TestCase):
             app.session_state["result"] = result
             app.run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "设计方案")
+            self.assertEqual(app.subheader[0].value, "图像模型输入预览")
+            self.assertIn("尚未发送", app.info[0].value)
             self.assertEqual(app.code[0].value, generation_prompt)
+            self.assertEqual(app.button(key="send_generation").label, "发送并生成图片")
+            self.assertEqual(app.button(key="cancel_generation").label, "取消本次生成")
 
-            app.button[0].click().run()
+            app.button(key="send_generation").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "查看实验结果")
             self.assertFalse(any(

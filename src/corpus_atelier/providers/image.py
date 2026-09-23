@@ -11,6 +11,9 @@ from ..artifacts.hashing import digest_file
 
 
 class ImageProvider(Protocol):
+    def describe_request(self, prompt: str, *, size: str,
+                         reference_paths: list[Path] | None = None) -> dict: ...
+
     def generate(self, prompt: str, *, size: str, output: Path,
                  reference_paths: list[Path] | None = None) -> dict: ...
 
@@ -21,13 +24,13 @@ class OpenAIImageProvider:
         self.quality = quality
         self.client = client
 
-    def generate(self, prompt: str, *, size: str, output: Path,
-                 reference_paths: list[Path] | None = None) -> dict:
-        from ..artifacts.records import write_json, write_text
+    def describe_request(self, prompt: str, *, size: str,
+                         reference_paths: list[Path] | None = None) -> dict:
+        """Return the persisted, human-reviewable form of the provider request."""
         reference_paths = list(reference_paths or [])
         if len(reference_paths) > 3:
             raise ValueError("Image generation accepts at most three reference images.")
-        request = {
+        return {
             "prompt": prompt, "model": self.model, "quality": self.quality,
             "size": size, "output_format": "png", "n": 1,
             "operation": "reference_generation" if reference_paths else "generation",
@@ -36,6 +39,14 @@ class OpenAIImageProvider:
                 for path in reference_paths
             ],
         }
+
+    def generate(self, prompt: str, *, size: str, output: Path,
+                 reference_paths: list[Path] | None = None) -> dict:
+        from ..artifacts.records import write_json, write_text
+        reference_paths = list(reference_paths or [])
+        request = self.describe_request(
+            prompt, size=size, reference_paths=reference_paths,
+        )
         write_json(output / "request.json", request)
         write_text(output / "prompt.md", prompt)
         response_record = {"status": "requested"}

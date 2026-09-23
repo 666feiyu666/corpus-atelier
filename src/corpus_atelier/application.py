@@ -63,10 +63,11 @@ class _Runtime:
         }
 
     @staticmethod
-    def _generation_binding(state, *, proposal, image_spec, prompt):
+    def _generation_binding(state, *, proposal, image_spec, prompt, request):
         binding = {
             "generation_mode": state["generation_mode"],
             "prompt": prompt,
+            "request": request,
             "proposal": proposal,
             "image_spec": image_spec,
             "generation_size": state["generation_size"],
@@ -185,6 +186,16 @@ class _Runtime:
             self.store.json(run_dir, "image-spec/image-spec.json", image_spec)
             generation_prompt = compile_generation_prompt(image_spec)
             self.store.text(run_dir, "generation/prompt.md", generation_prompt)
+            generation_request = self.image_provider.describe_request(
+                generation_prompt,
+                size=state["generation_size"],
+                reference_paths=[
+                    Path(path) for path in state.get("reference_image_paths", [])
+                ],
+            )
+            self.store.json(
+                run_dir, "generation/request-preview.json", generation_request,
+            )
             self.store.register(
                 run_dir,
                 image_prompt_request="image-spec/request.json",
@@ -192,17 +203,20 @@ class _Runtime:
                 image_prompt_response="image-spec/response.json",
                 image_spec="image-spec/image-spec.json",
                 generation_prompt="generation/prompt.md",
+                generation_request_preview="generation/request-preview.json",
             )
             digest = digest_json(self._generation_binding(
                 state,
                 proposal=state["proposal"],
                 image_spec=image_spec,
                 prompt=generation_prompt,
+                request=generation_request,
             ))
             return {
                 "image_prompt": prompt,
                 "image_spec": image_spec,
                 "generation_prompt": generation_prompt,
+                "generation_request": generation_request,
                 "generation_digest": digest,
                 "status": "awaiting_approval",
             }
@@ -235,6 +249,9 @@ class _Runtime:
                 "presentation": str((run_dir / "design/presentation.md").resolve()),
                 "image_spec": str((run_dir / "image-spec/image-spec.json").resolve()),
                 "generation_prompt": str((run_dir / "generation/prompt.md").resolve()),
+                "generation_request_preview": str(
+                    (run_dir / "generation/request-preview.json").resolve()
+                ),
                 "canvas": str((run_dir / "generation/canvas.json").resolve()),
             },
         }
@@ -271,11 +288,23 @@ class _Runtime:
         saved_canvas = json.loads(
             (run_dir / "generation/canvas.json").read_text(encoding="utf-8")
         )
+        saved_request = json.loads(
+            (run_dir / "generation/request-preview.json").read_text(encoding="utf-8")
+        )
+        current_request = self.image_provider.describe_request(
+            state["generation_prompt"],
+            size=state["generation_size"],
+            reference_paths=[
+                Path(path) for path in state.get("reference_image_paths", [])
+            ],
+        )
         if (
             saved_prompt != state["generation_prompt"]
             or saved_proposal != state["proposal"]
             or saved_image_spec != state["image_spec"]
             or saved_canvas != state["canvas"]
+            or saved_request != state["generation_request"]
+            or current_request != state["generation_request"]
         ):
             raise ValueError("Approved generation artifacts changed after preview.")
         if state["generation_mode"] == "with_corpus":
@@ -296,6 +325,7 @@ class _Runtime:
             proposal=state["proposal"],
             image_spec=state["image_spec"],
             prompt=state["generation_prompt"],
+            request=state["generation_request"],
         ))
         if actual != state["generation_digest"]:
             raise ValueError("Approved generation content changed.")

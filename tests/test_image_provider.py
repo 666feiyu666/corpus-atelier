@@ -42,7 +42,12 @@ class ImageProviderTests(unittest.TestCase):
             output = root / "output"
             output.mkdir()
 
-            response = OpenAIImageProvider(client=client).generate(
+            provider = OpenAIImageProvider(client=client)
+            preview = provider.describe_request(
+                "Create a new poster.", size="1024x1536",
+                reference_paths=[reference],
+            )
+            response = provider.generate(
                 "Create a new poster.", size="1024x1536", output=output,
                 reference_paths=[reference],
             )
@@ -52,6 +57,7 @@ class ImageProviderTests(unittest.TestCase):
             self.assertEqual(response["status"], "generated")
             request = json.loads(
                 (output / "request.json").read_text(encoding="utf-8"))
+            self.assertEqual(request, preview)
             self.assertEqual(request["operation"], "reference_generation")
             self.assertEqual(len(request["references"]), 1)
 

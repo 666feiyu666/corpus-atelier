@@ -60,6 +60,7 @@ class FakeTextProvider:
 
 class FakeImageProvider:
     model = "fake-image"
+    quality = "test"
 
     def __init__(self, fail=False):
         self.calls = 0
@@ -67,15 +68,31 @@ class FakeImageProvider:
         self.last_size = None
         self.fail = fail
 
+    def describe_request(self, prompt: str, *, size: str,
+                         reference_paths: list[Path] | None = None):
+        reference_paths = list(reference_paths or [])
+        return {
+            "prompt": prompt,
+            "model": self.model,
+            "quality": self.quality,
+            "size": size,
+            "output_format": "png",
+            "n": 1,
+            "operation": "reference_generation" if reference_paths else "generation",
+            "references": [
+                {"file": path.name, "sha256": digest_file(path)}
+                for path in reference_paths
+            ],
+        }
+
     def generate(self, prompt: str, *, size: str, output: Path,
                  reference_paths: list[Path] | None = None):
         self.calls += 1
         self.last_size = size
         self.reference_paths = list(reference_paths or [])
-        write_json(output / "request.json", {
-            "prompt": prompt, "size": size, "model": self.model,
-            "references": [str(path) for path in self.reference_paths],
-        })
+        write_json(output / "request.json", self.describe_request(
+            prompt, size=size, reference_paths=self.reference_paths,
+        ))
         write_text(output / "prompt.md", prompt)
         if self.fail:
             write_json(output / "response.json", {"status": "failed", "error_type": "RuntimeError"})

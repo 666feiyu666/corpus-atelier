@@ -350,9 +350,10 @@ def _start_page() -> None:
         st.error(f"无法生成设计方案：{exc}")
 
 
-def _approval_page(result: RunResult) -> None:
+def _generation_preview_page(result: RunResult) -> None:
     proposal = read_json_artifact(result, "proposal")
-    st.subheader("设计方案")
+    st.subheader("图像模型输入预览")
+    st.info("以下内容尚未发送给图像模型。确认无误后，再开始生成图片。")
     manifest = read_json_artifact(result, "manifest")
     mode_label = {
         "without_corpus": "无语料库生成",
@@ -360,10 +361,7 @@ def _approval_page(result: RunResult) -> None:
     }.get(manifest.get("generation_mode"))
     if mode_label:
         st.caption(f"研究模式：{mode_label}")
-    reference_image = result.artifacts.get("reference_image")
-    if reference_image:
-        with st.expander("查看所选参考图"):
-            st.image(reference_image, width="stretch")
+    st.markdown("**设计方案**")
     st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))
     description = proposal.get("design_description")
     if description:
@@ -372,19 +370,41 @@ def _approval_page(result: RunResult) -> None:
     rationale = proposal.get("design_rationale")
     if rationale:
         st.caption(rationale)
-    canvas = read_json_artifact(result, "canvas")
-    if canvas:
-        ratio = canvas["ratio"]
-        st.info(f"画布：{ratio[0]}:{ratio[1]} · {canvas['size']} px")
+    request = read_json_artifact(result, "generation_request_preview")
     generation_prompt = read_text_artifact(result, "generation_prompt")
-    if generation_prompt:
-        with st.expander("发送给图像模型的完整提示词", expanded=True):
-            st.code(generation_prompt, language=None, wrap_lines=True)
-    approve, reject = st.columns(2)
-    if approve.button("批准并生成", type="primary", width="stretch"):
-        _resume(HumanDecision(True, reviewer="streamlit-user"), "正在生成图片…")
-    if reject.button("放弃", width="stretch"):
-        _resume(HumanDecision(False, reviewer="streamlit-user"), "正在结束本次实验…")
+    with st.container(border=True):
+        st.markdown("**将发送的请求**")
+        if request:
+            parameters = [
+                f"模型：`{request.get('model', '未记录')}`",
+                f"质量：`{request.get('quality', '未记录')}`",
+                f"尺寸：`{request.get('size', '未记录')}`",
+                f"格式：`{request.get('output_format', '未记录')}`",
+            ]
+            st.markdown(" · ".join(parameters))
+        reference_image = result.artifacts.get("reference_image")
+        if reference_image:
+            with st.expander("参考图片", expanded=True):
+                st.image(reference_image, width="stretch")
+        if generation_prompt:
+            with st.expander("完整提示词", expanded=True):
+                st.code(generation_prompt, language=None, wrap_lines=True)
+    with st.container(horizontal=True, horizontal_alignment="right"):
+        if st.button(
+            "取消本次生成", key="cancel_generation", width="content",
+        ):
+            _resume(
+                HumanDecision(False, reviewer="streamlit-user"),
+                "正在取消本次生成…",
+            )
+        if st.button(
+            "发送并生成图片", type="primary", key="send_generation",
+            width="content",
+        ):
+            _resume(
+                HumanDecision(True, reviewer="streamlit-user"),
+                "正在生成图片…",
+            )
 
 
 def _final_decision_page(result: RunResult) -> None:
@@ -400,7 +420,7 @@ def _final_decision_page(result: RunResult) -> None:
 def _terminal_page(result: RunResult) -> None:
     labels = {
         "completed": "实验结果已接受",
-        "rejected": "已放弃图像生成",
+        "rejected": "本次图像生成已取消",
         "discarded": "实验结果已放弃",
         "failed": "本次实验失败",
     }
@@ -428,7 +448,7 @@ def main() -> None:
     if result is None:
         _start_page()
     elif result.status == "awaiting_approval":
-        _approval_page(result)
+        _generation_preview_page(result)
     elif result.status == "awaiting_final_decision":
         _final_decision_page(result)
     elif result.status in TERMINAL_STATUSES:

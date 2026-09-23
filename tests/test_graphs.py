@@ -42,9 +42,22 @@ class GraphTests(unittest.TestCase):
         ))
         self.assertEqual(result.status, "awaiting_approval")
         self.assertEqual(image.calls, 0)
+        preview = json.loads(Path(
+            result.artifacts["generation_request_preview"]
+        ).read_text(encoding="utf-8"))
+        self.assertEqual(preview["model"], "fake-image")
+        self.assertEqual(preview["quality"], "test")
+        self.assertEqual(preview["prompt"], Path(
+            result.artifacts["generation_prompt"]
+        ).read_text(encoding="utf-8"))
+        self.assertEqual(len(preview["references"]), 1)
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
         self.assertEqual(result.status, "awaiting_final_decision")
         self.assertEqual(image.calls, 1)
+        sent_request = json.loads(Path(
+            result.artifacts["generation_request"]
+        ).read_text(encoding="utf-8"))
+        self.assertEqual(sent_request, preview)
         self.assertIn("image", result.artifacts)
         self.assertNotIn("review", result.artifacts)
         pending_manifest = json.loads(
@@ -217,6 +230,28 @@ class GraphTests(unittest.TestCase):
             prompt.write_text(
                 prompt.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8",
             )
+            with self.assertRaisesRegex(ValueError, "changed after preview"):
+                app.resume(started.run_id, HumanDecision(True, reviewer="test"))
+            self.assertEqual(image.calls, 0)
+
+    def test_changed_image_request_invalidates_preview(self):
+        with TemporaryDirectory() as directory:
+            image = FakeImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=FakeTextProvider(),
+                image_provider=image,
+            )
+            started = app.start(DesignJob(
+                case_id="poster-01",
+                profile="rhetoric-poster",
+                brief=brief("poster-01"),
+                generation_mode="with_corpus",
+                snapshot=SNAPSHOT,
+                reference=REFERENCE,
+            ))
+            image.quality = "changed-after-preview"
+
             with self.assertRaisesRegex(ValueError, "changed after preview"):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 0)

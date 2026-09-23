@@ -79,6 +79,7 @@ class AtelierState(TypedDict, total=False):
     image_prompt: str
     image_spec: dict[str, Any]
     generation_prompt: str
+    generation_request: dict[str, Any]
     generation_size: str
     output_ratio: tuple[int, int]
     canvas: dict[str, Any]

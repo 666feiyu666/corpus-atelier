@@ -20,8 +20,8 @@ def load_brief():
     return json.loads((CASES / "brief.json").read_text(encoding="utf-8"))
 
 
-class ReferenceModeTests(unittest.TestCase):
-    def _start(self, mode):
+class VisualReferenceTests(unittest.TestCase):
+    def _start(self):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         text = FakeTextProvider()
@@ -34,19 +34,18 @@ class ReferenceModeTests(unittest.TestCase):
             profile="rhetoric-poster",
             brief=load_brief(),
             generation_mode="with_corpus",
-            reference_mode=f"style_{mode}",
             snapshot=SNAPSHOT,
             reference=REFERENCE,
         ))
         return app, text, image, result
 
-    def test_grounded_designer_reads_the_selected_image_directly(self):
-        _, text, image, result = self._start("grounded")
+    def test_designer_reads_the_selected_image_without_a_predefined_relationship(self):
+        _, text, image, result = self._start()
         self.assertEqual(result.status, "awaiting_approval")
         self.assertEqual(image.calls, 0)
         self.assertEqual(len(text.design_calls), 1)
         self.assertEqual(len(text.design_calls[0]["reference_paths"]), 1)
-        self.assertIn("Style-grounded reference relationship", text.design_calls[0]["prompt"])
+        self.assertNotIn("reference relationship", text.design_calls[0]["prompt"].lower())
         proposal = json.loads(Path(result.artifacts["proposal"]).read_text(encoding="utf-8"))
         self.assertNotIn("evidence_ids", proposal)
         self.assertIn("reference_package", result.artifacts)
@@ -54,21 +53,13 @@ class ReferenceModeTests(unittest.TestCase):
         manifest = json.loads(
             Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
         )
-        self.assertEqual(manifest["reference_mode"], "style_grounded")
+        self.assertNotIn("reference_mode", manifest)
 
     def test_same_reference_is_used_for_design_and_generation(self):
-        app, text, image, result = self._start("grounded")
+        app, text, image, result = self._start()
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
         self.assertEqual(result.status, "awaiting_final_decision")
         self.assertEqual(image.reference_paths, text.design_calls[0]["reference_paths"])
-
-    def test_inspired_mode_changes_the_direct_designer_contract(self):
-        _, text, _, result = self._start("inspired")
-        self.assertEqual(result.status, "awaiting_approval")
-        self.assertIn(
-            "loose visual inspiration",
-            text.design_calls[0]["prompt"],
-        )
 
     def test_without_corpus_uses_the_same_brief_without_reference_instructions(self):
         with TemporaryDirectory() as directory:
@@ -108,7 +99,7 @@ class ReferenceModeTests(unittest.TestCase):
         self.assertTrue(path.is_file())
 
     def test_reference_package_change_invalidates_approval(self):
-        app, _, image, result = self._start("grounded")
+        app, _, image, result = self._start()
         package = Path(result.artifacts["reference_package"])
         value = json.loads(package.read_text(encoding="utf-8"))
         value["reference"]["title"] = "changed after approval preview"

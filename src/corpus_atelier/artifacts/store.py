@@ -36,7 +36,6 @@ class ArtifactStore:
         self.root = Path(root).resolve()
 
     def create(self, *, case_id: str, brief: dict, profile, generation_mode: str,
-               reference_mode: str | None = None,
                snapshot: Path | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
         case_root = self.root / case_id
@@ -56,7 +55,7 @@ class ArtifactStore:
             "deliverable": profile.deliverable, "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 7,
+            "format_version": 1, "workflow_version": 8,
             "case_id": case_id, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,
@@ -65,14 +64,12 @@ class ArtifactStore:
         }
         if generation_mode == "with_corpus":
             if snapshot is None:
-                raise ValueError("Corpus-grounded runs require an atlas snapshot.")
+                raise ValueError("With-corpus runs require an atlas snapshot.")
             manifest.update(
                 corpus_source="atlas_snapshot",
                 reference_selection_mode="explicit-single-image",
                 atlas_snapshot=str(snapshot.resolve()),
             )
-        if reference_mode is not None:
-            manifest["reference_mode"] = reference_mode
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 

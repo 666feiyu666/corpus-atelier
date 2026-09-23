@@ -13,7 +13,6 @@ RunStatus = Literal[
 ]
 
 GenerationMode = Literal["without_corpus", "with_corpus"]
-ReferenceMode = Literal["style_grounded", "style_inspired"]
 
 
 @dataclass(frozen=True)
@@ -22,7 +21,6 @@ class DesignJob:
     profile: str
     brief: dict[str, Any]
     generation_mode: GenerationMode
-    reference_mode: ReferenceMode | None = None
     snapshot: Path | None = None
     reference: dict[str, Any] | None = None
 
@@ -70,7 +68,6 @@ class AtelierState(TypedDict, total=False):
     run_dir: str
     profile: str
     generation_mode: GenerationMode
-    reference_mode: ReferenceMode | None
     brief: dict[str, Any]
     snapshot: str
     reference_selection: dict[str, Any]

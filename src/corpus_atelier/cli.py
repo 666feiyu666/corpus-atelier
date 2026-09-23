@@ -39,9 +39,6 @@ def _parser() -> argparse.ArgumentParser:
         default="without_corpus",
     )
     run.add_argument("--reference", type=Path)
-    run.add_argument(
-        "--reference-mode", choices=("style_grounded", "style_inspired"),
-    )
     run.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
 
     preview = commands.add_parser(
@@ -118,7 +115,6 @@ def main(argv=None) -> int:
         profile=args.profile,
         brief=_read_object(args.brief, "Brief"),
         generation_mode=args.generation_mode,
-        reference_mode=args.reference_mode,
         snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
         reference=reference,
     ))

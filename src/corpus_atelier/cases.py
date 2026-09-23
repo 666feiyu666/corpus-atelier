@@ -17,9 +17,7 @@ CASE_MANIFEST_KEYS = {
     "profile",
     "order",
     "default_reference_id",
-    "default_reference_mode",
 }
-REFERENCE_MODES = {"style_grounded", "style_inspired"}
 
 
 @dataclass(frozen=True)
@@ -30,7 +28,6 @@ class ExampleCase:
     brief_path: Path
     order: int = 100
     default_reference_id: str | None = None
-    default_reference_mode: str | None = None
 
 
 def _read_object(path: Path, description: str) -> dict:
@@ -80,18 +77,6 @@ def _load_case(directory: Path) -> ExampleCase:
     reference_id = _optional_nonempty_string(
         manifest, "default_reference_id", manifest_path,
     )
-    reference_mode = _optional_nonempty_string(
-        manifest, "default_reference_mode", manifest_path,
-    )
-    if (reference_id is None) != (reference_mode is None):
-        raise ValueError(
-            "default_reference_id and default_reference_mode must be provided together "
-            f"in {manifest_path}."
-        )
-    if reference_mode is not None and reference_mode not in REFERENCE_MODES:
-        raise ValueError(
-            f"Unsupported default_reference_mode {reference_mode!r} in {manifest_path}."
-        )
 
     brief = _read_object(brief_path, "case brief")
     validate(brief, profile.brief_schema)
@@ -102,7 +87,6 @@ def _load_case(directory: Path) -> ExampleCase:
         brief_path=brief_path.resolve(),
         order=order,
         default_reference_id=reference_id,
-        default_reference_mode=reference_mode,
     )
 
 

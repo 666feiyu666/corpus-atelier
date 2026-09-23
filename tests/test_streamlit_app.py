@@ -126,10 +126,9 @@ class StreamlitAppTests(unittest.TestCase):
             app.selectbox(key="selected_reference_id").value,
             "mucha-poster-124474277",
         )
-        self.assertEqual(
-            app.selectbox(key="example_reference_mode").value,
-            "以共同风格特征为约束",
-        )
+        self.assertFalse(any(
+            item.label == "参考图使用策略" for item in app.selectbox
+        ))
         brief = json.loads(app.text_area(key="brief_editor").value)
         self.assertNotIn("reference_mode", brief)
         self.assertNotIn("corpus", brief["purpose"].lower())
@@ -139,9 +138,6 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertFalse(any(
             item.key == "selected_reference_id" for item in app.selectbox
-        ))
-        self.assertFalse(any(
-            item.key == "example_reference_mode" for item in app.selectbox
         ))
 
     def test_discovered_therapy_case_is_selectable(self):

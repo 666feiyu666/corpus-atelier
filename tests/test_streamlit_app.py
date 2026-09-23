@@ -23,10 +23,7 @@ class FakeUiApplication:
         self.artifacts = artifacts
 
     def resume(self, run_id, decision):
-        if hasattr(decision, "approved"):
-            status = "awaiting_final_decision" if decision.approved else "rejected"
-        else:
-            status = "completed" if decision.action == "accept" else "discarded"
+        status = "completed" if decision.approved else "rejected"
         return RunResult(
             run_id=run_id, status=status, run_dir=self.run_dir,
             message=status, artifacts=self.artifacts,
@@ -158,7 +155,7 @@ class StreamlitAppTests(unittest.TestCase):
             item.key == "selected_reference_id" for item in app.selectbox
         ))
 
-    def test_approval_acceptance_flow_renders_each_page_state(self):
+    def test_generation_preview_flows_directly_to_completed_result(self):
         with TemporaryDirectory() as directory:
             run_dir = Path(directory)
             proposal = run_dir / "proposal.json"
@@ -210,11 +207,5 @@ class StreamlitAppTests(unittest.TestCase):
 
             app.button(key="send_generation").click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "查看实验结果")
-            self.assertFalse(any(
-                "自动审查" in caption.value for caption in app.caption
-            ))
-
-            app.button[0].click().run()
-            self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "实验结果已接受")
+            self.assertEqual(app.subheader[0].value, "生成完成")
+            self.assertEqual([button.label for button in app.button], ["开始新实验"])

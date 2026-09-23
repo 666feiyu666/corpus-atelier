@@ -9,8 +9,7 @@ from typing import Any, Literal, TypedDict
 RunStatus = Literal[
     "created", "preparing_inputs", "loading_reference", "designing",
     "compiling_image_spec",
-    "awaiting_approval", "rejected", "generating", "awaiting_final_decision",
-    "completed", "discarded", "failed",
+    "awaiting_approval", "rejected", "generating", "completed", "failed",
 ]
 
 GenerationMode = Literal["without_corpus", "with_corpus"]
@@ -29,16 +28,6 @@ class DesignJob:
 @dataclass(frozen=True)
 class HumanDecision:
     approved: bool
-    reviewer: str = "cli-user"
-    note: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class FinalDecision:
-    action: Literal["accept", "discard"]
     reviewer: str = "cli-user"
     note: str = ""
 
@@ -86,6 +75,5 @@ class AtelierState(TypedDict, total=False):
     generation_digest: str
     approval: dict[str, Any]
     image_path: str
-    final_action: str
     status: RunStatus
     error: str

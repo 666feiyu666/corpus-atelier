@@ -12,7 +12,6 @@ def build_graph(runtime, checkpointer):
     graph.add_node("compile_image_spec", runtime.compile_image_spec)
     graph.add_node("approval", runtime.approval)
     graph.add_node("generate", runtime.generate)
-    graph.add_node("final_decision", runtime.final_decision)
 
     graph.add_edge(START, "prepare_inputs")
     graph.add_edge("prepare_inputs", "design")
@@ -23,6 +22,5 @@ def build_graph(runtime, checkpointer):
         lambda state: "generate" if state.get("status") != "rejected" else "end",
         {"generate": "generate", "end": END},
     )
-    graph.add_edge("generate", "final_decision")
-    graph.add_edge("final_decision", END)
+    graph.add_edge("generate", END)
     return graph.compile(checkpointer=checkpointer)

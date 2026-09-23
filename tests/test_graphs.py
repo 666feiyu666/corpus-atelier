@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.state import DesignJob, FinalDecision, HumanDecision
+from corpus_atelier.state import DesignJob, HumanDecision
 from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
@@ -52,7 +52,7 @@ class GraphTests(unittest.TestCase):
         ).read_text(encoding="utf-8"))
         self.assertEqual(len(preview["references"]), 1)
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
-        self.assertEqual(result.status, "awaiting_final_decision")
+        self.assertEqual(result.status, "completed")
         self.assertEqual(image.calls, 1)
         sent_request = json.loads(Path(
             result.artifacts["generation_request"]
@@ -60,28 +60,22 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(sent_request, preview)
         self.assertIn("image", result.artifacts)
         self.assertNotIn("review", result.artifacts)
-        pending_manifest = json.loads(
+        manifest = json.loads(
             Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
         )
-        self.assertIn("image_sha256", pending_manifest["final_decision_request"])
-        self.assertNotIn("review", pending_manifest["final_decision_request"])
+        self.assertIn("image_sha256", manifest)
+        self.assertIn("completed_at", manifest)
+        self.assertNotIn("final_decision_request", manifest)
         self.assertFalse((result.run_dir / "review").exists())
         from PIL import Image
         with Image.open(result.artifacts["image"]) as opened:
             expected = (2, 3) if profile == "rhetoric-poster" else (47, 20)
             self.assertEqual(opened.width * expected[1], opened.height * expected[0])
-        result = app.resume(result.run_id, FinalDecision("accept", reviewer="test"))
-        self.assertEqual(result.status, "completed")
-        self.assertIn("final_decision", result.artifacts)
         self.assertEqual(result.run_dir.parent.name, case)
-        manifest = json.loads(Path(result.artifacts["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["case_id"], case)
-        self.assertEqual(manifest["workflow_version"], 9)
+        self.assertEqual(manifest["workflow_version"], 10)
         self.assertNotIn("review", manifest["artifacts"])
-        self.assertEqual(
-            manifest["artifacts"]["final_decision"],
-            "decision/final-decision.json",
-        )
+        self.assertNotIn("final_decision", manifest["artifacts"])
         return result
 
     def test_rhetoric_graph_end_to_end(self):
@@ -125,7 +119,7 @@ class GraphTests(unittest.TestCase):
             self.assertEqual(canvas["ratio"], [4, 5])
 
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
-            self.assertEqual(result.status, "awaiting_final_decision")
+            self.assertEqual(result.status, "completed")
             self.assertEqual(image.last_size, canvas["size"])
             from PIL import Image
             with Image.open(result.artifacts["image"]) as opened:
@@ -279,26 +273,6 @@ class GraphTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed after preview"):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 0)
-
-    def test_final_decision_only_accepts_or_discards(self):
-        with TemporaryDirectory() as directory:
-            app = CorpusAtelierApplication(
-                runs_root=directory,
-                text_provider=FakeTextProvider(),
-                image_provider=FakeImageProvider(),
-            )
-            result = app.start(DesignJob(
-                case_id="poster-01",
-                profile="rhetoric-poster",
-                brief=brief("poster-01"),
-                generation_mode="with_corpus",
-                snapshot=SNAPSHOT,
-                reference=REFERENCE,
-            ))
-            result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
-            result = app.resume(result.run_id, FinalDecision("discard", reviewer="test"))
-            self.assertEqual(result.status, "discarded")
-
 
 if __name__ == "__main__":
     unittest.main()

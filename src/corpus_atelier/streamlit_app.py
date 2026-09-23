@@ -13,13 +13,13 @@ from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.artifacts.store import validate_case_id
 from corpus_atelier.cases import discover_cases
 from corpus_atelier.materials import list_references
-from corpus_atelier.state import DesignJob, FinalDecision, HumanDecision, RunResult
+from corpus_atelier.state import DesignJob, HumanDecision, RunResult
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
 CASES = discover_cases(ROOT / "experiments/cases")
-TERMINAL_STATUSES = {"completed", "rejected", "discarded", "failed"}
+TERMINAL_STATUSES = {"completed", "rejected", "failed"}
 DESIGN_METHODS = {
     "修辞导向": "rhetoric-graphic",
     "艺术指导导向": "art-graphic",
@@ -271,7 +271,7 @@ def _validate_start_inputs(
         raise ValueError("有语料库生成需要选择一张参考图像。")
 
 
-def _resume(decision: HumanDecision | FinalDecision, message: str) -> None:
+def _resume(decision: HumanDecision, message: str) -> None:
     app: CorpusAtelierApplication = st.session_state.atelier_app
     result: RunResult = st.session_state.result
     st.session_state.ui_error = ""
@@ -407,21 +407,10 @@ def _generation_preview_page(result: RunResult) -> None:
             )
 
 
-def _final_decision_page(result: RunResult) -> None:
-    st.subheader("查看实验结果")
-    _show_image(result)
-    accept, discard = st.columns(2)
-    if accept.button("接受结果", type="primary", width="stretch"):
-        _resume(FinalDecision("accept", reviewer="streamlit-user"), "正在保存决定…")
-    if discard.button("放弃结果", width="stretch"):
-        _resume(FinalDecision("discard", reviewer="streamlit-user"), "正在结束本次实验…")
-
-
 def _terminal_page(result: RunResult) -> None:
     labels = {
-        "completed": "实验结果已接受",
+        "completed": "生成完成",
         "rejected": "本次图像生成已取消",
-        "discarded": "实验结果已放弃",
         "failed": "本次实验失败",
     }
     st.subheader(labels.get(result.status, "本次实验已结束"))
@@ -449,8 +438,6 @@ def main() -> None:
         _start_page()
     elif result.status == "awaiting_approval":
         _generation_preview_page(result)
-    elif result.status == "awaiting_final_decision":
-        _final_decision_page(result)
     elif result.status in TERMINAL_STATUSES:
         _terminal_page(result)
     else:

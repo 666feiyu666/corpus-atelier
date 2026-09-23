@@ -60,7 +60,7 @@ class VisualReferenceTests(unittest.TestCase):
     def test_same_reference_is_used_for_design_and_generation(self):
         app, text, image, result = self._start()
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
-        self.assertEqual(result.status, "awaiting_final_decision")
+        self.assertEqual(result.status, "completed")
         self.assertEqual(image.reference_paths, text.design_calls[0]["reference_paths"])
 
     def test_without_corpus_uses_the_same_brief_without_reference_instructions(self):

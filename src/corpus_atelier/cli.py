@@ -13,7 +13,7 @@ from .artifacts.records import write_json
 from .design.validation import validate
 from .materials import build_reference_package
 from .registry import PROFILES, get_profile
-from .state import DesignJob, FinalDecision, HumanDecision
+from .state import DesignJob, HumanDecision
 
 
 DEFAULT_SNAPSHOT = Path("experiments/atlas-snapshot/mucha-commercial")
@@ -121,21 +121,16 @@ def main(argv=None) -> int:
     while True:
         _print_result(result)
         if result.status == "awaiting_approval":
-            answer = input("Approve this exact image-generation request? [y/N] ").strip().lower()
-            note = input("Approval note (optional): ").strip() if answer in {"y", "yes"} else ""
+            answer = input(
+                "Send this exact request to the image model? [y/N] "
+            ).strip().lower()
+            note = (
+                input("Confirmation note (optional): ").strip()
+                if answer in {"y", "yes"}
+                else ""
+            )
             result = app.resume(result.run_id, HumanDecision(
                 approved=answer in {"y", "yes"}, note=note,
             ))
             continue
-        if result.status == "awaiting_final_decision":
-            action = input("Accept or discard this image? [a/d] ").strip().lower()
-            if action in {"a", "accept"}:
-                decision = FinalDecision("accept")
-            elif action in {"d", "discard"}:
-                decision = FinalDecision("discard")
-            else:
-                print("Please enter a or d.")
-                continue
-            result = app.resume(result.run_id, decision)
-            continue
-        return 0 if result.status in {"completed", "rejected", "discarded"} else 1
+        return 0 if result.status in {"completed", "rejected"} else 1

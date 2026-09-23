@@ -361,37 +361,12 @@ class _Runtime:
         )
         self.store.update(
             run_dir,
-            "awaiting_final_decision",
+            "completed",
             latest_image=str(image_path),
             image_sha256=digest_file(image_path),
-        )
-        return {"image_path": str(image_path), "status": "awaiting_final_decision"}
-
-    def final_decision(self, state):
-        run_dir = self._dir(state)
-        payload = {
-            "run_id": state["run_id"],
-            "image": state["image_path"],
-            "image_sha256": digest_file(Path(state["image_path"])),
-        }
-        self.store.update(run_dir, "awaiting_final_decision", final_decision_request=payload)
-        decision = interrupt(payload)
-        if not isinstance(decision, dict) or decision.get("action") not in {
-            "accept", "discard",
-        }:
-            raise ValueError("Final decision must explicitly accept or discard the image.")
-        action = decision["action"]
-        record = {**decision, "decided_at": datetime.now(timezone.utc).isoformat()}
-        terminal = "completed" if action == "accept" else "discarded"
-        self.store.json(run_dir, "decision/final-decision.json", record)
-        self.store.register(run_dir, final_decision="decision/final-decision.json")
-        self.store.update(
-            run_dir,
-            terminal,
-            final_decision=record,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
-        return {"final_action": action, "status": terminal}
+        return {"image_path": str(image_path), "status": "completed"}
 
 
 class CorpusAtelierApplication:
@@ -472,7 +447,7 @@ class CorpusAtelierApplication:
             )
             raise
         result = self._result(run_id)
-        if result.status in {"completed", "rejected", "discarded", "failed"}:
+        if result.status in {"completed", "rejected", "failed"}:
             self._active.pop(run_id, None)
         return result
 
@@ -514,7 +489,6 @@ class CorpusAtelierApplication:
             "reference_package",
             "reference_prompt",
             "reference_plan",
-            "final_decision",
         ):
             if name in registered:
                 paths[name] = summary.run_dir / registered[name]
@@ -541,9 +515,7 @@ class CorpusAtelierApplication:
         messages = {
             "awaiting_approval": "Review the saved proposal and generation prompt.",
             "rejected": "Image generation was rejected; the experiment remains recorded.",
-            "awaiting_final_decision": "Review the generated image and accept or discard it.",
-            "completed": "The reviewer accepted the generated image.",
-            "discarded": "The reviewer discarded the generated image.",
+            "completed": "Image generation completed and artifacts were saved.",
             "failed": "The experiment failed; inspect its manifest and saved attempts.",
         }
         return RunResult(

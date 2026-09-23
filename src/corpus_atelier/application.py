@@ -14,11 +14,11 @@ from .artifacts.records import write_json
 from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
 from .design.presentation import render
 from .design.canvas import resolve_canvas
-from .design.prompt_compiler import compile_generation_prompt
 from .design.rendering import normalize_canvas
 from .design.synthesis import synthesize
-from .design.validation import validate, validate_proposal
+from .design.validation import validate, validate_image_spec, validate_proposal
 from .graphs import build_graph
+from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
@@ -63,11 +63,12 @@ class _Runtime:
         }
 
     @staticmethod
-    def _generation_binding(state, *, proposal, prompt):
+    def _generation_binding(state, *, proposal, image_spec, prompt):
         binding = {
             "generation_mode": state["generation_mode"],
             "prompt": prompt,
             "proposal": proposal,
+            "image_spec": image_spec,
             "generation_size": state["generation_size"],
             "output_ratio": list(state["output_ratio"]),
             "canvas": state["canvas"],
@@ -84,11 +85,23 @@ class _Runtime:
         self.store.update(run_dir, "designing")
         prompt = ""
         try:
+            if profile.deliverable == "graphic-design.v1":
+                generation_size, output_ratio, canvas = resolve_canvas(state["brief"])
+            else:
+                generation_size = profile.default_size
+                output_ratio = profile.output_ratio
+                canvas = {
+                    "size": generation_size,
+                    "ratio": list(output_ratio),
+                    "mode": "profile_default",
+                }
+            self.store.json(run_dir, "generation/canvas.json", canvas)
             prompt, proposal, response = synthesize(
                 profile,
                 state["brief"],
                 self.text_provider,
                 [Path(path) for path in state.get("reference_image_paths", [])],
+                canvas=canvas,
             )
             request = {
                 "model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
@@ -113,41 +126,17 @@ class _Runtime:
             if proposal["status"] != "ready":
                 self.store.update(run_dir, proposal["status"])
                 raise ValueError(f"Design proposal is blocked: {proposal['status']}.")
-            if profile.deliverable == "graphic-design.v1":
-                generation_size, output_ratio, canvas = resolve_canvas(state["brief"])
-            else:
-                generation_size = profile.default_size
-                output_ratio = profile.output_ratio
-                canvas = {
-                    "size": generation_size,
-                    "ratio": list(output_ratio),
-                    "mode": "profile_default",
-                }
-            self.store.json(run_dir, "generation/canvas.json", canvas)
-            generation_prompt = compile_generation_prompt(proposal)
-            self.store.text(run_dir, "generation/prompt.md", generation_prompt)
             self.store.register(
                 run_dir,
-                generation_prompt="generation/prompt.md",
                 canvas="generation/canvas.json",
             )
-            generation_state = {
-                **state,
-                "generation_size": generation_size,
-                "output_ratio": output_ratio,
-                "canvas": canvas,
-            }
-            digest = digest_json(self._generation_binding(
-                generation_state, proposal=proposal, prompt=generation_prompt,
-            ))
             return {
                 "design_prompt": prompt,
                 "proposal": proposal,
-                "generation_prompt": generation_prompt,
                 "generation_size": generation_size,
                 "output_ratio": output_ratio,
                 "canvas": canvas,
-                "generation_digest": digest,
+                "status": "compiling_image_spec",
             }
         except Exception as exc:
             if prompt:
@@ -165,6 +154,74 @@ class _Runtime:
             self.store.register(run_dir, design_error=error_path)
             raise
 
+    def compile_image_spec(self, state):
+        run_dir = self._dir(state)
+        target_model = getattr(
+            self.image_provider, "model", type(self.image_provider).__name__,
+        )
+        self.store.update(run_dir, "compiling_image_spec")
+        prompt = ""
+        try:
+            prompt, image_spec, response = synthesize_image_spec(
+                state["proposal"],
+                brief=state["brief"],
+                canvas=state["canvas"],
+                provider_profile=target_model,
+                provider=self.text_provider,
+            )
+            image_spec = validate_image_spec(
+                image_spec, state["brief"].get("exact_copy", []),
+            )
+            request = {
+                "model": getattr(
+                    self.text_provider, "model", type(self.text_provider).__name__,
+                ),
+                "target_image_model": target_model,
+                "schema": "image-spec.schema.json",
+            }
+            self.store.json(run_dir, "image-spec/request.json", request)
+            self.store.text(run_dir, "image-spec/prompt.md", prompt)
+            self.store.json(run_dir, "image-spec/response.json", response)
+            self.store.json(run_dir, "image-spec/image-spec.json", image_spec)
+            generation_prompt = compile_generation_prompt(image_spec)
+            self.store.text(run_dir, "generation/prompt.md", generation_prompt)
+            self.store.register(
+                run_dir,
+                image_prompt_request="image-spec/request.json",
+                image_prompt="image-spec/prompt.md",
+                image_prompt_response="image-spec/response.json",
+                image_spec="image-spec/image-spec.json",
+                generation_prompt="generation/prompt.md",
+            )
+            digest = digest_json(self._generation_binding(
+                state,
+                proposal=state["proposal"],
+                image_spec=image_spec,
+                prompt=generation_prompt,
+            ))
+            return {
+                "image_prompt": prompt,
+                "image_spec": image_spec,
+                "generation_prompt": generation_prompt,
+                "generation_digest": digest,
+                "status": "awaiting_approval",
+            }
+        except Exception as exc:
+            if prompt:
+                self.store.text(run_dir, "image-spec/prompt.md", prompt)
+            error_path = (
+                "image-spec/error.json"
+                if (run_dir / "image-spec/response.json").exists()
+                else "image-spec/response.json"
+            )
+            self.store.json(run_dir, error_path, {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            })
+            self.store.register(run_dir, image_prompt_error=error_path)
+            raise
+
     def approval(self, state):
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
@@ -176,6 +233,7 @@ class _Runtime:
             "artifacts": {
                 "proposal": str((run_dir / "design/proposal.json").resolve()),
                 "presentation": str((run_dir / "design/presentation.md").resolve()),
+                "image_spec": str((run_dir / "image-spec/image-spec.json").resolve()),
                 "generation_prompt": str((run_dir / "generation/prompt.md").resolve()),
                 "canvas": str((run_dir / "generation/canvas.json").resolve()),
             },
@@ -207,12 +265,16 @@ class _Runtime:
         saved_proposal = json.loads(
             (run_dir / "design/proposal.json").read_text(encoding="utf-8")
         )
+        saved_image_spec = json.loads(
+            (run_dir / "image-spec/image-spec.json").read_text(encoding="utf-8")
+        )
         saved_canvas = json.loads(
             (run_dir / "generation/canvas.json").read_text(encoding="utf-8")
         )
         if (
             saved_prompt != state["generation_prompt"]
             or saved_proposal != state["proposal"]
+            or saved_image_spec != state["image_spec"]
             or saved_canvas != state["canvas"]
         ):
             raise ValueError("Approved generation artifacts changed after preview.")
@@ -230,7 +292,10 @@ class _Runtime:
                 raise ValueError("Approved generation artifacts changed after preview.")
             load_snapshot(Path(state["snapshot"]))
         actual = digest_json(self._generation_binding(
-            state, proposal=state["proposal"], prompt=state["generation_prompt"],
+            state,
+            proposal=state["proposal"],
+            image_spec=state["image_spec"],
+            prompt=state["generation_prompt"],
         ))
         if actual != state["generation_digest"]:
             raise ValueError("Approved generation content changed.")
@@ -239,7 +304,7 @@ class _Runtime:
 
         self.store.update(run_dir, "generating")
         attempt = self.store.next_attempt(run_dir, "generation")
-        write_json(attempt / "image-spec.json", state["proposal"]["image_spec"])
+        write_json(attempt / "image-spec.json", state["image_spec"])
         response = self.image_provider.generate(
             state["generation_prompt"],
             size=state["generation_size"],

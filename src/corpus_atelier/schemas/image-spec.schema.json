@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "communication_objective": {"type": "string"},
+    "audience_and_context": {"type": "string"},
+    "visible_copy": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "subject_and_scene": {
+      "type": "string",
+      "description": "Unambiguous rendering instructions for subject identity, count, ownership, part-whole continuity, pose, contact, and the scene as one coherent image."
+    },
+    "composition": {"type": "string"},
+    "typography": {"type": "string"},
+    "visual_treatment": {"type": "string"},
+    "allowed_variation": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "required": [
+    "communication_objective",
+    "audience_and_context",
+    "visible_copy",
+    "subject_and_scene",
+    "composition",
+    "typography",
+    "visual_treatment",
+    "allowed_variation",
+    "exclusions"
+  ]
+}

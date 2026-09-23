@@ -2,34 +2,14 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "status": {"type": "string", "enum": ["ready", "needs_sources", "needs_clarification"], "description": "Ready only when both unresolved arrays are empty and image_spec is complete."},
+    "status": {"type": "string", "enum": ["ready", "needs_sources", "needs_clarification"], "description": "Ready only when both unresolved arrays are empty and the design description is complete."},
     "brief_interpretation": {"type": "string"},
     "chosen_direction": {"type": "string"},
-    "design_rationale": {"type": "string", "description": "Concise, human-reviewable explanation; it is not sent to the image renderer."},
+    "design_description": {"type": "string", "description": "A complete provider-independent description from which a reader can mentally reconstruct the finished image: subjects, relationships, composition, hierarchy, typography, palette, medium, lighting, material, texture, and degree of realism."},
+    "design_rationale": {"type": "string", "description": "Concise, human-reviewable explanation of why the design decisions answer the brief."},
     "review_criteria": {"type": "array", "items": {"type": "string"}},
     "source_requirements": {"type": "array", "items": {"type": "string"}},
-    "clarification_questions": {"type": "array", "items": {"type": "string"}},
-    "image_spec": {
-      "description": "Self-contained, renderer-ready instructions for GPT Image 2 when ready; null whenever blocked.",
-      "anyOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "communication_objective": {"type": "string"},
-            "audience_and_context": {"type": "string"},
-            "visible_copy": {"type": "array", "items": {"type": "string"}},
-            "composition": {"type": "string"},
-            "typography": {"type": "string"},
-            "visual_treatment": {"type": "string"},
-            "allowed_variation": {"type": "array", "items": {"type": "string"}},
-            "exclusions": {"type": "array", "items": {"type": "string"}}
-          },
-          "required": ["communication_objective", "audience_and_context", "visible_copy", "composition", "typography", "visual_treatment", "allowed_variation", "exclusions"]
-        },
-        {"type": "null"}
-      ]
-    }
+    "clarification_questions": {"type": "array", "items": {"type": "string"}}
   },
-  "required": ["status", "brief_interpretation", "chosen_direction", "design_rationale", "review_criteria", "source_requirements", "clarification_questions", "image_spec"]
+  "required": ["status", "brief_interpretation", "chosen_direction", "design_description", "design_rationale", "review_criteria", "source_requirements", "clarification_questions"]
 }

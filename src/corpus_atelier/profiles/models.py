@@ -11,7 +11,7 @@ class DesignProfile:
     brief_schema: str
     proposal_schema: str
     description: str
-    objective_prompt: str
-    deliverable_prompts: tuple[str, ...]
+    objective_reference: str
+    deliverable_references: tuple[str, ...]
     default_size: str
     output_ratio: tuple[int, int]

@@ -25,8 +25,13 @@ def validate_proposal(value: dict, schema_name: str) -> dict:
     if value["status"] == "ready":
         if value["source_requirements"] or value["clarification_questions"]:
             raise ValueError("A ready proposal cannot have unresolved requirements.")
-        if value["image_spec"] is None:
-            raise ValueError("A ready proposal requires image_spec.")
-    elif value["image_spec"] is not None:
-        raise ValueError("A blocked proposal must withhold image_spec.")
+        if not value["design_description"].strip():
+            raise ValueError("A ready proposal requires a visible design description.")
+    return value
+
+
+def validate_image_spec(value: dict, exact_copy: list[str]) -> dict:
+    validate(value, "image-spec.schema.json")
+    if value["visible_copy"] != exact_copy:
+        raise ValueError("The image specification changed the exact visible copy.")
     return value

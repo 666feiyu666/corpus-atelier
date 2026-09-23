@@ -63,7 +63,7 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(result.run_dir.parent.name, case)
         manifest = json.loads(Path(result.artifacts["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["case_id"], case)
-        self.assertEqual(manifest["workflow_version"], 8)
+        self.assertEqual(manifest["workflow_version"], 9)
         self.assertNotIn("review", manifest["artifacts"])
         self.assertEqual(
             manifest["artifacts"]["final_decision"],

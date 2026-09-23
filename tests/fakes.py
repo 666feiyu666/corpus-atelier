@@ -1,5 +1,6 @@
 """Offline providers for deterministic graph tests."""
 
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -22,31 +23,38 @@ class FakeTextProvider:
             "reference_paths": reference_paths,
             "schema_name": schema_name,
         })
+        if schema_name == "image-spec.schema.json":
+            target = prompt.split("# Compilation target\n\n", 1)[1].split(
+                "\n\n# Completed design proposal", 1,
+            )[0]
+            visible = json.loads(target)["exact_copy"]
+            value = {
+                "communication_objective": "Invite the intended audience to engage.",
+                "audience_and_context": "The approved delivery and viewing context.",
+                "visible_copy": visible,
+                "subject_and_scene": "Render one coherent scene with explicit subject identity and relationships.",
+                "composition": "One dominant title, a central layered motif, and quiet margins.",
+                "typography": "High-contrast display title with restrained supporting type.",
+                "visual_treatment": "Contemporary editorial collage with flat organic forms.",
+                "allowed_variation": ["Texture density may vary"],
+                "exclusions": ["No logos", "No additional copy"],
+            }
+            return value, {"status": "completed", "provider": "fake"}
         is_graphic = schema_name == "graphic-design-proposal.schema.json"
         visible = ["CORPUS ATELIER"] if schema_name.startswith("poster") else [
             "从语料到视觉论证", "Corpus Atelier"
         ]
         if is_graphic:
             visible = ["Design for context"]
-        image_spec = {
-            "communication_objective": "Invite the intended audience to engage.",
-            "audience_and_context": "Mobile and public display contexts.",
-            "visible_copy": visible,
-            "composition": "One dominant title, a central layered motif, and quiet margins.",
-            "typography": "High-contrast display title with restrained supporting type.",
-            "visual_treatment": "Contemporary editorial collage with flat organic forms.",
-            "allowed_variation": ["Texture density may vary"],
-            "exclusions": ["No logos", "No additional copy"],
-        }
         value = {
             "status": "ready",
             "brief_interpretation": "A focused communication task.",
             "chosen_direction": "Layered archival forms become a clear visual argument.",
+            "design_description": "A portrait canvas with one central layered motif, a dominant title above it, quiet margins, flat organic forms, and a restrained editorial palette.",
             "design_rationale": "The hierarchy connects evidence, transformation, and invitation.",
             "review_criteria": ["Exact copy is visible", "The focal hierarchy is clear"],
             "source_requirements": [],
             "clarification_questions": [],
-            "image_spec": image_spec,
         }
         return value, {"status": "completed", "provider": "fake"}
 

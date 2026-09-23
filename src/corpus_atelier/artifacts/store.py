@@ -55,7 +55,7 @@ class ArtifactStore:
             "deliverable": profile.deliverable, "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 8,
+            "format_version": 1, "workflow_version": 9,
             "case_id": case_id, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,

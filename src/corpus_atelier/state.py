@@ -8,6 +8,7 @@ from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
     "created", "preparing_inputs", "loading_reference", "designing",
+    "compiling_image_spec",
     "awaiting_approval", "rejected", "generating", "awaiting_final_decision",
     "completed", "discarded", "failed",
 ]
@@ -75,6 +76,8 @@ class AtelierState(TypedDict, total=False):
     reference_image_paths: list[str]
     design_prompt: str
     proposal: dict[str, Any]
+    image_prompt: str
+    image_spec: dict[str, Any]
     generation_prompt: str
     generation_size: str
     output_ratio: tuple[int, int]

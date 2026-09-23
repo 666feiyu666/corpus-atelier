@@ -365,6 +365,10 @@ def _approval_page(result: RunResult) -> None:
         with st.expander("查看所选参考图"):
             st.image(reference_image, width="stretch")
     st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))
+    description = proposal.get("design_description")
+    if description:
+        with st.expander("完整视觉描述", expanded=True):
+            st.write(description)
     rationale = proposal.get("design_rationale")
     if rationale:
         st.caption(rationale)

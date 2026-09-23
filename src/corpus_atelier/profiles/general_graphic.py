@@ -12,8 +12,8 @@ RHETORIC_PROFILE = DesignProfile(
     brief_schema="graphic-design-brief.schema.json",
     proposal_schema="graphic-design-proposal.schema.json",
     description="Rhetoric-led graphic design for an open delivery context.",
-    objective_prompt=RHETORIC_LED,
-    deliverable_prompts=(GRAPHIC_DESIGN,),
+    objective_reference=RHETORIC_LED,
+    deliverable_references=(GRAPHIC_DESIGN,),
     default_size="1024x1024",
     output_ratio=(1, 1),
 )
@@ -26,8 +26,8 @@ ART_PROFILE = DesignProfile(
     brief_schema="graphic-design-brief.schema.json",
     proposal_schema="graphic-design-proposal.schema.json",
     description="Art-direction-led graphic design for an open delivery context.",
-    objective_prompt=ART_LED,
-    deliverable_prompts=(GRAPHIC_DESIGN,),
+    objective_reference=ART_LED,
+    deliverable_references=(GRAPHIC_DESIGN,),
     default_size="1024x1024",
     output_ratio=(1, 1),
 )

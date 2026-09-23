@@ -1,14 +1,15 @@
 import unittest
 
-from corpus_atelier.design.prompt_compiler import (
-    compile_design_prompt, compile_generation_prompt,
+from corpus_atelier.design.prompt_compiler import compile_design_prompt
+from corpus_atelier.image_prompt.prompt_compiler import (
+    compile_generation_prompt, compile_image_spec_prompt,
 )
 from corpus_atelier.registry import get_profile
 from tests.fakes import FakeTextProvider
 
 
 class PromptTests(unittest.TestCase):
-    def test_deliverable_prompts_compose_foundation_before_specialization(self):
+    def test_deliverable_references_compose_foundation_before_specialization(self):
         cases = {
             "rhetoric-poster": "Produce a portrait poster.",
             "art-article-cover": "Produce an exact 47:20 WeChat article cover.",
@@ -29,14 +30,13 @@ class PromptTests(unittest.TestCase):
         self.assertIn("# Deliverable foundation", general_prompt)
         self.assertNotIn("# Deliverable specialization", general_prompt)
 
-    def test_designer_receives_gpt_image_2_authoring_knowledge(self):
+    def test_designer_receives_design_skill_without_image_model_knowledge(self):
         prompt = compile_design_prompt(
             get_profile("rhetoric-poster"), {"topic": "x"},
         )
-        self.assertIn("GPT Image 2 authoring knowledge", prompt)
-        self.assertIn("image_spec", prompt)
-        self.assertIn("own without the design_rationale", prompt)
-        self.assertIn("focal subject and supporting elements", prompt)
+        self.assertIn("coherent mental image", prompt)
+        self.assertIn("design_description", prompt)
+        self.assertNotIn("GPT Image 2 compilation guidance", prompt)
         self.assertNotIn("Untrusted selected visual reference", prompt)
 
     def test_design_prompt_has_no_predefined_reference_relationship(self):
@@ -48,14 +48,35 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("Untrusted selected visual reference", prompt)
 
     def test_generation_receives_spec_not_rationale(self):
-        proposal, _ = FakeTextProvider().propose("", schema_name="poster-proposal.schema.json")
-        prompt = compile_generation_prompt(proposal)
+        provider = FakeTextProvider()
+        proposal, _ = provider.propose("", schema_name="poster-proposal.schema.json")
+        compiler_prompt = compile_image_spec_prompt(
+            proposal,
+            brief={"exact_copy": ["CORPUS ATELIER"]},
+            canvas={"size": "1024x1536", "ratio": [2, 3]},
+            provider_profile="gpt-image-2",
+        )
+        spec, _ = provider.propose(
+            compiler_prompt, schema_name="image-spec.schema.json",
+        )
+        prompt = compile_generation_prompt(spec)
         self.assertIn("Approved image specification", prompt)
         self.assertNotIn(proposal["design_rationale"], prompt)
-        self.assertNotIn("GPT Image 2 authoring knowledge", prompt)
-        self.assertIn(proposal["image_spec"]["composition"], prompt)
+        self.assertIn(spec["subject_and_scene"], prompt)
+        self.assertIn("Visual-semantic failure reference", compiler_prompt)
+        self.assertIn("detached foreground hand", compiler_prompt)
 
     def test_generation_prompt_has_no_predefined_reference_relationship(self):
-        proposal, _ = FakeTextProvider().propose("", schema_name="poster-proposal.schema.json")
-        prompt = compile_generation_prompt(proposal)
+        provider = FakeTextProvider()
+        proposal, _ = provider.propose("", schema_name="poster-proposal.schema.json")
+        compiler_prompt = compile_image_spec_prompt(
+            proposal,
+            brief={"exact_copy": ["CORPUS ATELIER"]},
+            canvas={"size": "1024x1536", "ratio": [2, 3]},
+            provider_profile="gpt-image-2",
+        )
+        spec, _ = provider.propose(
+            compiler_prompt, schema_name="image-spec.schema.json",
+        )
+        prompt = compile_generation_prompt(spec)
         self.assertNotIn("reference relationship", prompt.lower())

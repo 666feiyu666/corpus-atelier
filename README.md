@@ -1,6 +1,6 @@
 # Corpus Atelier
 
-Corpus Atelier is a downstream research workspace for turning domain knowledge—such as design, rhetoric, and semiotics—and structured visual corpora (see [Visual-Rhetoric-Atlas](https://github.com/666feiyu666/visual-rhetoric-atlas)) into reproducible graphic-design experiments.
+Corpus Atelier is a downstream research workspace for turning domain knowledge—such as design, rhetoric, and semiotics—and structured visual corpora (see [Atelier Corpus](https://github.com/666feiyu666/atelier-corpus)) into reproducible graphic-design experiments.
 
 The project focuses on one knowledge-transformation process:
 

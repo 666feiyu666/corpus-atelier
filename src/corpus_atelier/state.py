@@ -17,6 +17,12 @@ GenerationMode = Literal["without_corpus", "with_corpus"]
 
 
 @dataclass(frozen=True)
+class RequiredImage:
+    filename: str
+    content: bytes
+
+
+@dataclass(frozen=True)
 class DesignJob:
     case_id: str
     profile: str
@@ -24,6 +30,7 @@ class DesignJob:
     generation_mode: GenerationMode
     snapshot: Path | None = None
     reference: dict[str, Any] | None = None
+    required_images: tuple[RequiredImage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,7 @@ class NaturalLanguageDesignJob:
     generation_mode: GenerationMode
     snapshot: Path | None = None
     reference: dict[str, Any] | None = None
+    required_images: tuple[RequiredImage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,9 @@ class AtelierState(TypedDict, total=False):
     reference_selection: dict[str, Any]
     reference_package: dict[str, Any] | None
     reference_image_paths: list[str]
+    required_assets: list[dict[str, Any]]
+    required_asset_paths: list[str]
+    composition_plan: dict[str, Any]
     design_prompt: str
     proposal: dict[str, Any]
     image_prompt: str

@@ -82,7 +82,7 @@ class OpenAITextProvider:
             suffix = path.suffix.lower().lstrip(".")
             media_type = "jpeg" if suffix in {"jpg", "jpeg"} else suffix
             content.extend([
-                {"type": "input_text", "text": f"Complete reference image {index}:"},
+                {"type": "input_text", "text": f"Supplied visual input {index}:"},
                 {"type": "input_image", "image_url":
                  f"data:image/{media_type};base64,{encoded}"},
             ])

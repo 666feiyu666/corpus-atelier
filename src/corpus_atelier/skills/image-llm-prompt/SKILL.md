@@ -25,6 +25,7 @@ In particular, stabilize:
 - the difference between emphasis on a product and enlargement of its carrier;
 - consistency between illustrated, photographic, and materially detailed elements;
 - exact visible copy and its placement.
+- a clear normalized placement region for every supplied required image.
 
 Stabilize a dimension only when the approved design depends on it or when leaving it implicit could
 plausibly change the intended image. Do not fill an unused field with invented content, inherit an
@@ -49,6 +50,12 @@ that does not follow from the approved design.
 
 Return only the requested structured object. The result must stand on its own for the renderer;
 do not rely on the design rationale or private reasoning.
+
+The compilation target may contain `required_assets`. Put every listed asset ID exactly once in
+`required_asset_placements`, using normalized `left`, `top`, `width`, and `height` coordinates.
+Choose boxes that match the completed design and leave enough area for the asset's stated aspect
+ratio. Required images are composited deterministically after rendering: reserve their regions in
+the generated background, but do not ask the renderer to imitate, transcribe, or draw them.
 
 Before compiling, apply the failure patterns in
 [references/semantic-disambiguation.md](references/semantic-disambiguation.md). Apply the target

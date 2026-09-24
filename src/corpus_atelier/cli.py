@@ -13,7 +13,10 @@ from .artifacts.records import write_json
 from .design.validation import validate
 from .materials import build_reference_package
 from .registry import PROFILES, get_profile
-from .state import DesignJob, HumanDecision, NaturalLanguageDesignJob
+from .required_assets import validate_required_images
+from .state import (
+    DesignJob, HumanDecision, NaturalLanguageDesignJob, RequiredImage,
+)
 
 
 DEFAULT_SNAPSHOT = Path("experiments/atlas-snapshot/mucha-commercial")
@@ -28,6 +31,7 @@ def _parser() -> argparse.ArgumentParser:
     validate_cmd.add_argument("--profile", required=True, choices=PROFILES)
     validate_cmd.add_argument("--brief", required=True, type=Path)
     validate_cmd.add_argument("--reference", type=Path)
+    validate_cmd.add_argument("--required-image", action="append", type=Path, default=[])
 
     run = commands.add_parser("run", help="Run one approval-gated design experiment.")
     run.add_argument("--case-id", required=True)
@@ -40,6 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--reference", type=Path)
     run.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
+    run.add_argument("--required-image", action="append", type=Path, default=[])
 
     request = commands.add_parser(
         "request", help="Run one experiment from an informal design request.",
@@ -60,6 +65,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     request.add_argument("--reference", type=Path)
     request.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
+    request.add_argument("--required-image", action="append", type=Path, default=[])
 
     preview = commands.add_parser(
         "preview-reference", help="Resolve one selected reference without provider calls.",
@@ -90,6 +96,13 @@ def _print_result(result) -> None:
         print(f"{name}: {path}")
 
 
+def _required_images(paths: list[Path]) -> tuple[RequiredImage, ...]:
+    return tuple(
+        RequiredImage(filename=path.name, content=path.read_bytes())
+        for path in paths
+    )
+
+
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "profiles":
@@ -105,6 +118,7 @@ def main(argv=None) -> int:
                 _read_object(args.reference, "Reference selection"),
                 "reference-selection.schema.json",
             )
+        validate_required_images(_required_images(args.required_image))
         print(f"Valid {profile.name} brief: {args.brief.resolve()}")
         return 0
 
@@ -143,6 +157,7 @@ def main(argv=None) -> int:
             generation_mode=args.generation_mode,
             snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
             reference=reference,
+            required_images=_required_images(args.required_image),
         ))
     else:
         result = app.start(DesignJob(
@@ -152,6 +167,7 @@ def main(argv=None) -> int:
             generation_mode=args.generation_mode,
             snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
             reference=reference,
+            required_images=_required_images(args.required_image),
         ))
     while True:
         _print_result(result)

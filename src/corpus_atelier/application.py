@@ -22,6 +22,13 @@ from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .intake import compile_intake_prompt
 from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
+from .required_assets import (
+    build_composition_plan,
+    compose_required_assets,
+    ingest_required_images,
+    validate_required_asset_integrity,
+    validate_required_images,
+)
 from .registry import get_profile
 from .state import DesignJob, NaturalLanguageDesignJob, RunResult, RunSummary
 
@@ -40,13 +47,25 @@ class _Runtime:
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
         self.store.update(run_dir, "interpreting_request")
-        prompt = compile_intake_prompt(profile, state["user_request"])
+        prompt = compile_intake_prompt(
+            profile,
+            state["user_request"],
+            state.get("required_assets", []),
+        )
         request = {
             "model": getattr(
                 self.text_provider, "model", type(self.text_provider).__name__,
             ),
             "profile": profile.name,
             "schema": profile.brief_schema,
+            "required_assets": [
+                {
+                    "asset_id": item["asset_id"],
+                    "original_filename": item["original_filename"],
+                    "prepared_sha256": item["prepared_sha256"],
+                }
+                for item in state.get("required_assets", [])
+            ],
         }
         self.store.json(run_dir, "intake/request.json", request)
         self.store.text(run_dir, "intake/prompt.md", prompt)
@@ -106,7 +125,9 @@ class _Runtime:
         }
 
     @staticmethod
-    def _generation_binding(state, *, proposal, image_spec, prompt, request):
+    def _generation_binding(
+        state, *, proposal, image_spec, prompt, request, composition_plan=None,
+    ):
         binding = {
             "generation_mode": state["generation_mode"],
             "prompt": prompt,
@@ -116,6 +137,11 @@ class _Runtime:
             "generation_size": state["generation_size"],
             "output_ratio": list(state["output_ratio"]),
             "canvas": state["canvas"],
+            "required_assets": state.get("required_assets", []),
+            "composition_plan": (
+                state.get("composition_plan", {})
+                if composition_plan is None else composition_plan
+            ),
         }
         if state["generation_mode"] == "with_corpus":
             binding.update(
@@ -140,18 +166,49 @@ class _Runtime:
                     "mode": "profile_default",
                 }
             self.store.json(run_dir, "generation/canvas.json", canvas)
+            required_paths = [
+                Path(path) for path in state.get("required_asset_paths", [])
+            ]
+            corpus_paths = [
+                Path(path) for path in state.get("reference_image_paths", [])
+            ]
+            visual_inputs = [
+                {
+                    "input_index": index,
+                    "role": "required_exact_image",
+                    "asset_id": record["asset_id"],
+                    "prepared_size": record["prepared_size"],
+                    "instruction": (
+                        "This image must appear unchanged in the final composition. "
+                        "Reserve a suitable region; deterministic post-processing will place it."
+                    ),
+                }
+                for index, record in enumerate(
+                    state.get("required_assets", []), start=1,
+                )
+            ]
+            if corpus_paths:
+                visual_inputs.append({
+                    "input_index": len(visual_inputs) + 1,
+                    "role": "corpus_reference",
+                    "instruction": (
+                        "Use only as optional visual knowledge; it is not required content."
+                    ),
+                })
             prompt, proposal, response = synthesize(
                 profile,
                 state["brief"],
                 self.text_provider,
-                [Path(path) for path in state.get("reference_image_paths", [])],
+                required_paths + corpus_paths,
                 canvas=canvas,
+                visual_inputs=visual_inputs,
             )
             request = {
                 "model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
                 "profile": profile.name,
                 "schema": profile.proposal_schema,
                 "references": state.get("reference_package"),
+                "visual_inputs": visual_inputs,
             }
             self.store.json(run_dir, "design/request.json", request)
             self.store.text(run_dir, "design/prompt.md", prompt)
@@ -212,9 +269,14 @@ class _Runtime:
                 canvas=state["canvas"],
                 provider_profile=target_model,
                 provider=self.text_provider,
+                required_assets=state.get("required_assets", []),
             )
             image_spec = validate_image_spec(
                 image_spec, state["brief"].get("exact_copy", []),
+                [item["asset_id"] for item in state.get("required_assets", [])],
+            )
+            composition_plan = build_composition_plan(
+                image_spec, state.get("required_assets", []),
             )
             request = {
                 "model": getattr(
@@ -229,6 +291,9 @@ class _Runtime:
             self.store.json(run_dir, "image-spec/image-spec.json", image_spec)
             generation_prompt = compile_generation_prompt(image_spec)
             self.store.text(run_dir, "generation/prompt.md", generation_prompt)
+            self.store.json(
+                run_dir, "generation/composition-preview.json", composition_plan,
+            )
             generation_request = self.image_provider.describe_request(
                 generation_prompt,
                 size=state["generation_size"],
@@ -247,6 +312,7 @@ class _Runtime:
                 image_spec="image-spec/image-spec.json",
                 generation_prompt="generation/prompt.md",
                 generation_request_preview="generation/request-preview.json",
+                composition_preview="generation/composition-preview.json",
             )
             digest = digest_json(self._generation_binding(
                 state,
@@ -254,12 +320,14 @@ class _Runtime:
                 image_spec=image_spec,
                 prompt=generation_prompt,
                 request=generation_request,
+                composition_plan=composition_plan,
             ))
             return {
                 "image_prompt": prompt,
                 "image_spec": image_spec,
                 "generation_prompt": generation_prompt,
                 "generation_request": generation_request,
+                "composition_plan": composition_plan,
                 "generation_digest": digest,
                 "status": "awaiting_approval",
             }
@@ -296,8 +364,18 @@ class _Runtime:
                     (run_dir / "generation/request-preview.json").resolve()
                 ),
                 "canvas": str((run_dir / "generation/canvas.json").resolve()),
+                "composition_preview": str(
+                    (run_dir / "generation/composition-preview.json").resolve()
+                ),
             },
         }
+        for record in state.get("required_assets", []):
+            key = record["asset_id"].replace("-", "_")
+            root = run_dir / "input" / "required-assets" / record["asset_id"]
+            payload["artifacts"].update({
+                f"{key}_preview": str((root / record["preview_file"]).resolve()),
+                f"{key}_metadata": str((root / "asset.json").resolve()),
+            })
         if state["generation_mode"] == "with_corpus":
             payload["artifacts"].update({
                 "reference_selection": str((run_dir / "reference/selection.json").resolve()),
@@ -334,6 +412,15 @@ class _Runtime:
         saved_request = json.loads(
             (run_dir / "generation/request-preview.json").read_text(encoding="utf-8")
         )
+        saved_composition = json.loads(
+            (run_dir / "generation/composition-preview.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        validate_required_asset_integrity(
+            state.get("required_assets", []),
+            state.get("required_asset_paths", []),
+        )
         current_request = self.image_provider.describe_request(
             state["generation_prompt"],
             size=state["generation_size"],
@@ -348,6 +435,7 @@ class _Runtime:
             or saved_canvas != state["canvas"]
             or saved_request != state["generation_request"]
             or current_request != state["generation_request"]
+            or saved_composition != state.get("composition_plan", {})
         ):
             raise ValueError("Approved generation artifacts changed after preview.")
         if state["generation_mode"] == "with_corpus":
@@ -388,11 +476,26 @@ class _Runtime:
         image_path, render_record = normalize_canvas(
             image_path, tuple(state["output_ratio"]),
         )
+        composition_record = None
+        if state.get("required_assets"):
+            image_path, composition_record = compose_required_assets(
+                image_path,
+                state["required_assets"],
+                state["required_asset_paths"],
+                state["composition_plan"]["placements"],
+            )
+            if render_record.get("source_file") == "image.png":
+                render_record["source_file"] = "background.png"
+            if render_record.get("output_file") == "image.png":
+                render_record["output_file"] = "background.png"
+            write_json(attempt / "render.json", render_record)
         response.update(
             file=image_path.name,
             sha256=digest_file(image_path),
             render=render_record,
         )
+        if composition_record is not None:
+            response["composition"] = composition_record
         write_json(attempt / "response.json", response)
         relative = attempt.relative_to(run_dir).as_posix()
         self.store.register(
@@ -402,6 +505,12 @@ class _Runtime:
             render=f"{relative}/render.json",
             image=f"{relative}/image.png",
         )
+        if composition_record is not None:
+            self.store.register(
+                run_dir,
+                generation_background=f"{relative}/background.png",
+                composition=f"{relative}/composition.json",
+            )
         self.store.update(
             run_dir,
             "completed",
@@ -450,18 +559,35 @@ class CorpusAtelierApplication:
             raise
         return self._result(run_id)
 
+    def _ingest_required_images(self, run_dir: Path, uploads) -> tuple[list[dict], list[str]]:
+        try:
+            records, paths, artifacts = ingest_required_images(run_dir, uploads)
+            if artifacts:
+                self.store.register(run_dir, **artifacts)
+                self.store.update(run_dir, "created", required_assets=records)
+            return records, paths
+        except Exception as exc:
+            self.store.update(
+                run_dir, "failed", error_type=type(exc).__name__, error=str(exc),
+            )
+            raise
+
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
         validate(job.brief, profile.brief_schema)
         snapshot, reference = self._corpus_inputs(
             job.generation_mode, job.snapshot, job.reference,
         )
+        uploads = validate_required_images(job.required_images)
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
             brief=job.brief,
             profile=profile,
             generation_mode=job.generation_mode,
             snapshot=snapshot,
+        )
+        required_assets, required_paths = self._ingest_required_images(
+            run_dir, uploads,
         )
         state = {
             "case_id": job.case_id,
@@ -470,6 +596,8 @@ class CorpusAtelierApplication:
             "profile": profile.name,
             "generation_mode": job.generation_mode,
             "brief": job.brief,
+            "required_assets": required_assets,
+            "required_asset_paths": required_paths,
             "status": "created",
         }
         if snapshot is not None and reference is not None:
@@ -486,6 +614,7 @@ class CorpusAtelierApplication:
         snapshot, reference = self._corpus_inputs(
             job.generation_mode, job.snapshot, job.reference,
         )
+        uploads = validate_required_images(job.required_images)
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
             request=job.request,
@@ -493,12 +622,17 @@ class CorpusAtelierApplication:
             generation_mode=job.generation_mode,
             snapshot=snapshot,
         )
+        required_assets, required_paths = self._ingest_required_images(
+            run_dir, uploads,
+        )
         state = {
             "case_id": job.case_id,
             "run_id": run_id,
             "run_dir": str(run_dir),
             "profile": profile.name,
             "user_request": job.request,
+            "required_assets": required_assets,
+            "required_asset_paths": required_paths,
             "generation_mode": job.generation_mode,
             "status": "created",
         }

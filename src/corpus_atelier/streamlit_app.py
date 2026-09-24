@@ -119,11 +119,13 @@ def _start_page() -> None:
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
         return
+    if not request.strip():
+        st.error("实验输入有误：请先描述你的设计需求。")
+        return
+    if generation_mode == "with_corpus" and not reference_id:
+        st.error("实验输入有误：有语料库生成需要选择一张参考图像。")
+        return
     try:
-        if not request.strip():
-            raise ValueError("请先描述你的设计需求。")
-        if generation_mode == "with_corpus" and not reference_id:
-            raise ValueError("有语料库生成需要选择一张参考图像。")
         reference = None
         snapshot = None
         if generation_mode == "with_corpus":
@@ -148,8 +150,6 @@ def _start_page() -> None:
         st.session_state.ui_error = ""
         st.session_state.ui_failed = False
         st.rerun()
-    except (json.JSONDecodeError, ValueError) as exc:
-        st.error(f"实验输入有误：{exc}")
     except Exception as exc:
         st.error(f"无法生成设计方案：{exc}")
 

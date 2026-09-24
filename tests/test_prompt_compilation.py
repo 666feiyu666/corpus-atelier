@@ -20,15 +20,26 @@ class PromptTests(unittest.TestCase):
                     get_profile(profile_name), {"task": "x"},
                 )
                 foundation = "Produce a graphic design for the delivery"
-                self.assertIn("# Deliverable foundation", prompt)
-                self.assertIn("# Deliverable specialization", prompt)
+                self.assertIn(
+                    "# Supplied deliverable foundation — complete", prompt,
+                )
+                self.assertIn(
+                    "# Supplied deliverable specialization — complete", prompt,
+                )
                 self.assertLess(prompt.index(foundation), prompt.index(specialization))
 
         general_prompt = compile_design_prompt(
             get_profile("rhetoric-graphic"), {"task": "x"},
         )
-        self.assertIn("# Deliverable foundation", general_prompt)
-        self.assertNotIn("# Deliverable specialization", general_prompt)
+        self.assertIn("# Supplied profile policy bundle", general_prompt)
+        self.assertIn("# Supplied objective policy — complete", general_prompt)
+        self.assertIn("# Supplied deliverable foundation — complete", general_prompt)
+        self.assertNotIn("# Supplied deliverable specialization", general_prompt)
+        self.assertIn("do not request their source files", general_prompt)
+        self.assertNotIn(
+            "Read the selected objective policy in `references/objectives/`",
+            general_prompt,
+        )
 
     def test_designer_receives_design_skill_without_image_model_knowledge(self):
         prompt = compile_design_prompt(

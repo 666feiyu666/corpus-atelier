@@ -42,11 +42,17 @@ side, count, coordinate, camera setting, material, or decorative feature solely 
 specified. A complete design resolves what matters and identifies meaningful latitude; it does not
 turn every optional detail into a requirement.
 
-## Context references
+## Supplied profile policies
 
-Read the selected objective policy in `references/objectives/` and the selected deliverable
-policies in `references/deliverables/`. Apply only the references selected by the active profile;
-do not load unrelated objective or deliverable variants.
+The runtime prompt already supplies the active profile's complete objective and deliverable
+policies in explicitly labeled sections. Treat those supplied sections as authoritative and
+sufficient. Do not request repository paths, files under `references/objectives/` or
+`references/deliverables/`, or any other internal skill resources.
+
+Use `needs_sources` only when the user's requirements explicitly depend on work-specific external
+material that is absent from both the prompt and the supplied visual references. A requested
+artistic style, genre, medium, or general body of cultural knowledge is not by itself a missing
+source.
 
 ## Boundaries
 

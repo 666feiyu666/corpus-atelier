@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 from streamlit.testing.v1 import AppTest
@@ -25,6 +26,14 @@ class FakeUiApplication:
             run_id=run_id, status=status, run_dir=self.run_dir,
             message=status, artifacts=self.artifacts,
         )
+
+
+class FailingStartApplication:
+    def __init__(self, **kwargs):
+        pass
+
+    def start_request(self, job):
+        raise ValueError("Design proposal requested an unavailable source.")
 
 
 class StreamlitAppTests(unittest.TestCase):
@@ -56,6 +65,26 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(
             app.selectbox(key="selected_reference_id").value,
             "mucha-poster-124474229",
+        )
+
+    def test_model_failure_is_not_reported_as_invalid_user_input(self):
+        with patch(
+            "corpus_atelier.application.CorpusAtelierApplication",
+            FailingStartApplication,
+        ):
+            app = AppTest.from_file(
+                str(ROOT / "src/corpus_atelier/streamlit_app.py"),
+                default_timeout=10,
+            ).run()
+            app.text_area(key="natural_request").set_value(
+                "请做一张超现实主义电脑壁纸。"
+            ).run()
+            app.button[0].click().run()
+
+        self.assertFalse(app.exception)
+        self.assertEqual(
+            app.error[0].value,
+            "无法生成设计方案：Design proposal requested an unavailable source.",
         )
 
     def test_generation_preview_flows_directly_to_completed_result(self):

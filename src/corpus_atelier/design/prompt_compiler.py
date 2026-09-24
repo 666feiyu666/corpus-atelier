@@ -11,19 +11,22 @@ def compile_design_prompt(
     requirements = json.dumps(brief, ensure_ascii=False, indent=2, allow_nan=False)
     deliverable_references = profile.deliverable_references
     deliverable_sections = [
-        "# Deliverable foundation\n\n" + load_skill_reference(
+        "# Supplied deliverable foundation — complete\n\n" + load_skill_reference(
             "design", deliverable_references[0],
         )
     ]
     deliverable_sections.extend(
-        "# Deliverable specialization\n\n" + load_skill_reference(
+        "# Supplied deliverable specialization — complete\n\n" + load_skill_reference(
             "design", reference,
         )
         for reference in deliverable_references[1:]
     )
     sections = [
         load_skill("design"),
-        "# Objective policy\n\n" + load_skill_reference(
+        "# Supplied profile policy bundle\n\n"
+        "The active profile's selected policies are included in full below. They are already "
+        "available for this task; do not request their source files or repository paths.",
+        "# Supplied objective policy — complete\n\n" + load_skill_reference(
             "design", profile.objective_reference,
         ),
         *deliverable_sections,

@@ -22,6 +22,16 @@ def validate(value: object, schema_name: str):
 
 def validate_proposal(value: dict, schema_name: str) -> dict:
     validate(value, schema_name)
+    internal_policy_paths = (
+        "references/objectives/",
+        "references/deliverables/",
+    )
+    for requirement in value["source_requirements"]:
+        if any(path in requirement.lower() for path in internal_policy_paths):
+            raise ValueError(
+                "Design proposal requested internal profile policy files that were "
+                "already supplied."
+            )
     if value["status"] == "ready":
         if value["source_requirements"] or value["clarification_questions"]:
             raise ValueError("A ready proposal cannot have unresolved requirements.")

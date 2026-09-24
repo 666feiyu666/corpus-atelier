@@ -2,7 +2,11 @@ import json
 from pathlib import Path
 import unittest
 
-from corpus_atelier.design.validation import load_schema, validate
+from corpus_atelier.design.validation import (
+    load_schema,
+    validate,
+    validate_proposal,
+)
 from corpus_atelier.providers.text import _schema_for_openai
 from corpus_atelier.registry import PROFILES, get_profile
 
@@ -75,6 +79,23 @@ class ProfileTests(unittest.TestCase):
         profile = get_profile("rhetoric-poster")
         with self.assertRaises(ValueError):
             validate({"topic": "incomplete"}, profile.brief_schema)
+
+    def test_proposal_cannot_request_supplied_internal_policy_files(self):
+        proposal = {
+            "status": "needs_sources",
+            "brief_interpretation": "A complete interpretation.",
+            "chosen_direction": "A complete direction.",
+            "design_description": "A complete visible design.",
+            "design_rationale": "A concise rationale.",
+            "review_criteria": [],
+            "source_requirements": [
+                "Provide references/objectives/rhetoric-led.md.",
+            ],
+            "clarification_questions": [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "already supplied"):
+            validate_proposal(proposal, "graphic-design-proposal.schema.json")
 
     def test_watch_has_one_mode_independent_brief(self):
         root = Path(__file__).resolve().parents[1] / "experiments/cases/mucha-watch"

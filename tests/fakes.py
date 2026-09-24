@@ -23,6 +23,45 @@ class FakeTextProvider:
             "reference_paths": reference_paths,
             "schema_name": schema_name,
         })
+        if schema_name == "graphic-design-brief.schema.json":
+            value = {
+                "deliverable": "16:9 desktop wallpaper",
+                "purpose": (
+                    "Use mild workplace humor to discourage people from interacting "
+                    "with an unattended computer."
+                ),
+                "audience": "Coworkers and passersby in a shared office.",
+                "use_context": (
+                    "Displayed behind desktop icons on a workstation and understood "
+                    "at a glance."
+                ),
+                "exact_copy": ["都看到这里了，就顺手帮我锁个屏吧"],
+                "constraints": ["Keep the message playful and low-aggression."],
+                "preferences": ["Use concise, self-aware workplace humor."],
+                "canvas": {"aspect_ratio": {"width": 16, "height": 9}},
+            }
+            return value, {"status": "completed", "provider": "fake"}
+        if schema_name == "poster-brief.schema.json":
+            value = {
+                "topic": "A complete poster topic",
+                "purpose": "Communicate one clear invitation.",
+                "audience": "The intended public audience.",
+                "setting": "Viewed in a public setting.",
+                "exact_copy": ["POSTER TITLE"],
+                "constraints": [],
+                "preferences": [],
+            }
+            return value, {"status": "completed", "provider": "fake"}
+        if schema_name == "article-cover-brief.schema.json":
+            value = {
+                "article_title": "A complete article title",
+                "article_summary": "A concise summary of the article.",
+                "audience": "Article readers.",
+                "exact_copy": ["A complete article title"],
+                "constraints": [],
+                "art_direction": "A restrained editorial direction.",
+            }
+            return value, {"status": "completed", "provider": "fake"}
         if schema_name == "image-spec.schema.json":
             target = prompt.split("# Compilation target\n\n", 1)[1].split(
                 "\n\n# Completed design proposal", 1,

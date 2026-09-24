@@ -2,8 +2,9 @@ import io
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from corpus_atelier.cli import main
 
@@ -50,3 +51,32 @@ class CliTests(unittest.TestCase):
                 (output / "reference-package.json").read_text(encoding="utf-8"))
             self.assertEqual(package["reference"]["id"], "mucha-poster-124474277")
             self.assertNotIn("knowledge", package)
+
+    def test_request_command_uses_the_natural_language_entrypoint(self):
+        application = Mock()
+        application.start_request.return_value = SimpleNamespace(
+            run_id="test-run",
+            status="completed",
+            message="completed",
+            artifacts={},
+        )
+        stream = io.StringIO()
+
+        with (
+            patch(
+                "corpus_atelier.cli.CorpusAtelierApplication",
+                return_value=application,
+            ),
+            patch("sys.stdout", stream),
+        ):
+            code = main([
+                "request",
+                "--text", "请做一张适合办公室工位的电脑壁纸。",
+            ])
+
+        self.assertEqual(code, 0)
+        job = application.start_request.call_args.args[0]
+        self.assertEqual(job.case_id, "natural-language")
+        self.assertEqual(job.profile, "rhetoric-graphic")
+        self.assertEqual(job.generation_mode, "without_corpus")
+        self.assertEqual(job.request, "请做一张适合办公室工位的电脑壁纸。")

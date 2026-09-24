@@ -35,9 +35,14 @@ class ArtifactStore:
     def __init__(self, root: Path | str = "experiments/runs"):
         self.root = Path(root).resolve()
 
-    def create(self, *, case_id: str, brief: dict, profile, generation_mode: str,
+    def create(self, *, case_id: str, profile, generation_mode: str,
+               brief: dict | None = None, request: str | None = None,
                snapshot: Path | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
+        if (brief is None) == (request is None):
+            raise ValueError(
+                "A run requires exactly one structured brief or natural-language request."
+            )
         case_root = self.root / case_id
         case_root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -49,18 +54,25 @@ class ArtifactStore:
                 break
             except FileExistsError:
                 continue
-        write_json(run_dir / "brief.json", brief)
+        if brief is not None:
+            write_json(run_dir / "brief.json", brief)
+            input_mode = "structured_brief"
+            initial_artifacts = {"brief": "brief.json"}
+        else:
+            write_text(run_dir / "input/request.txt", request)
+            input_mode = "natural_language"
+            initial_artifacts = {"user_request": "input/request.txt"}
         write_json(run_dir / "profile.json", {
             "name": profile.name, "objective": profile.objective,
             "deliverable": profile.deliverable, "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 10,
+            "format_version": 1, "workflow_version": 11,
             "case_id": case_id, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,
-            "generation_mode": generation_mode,
-            "status": "created", "artifacts": {},
+            "generation_mode": generation_mode, "input_mode": input_mode,
+            "status": "created", "artifacts": initial_artifacts,
         }
         if generation_mode == "with_corpus":
             if snapshot is None:

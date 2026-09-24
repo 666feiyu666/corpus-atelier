@@ -13,7 +13,7 @@ from .artifacts.records import write_json
 from .design.validation import validate
 from .materials import build_reference_package
 from .registry import PROFILES, get_profile
-from .state import DesignJob, HumanDecision
+from .state import DesignJob, HumanDecision, NaturalLanguageDesignJob
 
 
 DEFAULT_SNAPSHOT = Path("experiments/atlas-snapshot/mucha-commercial")
@@ -40,6 +40,26 @@ def _parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--reference", type=Path)
     run.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
+
+    request = commands.add_parser(
+        "request", help="Run one experiment from an informal design request.",
+    )
+    request.add_argument("--case-id", default="natural-language")
+    request.add_argument(
+        "--profile",
+        choices=("rhetoric-graphic", "art-graphic"),
+        default="rhetoric-graphic",
+    )
+    source = request.add_mutually_exclusive_group(required=True)
+    source.add_argument("--text")
+    source.add_argument("--request-file", type=Path)
+    request.add_argument(
+        "--generation-mode",
+        choices=("without_corpus", "with_corpus"),
+        default="without_corpus",
+    )
+    request.add_argument("--reference", type=Path)
+    request.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
 
     preview = commands.add_parser(
         "preview-reference", help="Resolve one selected reference without provider calls.",
@@ -110,14 +130,29 @@ def main(argv=None) -> int:
         _read_object(args.reference, "Reference selection")
         if args.reference is not None else None
     )
-    result = app.start(DesignJob(
-        case_id=args.case_id,
-        profile=args.profile,
-        brief=_read_object(args.brief, "Brief"),
-        generation_mode=args.generation_mode,
-        snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
-        reference=reference,
-    ))
+    if args.command == "request":
+        request_text = (
+            args.text
+            if args.text is not None
+            else args.request_file.read_text(encoding="utf-8")
+        )
+        result = app.start_request(NaturalLanguageDesignJob(
+            case_id=args.case_id,
+            profile=args.profile,
+            request=request_text,
+            generation_mode=args.generation_mode,
+            snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
+            reference=reference,
+        ))
+    else:
+        result = app.start(DesignJob(
+            case_id=args.case_id,
+            profile=args.profile,
+            brief=_read_object(args.brief, "Brief"),
+            generation_mode=args.generation_mode,
+            snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
+            reference=reference,
+        ))
     while True:
         _print_result(result)
         if result.status == "awaiting_approval":

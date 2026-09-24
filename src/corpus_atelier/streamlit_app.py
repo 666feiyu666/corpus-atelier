@@ -10,33 +10,17 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.artifacts.store import validate_case_id
-from corpus_atelier.cases import discover_cases
 from corpus_atelier.materials import list_references
-from corpus_atelier.state import DesignJob, HumanDecision, RunResult
+from corpus_atelier.state import HumanDecision, NaturalLanguageDesignJob, RunResult
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
-CASES = discover_cases(ROOT / "experiments/cases")
+PRODUCT_CASE_ID = "natural-language"
 TERMINAL_STATUSES = {"completed", "rejected", "failed"}
 DESIGN_METHODS = {
     "修辞导向": "rhetoric-graphic",
     "艺术指导导向": "art-graphic",
-}
-DELIVERY_CONTEXTS = [
-    "手机阅读海报",
-    "张贴或印刷海报",
-    "小红书配图",
-    "文章内插图",
-    "微信公众号封面",
-]
-DELIVERY_RATIOS = {
-    "手机阅读海报": (4, 5),
-    "张贴或印刷海报": (2, 3),
-    "小红书配图": (3, 4),
-    "文章内插图": (16, 9),
-    "微信公众号封面": (47, 20),
 }
 GENERATION_MODES = {
     "无语料库生成": "without_corpus",
@@ -44,65 +28,10 @@ GENERATION_MODES = {
 }
 
 
-def load_case(label: str) -> dict[str, Any]:
-    """Load one bundled example brief."""
-    return json.loads(CASES[label].brief_path.read_text(encoding="utf-8"))
-
-
 @st.cache_data(max_entries=4)
 def load_reference_choices(snapshot: str) -> list[dict[str, str]]:
     """Load verified reference labels once per snapshot path."""
     return list_references(snapshot)
-
-
-def parse_brief(value: str) -> dict[str, Any]:
-    """Parse a brief while keeping UI validation separate from model calls."""
-    brief = json.loads(value)
-    if not isinstance(brief, dict):
-        raise ValueError("Brief 必须是一个 JSON 对象。")
-    return brief
-
-
-def split_lines(value: str) -> list[str]:
-    """Convert a multiline UI field into compact ordered strings."""
-    return [line.strip() for line in value.splitlines() if line.strip()]
-
-
-def delivery_ratio(deliverable: str) -> tuple[int, int] | None:
-    """Return the UI-owned ratio for a known delivery context."""
-    return DELIVERY_RATIOS.get(deliverable)
-
-
-def build_general_brief(
-    *, deliverable: str, purpose: str, audience: str, use_context: str,
-    exact_copy: str, constraints: str, preferences: str,
-    ratio_width: int, ratio_height: int,
-    validate_required: bool = True,
-) -> dict[str, Any]:
-    """Build the open graphic-design brief without UI or model side effects."""
-    required = {
-        "交付类型": deliverable,
-        "设计目的": purpose,
-        "受众": audience,
-        "使用与观看场景": use_context,
-    }
-    missing = [label for label, value in required.items() if not value.strip()]
-    if validate_required and missing:
-        raise ValueError(f"请填写：{'、'.join(missing)}。")
-    return {
-        "deliverable": deliverable.strip(),
-        "purpose": purpose.strip(),
-        "audience": audience.strip(),
-        "use_context": use_context.strip(),
-        "exact_copy": split_lines(exact_copy),
-        "constraints": split_lines(constraints),
-        "preferences": split_lines(preferences),
-        "canvas": {
-            "aspect_ratio": {
-                "width": int(ratio_width), "height": int(ratio_height),
-            },
-        },
-    }
 
 
 def read_json_artifact(result: RunResult, name: str) -> dict[str, Any]:
@@ -120,21 +49,11 @@ def read_text_artifact(result: RunResult, name: str) -> str:
 
 
 def _reset() -> None:
-    for key in ("atelier_app", "result", "ui_error", "ui_failed"):
+    for key in (
+        "atelier_app", "result", "ui_error", "ui_failed", "natural_request",
+        "design_method", "new_generation_mode", "selected_reference_id",
+    ):
         st.session_state.pop(key, None)
-
-
-def _change_case() -> None:
-    selected = CASES[st.session_state.case_label]
-    case_brief = load_case(st.session_state.case_label)
-    st.session_state.brief_editor = json.dumps(
-        case_brief, ensure_ascii=False, indent=2,
-    )
-    st.session_state.selected_reference_id = selected.default_reference_id
-    has_corpus = selected.default_reference_id is not None
-    st.session_state.example_generation_mode = (
-        "有语料库生成" if has_corpus else "无语料库生成"
-    )
 
 
 def _reference_field() -> str | None:
@@ -149,126 +68,30 @@ def _reference_field() -> str | None:
     )
 
 
-def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
-    case_id = st.text_input(
-        "Case ID",
-        placeholder="例如 reading-group-poster",
-        help="用于将本次运行归档到 experiments/runs/<case-id>/。",
-        key="new_case_id",
-    )
-    method = st.segmented_control(
-        "设计方法", list(DESIGN_METHODS), default=list(DESIGN_METHODS)[0],
-        key="design_method",
-    )
-    generation_label = st.segmented_control(
-        "研究模式", list(GENERATION_MODES), default="无语料库生成",
-        key="new_generation_mode",
-    )
-    generation_mode = GENERATION_MODES[generation_label]
-    deliverable = st.selectbox(
-        "交付类型",
-        DELIVERY_CONTEXTS,
-        accept_new_options=True,
-        placeholder="选择常见类型，或直接输入自定义场景",
-        key="general_deliverable",
-    )
-    purpose = st.text_area(
-        "设计目的", placeholder="希望这张图完成什么沟通任务？", key="general_purpose",
-    )
-    audience = st.text_input("受众", key="general_audience")
-    use_context = st.text_area(
-        "使用与观看场景",
-        placeholder="在哪里出现、用什么设备或距离观看、是否可能裁切或印刷？",
-        key="general_use_context",
-    )
-    exact_copy = st.text_area(
-        "必须出现的文字（每行一项，可留空）", key="general_exact_copy",
-    )
-    with st.expander("补充要求", expanded=False):
-        constraints = st.text_area("硬性限制（每行一项）", key="general_constraints")
-        preferences = st.text_area("设计偏好（每行一项）", key="general_preferences")
-
-    fixed_ratio = delivery_ratio(deliverable or "")
-    if fixed_ratio is not None:
-        ratio_width, ratio_height = fixed_ratio
-        st.caption(f"画布比例：{ratio_width}:{ratio_height}（由交付类型确定）")
-    else:
-        st.caption("自定义交付类型的画布比例")
-        ratio_columns = st.columns(2)
-        ratio_width = ratio_columns[0].number_input(
-            "宽度比例", min_value=1, max_value=100, value=4, step=1,
-            key="ratio_width",
-        )
-        ratio_height = ratio_columns[1].number_input(
-            "高度比例", min_value=1, max_value=100, value=5, step=1,
-            key="ratio_height",
-        )
-
-    brief = build_general_brief(
-        deliverable=deliverable or "",
-        purpose=purpose,
-        audience=audience,
-        use_context=use_context,
-        exact_copy=exact_copy,
-        constraints=constraints,
-        preferences=preferences,
-        ratio_width=int(ratio_width),
-        ratio_height=int(ratio_height),
-        validate_required=False,
+def _natural_request_inputs() -> tuple[str, str, str, str | None]:
+    request = st.text_area(
+        "描述你的设计需求",
+        height=220,
+        placeholder=(
+            "可以直接说你遇到的情境、希望设计起什么作用、给谁看，以及你已经有的想法。"
+            "不需要整理成字段。"
+        ),
+        key="natural_request",
     )
     reference_id: str | None = None
-    if generation_mode == "with_corpus":
-        with st.expander("选择参考图", expanded=True):
+    with st.expander("研究设置", expanded=False):
+        method = st.segmented_control(
+            "设计方法", list(DESIGN_METHODS), default=list(DESIGN_METHODS)[0],
+            key="design_method",
+        )
+        generation_label = st.segmented_control(
+            "研究模式", list(GENERATION_MODES), default="无语料库生成",
+            key="new_generation_mode",
+        )
+        generation_mode = GENERATION_MODES[generation_label]
+        if generation_mode == "with_corpus":
             reference_id = _reference_field()
-    return DESIGN_METHODS[method], generation_mode, brief, reference_id, case_id
-
-
-def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
-    if st.session_state.get("case_label") not in CASES:
-        st.session_state.case_label = next(iter(CASES))
-    if "brief_editor" not in st.session_state:
-        _change_case()
-    st.selectbox(
-        "选择示例", list(CASES), key="case_label", on_change=_change_case,
-    )
-    generation_label = st.segmented_control(
-        "研究模式", list(GENERATION_MODES), key="example_generation_mode",
-    )
-    generation_mode = GENERATION_MODES[generation_label]
-    with st.expander("编辑内容", expanded=False):
-        st.text_area("Brief（JSON）", height=280, key="brief_editor")
-    brief = parse_brief(st.session_state.brief_editor)
-    reference_id: str | None = None
-    if generation_mode == "with_corpus":
-        with st.expander("选择参考图", expanded=True):
-            reference_id = _reference_field()
-    selected = CASES[st.session_state.case_label]
-    return (
-        selected.profile,
-        generation_mode,
-        brief,
-        reference_id,
-        selected.case_id,
-    )
-
-
-def _validate_start_inputs(
-    generation_mode: str, brief: dict[str, Any], reference_id: str | None,
-    case_id: str,
-) -> None:
-    validate_case_id(case_id)
-    if "deliverable" in brief:
-        required = {
-            "交付类型": brief["deliverable"],
-            "设计目的": brief["purpose"],
-            "受众": brief["audience"],
-            "使用与观看场景": brief["use_context"],
-        }
-        missing = [label for label, value in required.items() if not value.strip()]
-        if missing:
-            raise ValueError(f"请填写：{'、'.join(missing)}。")
-    if generation_mode == "with_corpus" and not reference_id:
-        raise ValueError("有语料库生成需要选择一张参考图像。")
+    return DESIGN_METHODS[method], generation_mode, request, reference_id
 
 
 def _resume(decision: HumanDecision, message: str) -> None:
@@ -292,34 +115,15 @@ def _show_image(result: RunResult) -> None:
 
 def _start_page() -> None:
     st.subheader("开始一个实验")
-    start_mode = st.segmented_control(
-        "开始方式", ["新建设计", "使用示例"], default="新建设计", key="start_mode",
-    )
-
-    try:
-        if start_mode == "新建设计":
-            profile, generation_mode, brief, reference_id, case_id = (
-                _new_design_inputs()
-            )
-        else:
-            profile, generation_mode, brief, reference_id, case_id = (
-                _example_inputs()
-            )
-        input_error: Exception | None = None
-    except (json.JSONDecodeError, ValueError) as exc:
-        profile, generation_mode, brief, reference_id, case_id = (
-            "", "", {}, None, ""
-        )
-        input_error = exc
+    profile, generation_mode, request, reference_id = _natural_request_inputs()
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
         return
     try:
-        if input_error is not None:
-            raise input_error
-        _validate_start_inputs(
-            generation_mode, brief, reference_id, case_id,
-        )
+        if not request.strip():
+            raise ValueError("请先描述你的设计需求。")
+        if generation_mode == "with_corpus" and not reference_id:
+            raise ValueError("有语料库生成需要选择一张参考图像。")
         reference = None
         snapshot = None
         if generation_mode == "with_corpus":
@@ -330,11 +134,11 @@ def _start_page() -> None:
             snapshot = SNAPSHOT
         load_dotenv(ROOT / ".env")
         app = CorpusAtelierApplication(runs_root=ROOT / "experiments/runs")
-        with st.spinner("正在准备设计方案…"):
-            result = app.start(DesignJob(
-                case_id=case_id,
+        with st.spinner("正在理解需求并准备设计方案…"):
+            result = app.start_request(NaturalLanguageDesignJob(
+                case_id=PRODUCT_CASE_ID,
                 profile=profile,
-                brief=brief,
+                request=request,
                 generation_mode=generation_mode,
                 snapshot=snapshot,
                 reference=reference,
@@ -352,6 +156,7 @@ def _start_page() -> None:
 
 def _generation_preview_page(result: RunResult) -> None:
     proposal = read_json_artifact(result, "proposal")
+    brief = read_json_artifact(result, "brief")
     st.subheader("图像模型输入预览")
     st.info("以下内容尚未发送给图像模型。确认无误后，再开始生成图片。")
     manifest = read_json_artifact(result, "manifest")
@@ -361,6 +166,17 @@ def _generation_preview_page(result: RunResult) -> None:
     }.get(manifest.get("generation_mode"))
     if mode_label:
         st.caption(f"研究模式：{mode_label}")
+    if brief:
+        with st.expander("系统理解的需求", expanded=False):
+            st.markdown(f"**交付物：** {brief.get('deliverable', '未记录')}")
+            st.markdown(f"**目的：** {brief.get('purpose', '未记录')}")
+            st.markdown(f"**受众：** {brief.get('audience', '未记录')}")
+            st.markdown(f"**使用场景：** {brief.get('use_context', '未记录')}")
+            exact_copy = brief.get("exact_copy", [])
+            if exact_copy:
+                st.markdown("**画面文字：**")
+                for item in exact_copy:
+                    st.markdown(f"- {item}")
     st.markdown("**设计方案**")
     st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))
     description = proposal.get("design_description")
@@ -423,7 +239,7 @@ def _terminal_page(result: RunResult) -> None:
 def main() -> None:
     st.set_page_config(page_title="Corpus Atelier", page_icon="◫", layout="centered")
     st.title("Corpus Atelier")
-    st.caption("比较无语料库与显式语料库条件的可复现图像生成实验")
+    st.caption("用自然语言描述情境和目标，把想法转化为可审阅的视觉设计")
 
     if st.session_state.get("ui_error"):
         st.error(f"操作失败：{st.session_state.ui_error}")

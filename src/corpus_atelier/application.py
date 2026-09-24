@@ -19,10 +19,11 @@ from .design.synthesis import synthesize
 from .design.validation import validate, validate_image_spec, validate_proposal
 from .graphs import build_graph
 from .image_prompt import compile_generation_prompt, synthesize_image_spec
+from .intake import compile_intake_prompt
 from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
-from .state import DesignJob, RunResult, RunSummary
+from .state import DesignJob, NaturalLanguageDesignJob, RunResult, RunSummary
 
 
 class _Runtime:
@@ -34,6 +35,48 @@ class _Runtime:
     @staticmethod
     def _dir(state):
         return Path(state["run_dir"])
+
+    def interpret_request(self, state):
+        run_dir = self._dir(state)
+        profile = get_profile(state["profile"])
+        self.store.update(run_dir, "interpreting_request")
+        prompt = compile_intake_prompt(profile, state["user_request"])
+        request = {
+            "model": getattr(
+                self.text_provider, "model", type(self.text_provider).__name__,
+            ),
+            "profile": profile.name,
+            "schema": profile.brief_schema,
+        }
+        self.store.json(run_dir, "intake/request.json", request)
+        self.store.text(run_dir, "intake/prompt.md", prompt)
+        self.store.register(
+            run_dir,
+            intake_request="intake/request.json",
+            intake_prompt="intake/prompt.md",
+        )
+        try:
+            brief, response = self.text_provider.propose(
+                prompt,
+                schema_name=profile.brief_schema,
+            )
+            brief = validate(brief, profile.brief_schema)
+            self.store.json(run_dir, "intake/response.json", response)
+            self.store.json(run_dir, "brief.json", brief)
+            self.store.register(
+                run_dir,
+                intake_response="intake/response.json",
+                brief="brief.json",
+            )
+            return {"brief": brief, "status": "preparing_inputs"}
+        except Exception as exc:
+            self.store.json(run_dir, "intake/response.json", {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            })
+            self.store.register(run_dir, intake_response="intake/response.json")
+            raise
 
     def prepare_inputs(self, state):
         run_dir = self._dir(state)
@@ -382,22 +425,37 @@ class CorpusAtelierApplication:
         self.graph = build_graph(self.runtime, self.checkpointer)
         self._active: dict[str, dict] = {}
 
+    @staticmethod
+    def _corpus_inputs(generation_mode, snapshot, reference):
+        if generation_mode not in {"without_corpus", "with_corpus"}:
+            raise ValueError(f"Unsupported generation mode: {generation_mode!r}.")
+        if generation_mode == "without_corpus":
+            if snapshot is not None or reference is not None:
+                raise ValueError("Without-corpus runs cannot include a snapshot or reference.")
+            return None, None
+        if snapshot is None or reference is None:
+            raise ValueError("With-corpus runs require a snapshot and reference selection.")
+        validate(reference, "reference-selection.schema.json")
+        return Path(snapshot).resolve(strict=True), reference
+
+    def _invoke_start(self, run_id: str, run_dir: Path, state: dict) -> RunResult:
+        config = {"configurable": {"thread_id": run_id}}
+        self._active[run_id] = {"config": config, "run_dir": run_dir}
+        try:
+            self.graph.invoke(state, config=config)
+        except Exception as exc:
+            self.store.update(
+                run_dir, "failed", error_type=type(exc).__name__, error=str(exc),
+            )
+            raise
+        return self._result(run_id)
+
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
         validate(job.brief, profile.brief_schema)
-        if job.generation_mode not in {"without_corpus", "with_corpus"}:
-            raise ValueError(f"Unsupported generation mode: {job.generation_mode!r}.")
-        if job.generation_mode == "without_corpus":
-            if job.snapshot is not None or job.reference is not None:
-                raise ValueError("Without-corpus runs cannot include a snapshot or reference.")
-            snapshot = None
-            reference = None
-        else:
-            if job.snapshot is None or job.reference is None:
-                raise ValueError("With-corpus runs require a snapshot and reference selection.")
-            validate(job.reference, "reference-selection.schema.json")
-            snapshot = Path(job.snapshot).resolve(strict=True)
-            reference = job.reference
+        snapshot, reference = self._corpus_inputs(
+            job.generation_mode, job.snapshot, job.reference,
+        )
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
             brief=job.brief,
@@ -405,8 +463,6 @@ class CorpusAtelierApplication:
             generation_mode=job.generation_mode,
             snapshot=snapshot,
         )
-        config = {"configurable": {"thread_id": run_id}}
-        self._active[run_id] = {"config": config, "run_dir": run_dir}
         state = {
             "case_id": job.case_id,
             "run_id": run_id,
@@ -421,14 +477,37 @@ class CorpusAtelierApplication:
                 snapshot=str(snapshot),
                 reference_selection=reference,
             )
-        try:
-            self.graph.invoke(state, config=config)
-        except Exception as exc:
-            self.store.update(
-                run_dir, "failed", error_type=type(exc).__name__, error=str(exc),
+        return self._invoke_start(run_id, run_dir, state)
+
+    def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:
+        if not isinstance(job.request, str) or not job.request.strip():
+            raise ValueError("Natural-language design request must not be empty.")
+        profile = get_profile(job.profile)
+        snapshot, reference = self._corpus_inputs(
+            job.generation_mode, job.snapshot, job.reference,
+        )
+        run_id, run_dir = self.store.create(
+            case_id=job.case_id,
+            request=job.request,
+            profile=profile,
+            generation_mode=job.generation_mode,
+            snapshot=snapshot,
+        )
+        state = {
+            "case_id": job.case_id,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "profile": profile.name,
+            "user_request": job.request,
+            "generation_mode": job.generation_mode,
+            "status": "created",
+        }
+        if snapshot is not None and reference is not None:
+            state.update(
+                snapshot=str(snapshot),
+                reference_selection=reference,
             )
-            raise
-        return self._result(run_id)
+        return self._invoke_start(run_id, run_dir, state)
 
     def resume(self, run_id: str, decision: object) -> RunResult:
         if run_id not in self._active:

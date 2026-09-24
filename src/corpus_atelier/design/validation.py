@@ -40,39 +40,8 @@ def validate_proposal(value: dict, schema_name: str) -> dict:
     return value
 
 
-def validate_image_spec(
-    value: dict, exact_copy: list[str], required_asset_ids: list[str] | None = None,
-) -> dict:
+def validate_image_spec(value: dict, exact_copy: list[str]) -> dict:
     validate(value, "image-spec.schema.json")
     if value["visible_copy"] != exact_copy:
         raise ValueError("The image specification changed the exact visible copy.")
-    expected = list(required_asset_ids or [])
-    actual = [item["asset_id"] for item in value["required_asset_placements"]]
-    if len(actual) != len(set(actual)):
-        raise ValueError("A required image may have only one placement.")
-    if sorted(actual) != sorted(expected):
-        raise ValueError(
-            "The image specification must place every required image exactly once."
-        )
-    for placement in value["required_asset_placements"]:
-        if (
-            placement["left"] + placement["width"] > 1
-            or placement["top"] + placement["height"] > 1
-        ):
-            raise ValueError("A required-image placement extends beyond the canvas.")
-    placements = value["required_asset_placements"]
-    for index, first in enumerate(placements):
-        first_right = first["left"] + first["width"]
-        first_bottom = first["top"] + first["height"]
-        for second in placements[index + 1:]:
-            second_right = second["left"] + second["width"]
-            second_bottom = second["top"] + second["height"]
-            overlaps = not (
-                first_right <= second["left"]
-                or second_right <= first["left"]
-                or first_bottom <= second["top"]
-                or second_bottom <= first["top"]
-            )
-            if overlaps:
-                raise ValueError("Required-image placements must not overlap.")
     return value

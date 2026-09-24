@@ -7,14 +7,11 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
-from streamlit.typing import UploadedFile
 from dotenv import load_dotenv
 
 from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.materials import list_references
-from corpus_atelier.state import (
-    HumanDecision, NaturalLanguageDesignJob, RequiredImage, RunResult,
-)
+from corpus_atelier.state import HumanDecision, NaturalLanguageDesignJob, RunResult
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,7 +52,6 @@ def _reset() -> None:
     for key in (
         "atelier_app", "result", "ui_error", "ui_failed", "natural_request",
         "design_method", "new_generation_mode", "selected_reference_id",
-        "required_image_uploads",
     ):
         st.session_state.pop(key, None)
 
@@ -72,8 +68,7 @@ def _reference_field() -> str | None:
     )
 
 
-def _natural_request_inputs(
-) -> tuple[str, str, str, str | None, list[UploadedFile]]:
+def _natural_request_inputs() -> tuple[str, str, str, str | None]:
     request = st.text_area(
         "描述你的设计需求",
         height=220,
@@ -83,23 +78,6 @@ def _natural_request_inputs(
         ),
         key="natural_request",
     )
-    required_uploads = st.file_uploader(
-        "必须原样出现在成品中的图片（可选）",
-        type=["png", "jpg", "jpeg", "webp"],
-        accept_multiple_files=True,
-        max_upload_size=10,
-        key="required_image_uploads",
-        help=(
-            "最多 3 张。请在上方自然语言需求中说明用途，例如“这张是研究会 Logo”。"
-            "系统会保存原件，并在图像生成后确定性地放入成品。"
-        ),
-    )
-    if required_uploads:
-        st.image(
-            required_uploads,
-            caption=[upload.name for upload in required_uploads],
-            width="stretch",
-        )
     reference_id: str | None = None
     with st.expander("研究设置", expanded=False):
         method = st.segmented_control(
@@ -113,10 +91,7 @@ def _natural_request_inputs(
         generation_mode = GENERATION_MODES[generation_label]
         if generation_mode == "with_corpus":
             reference_id = _reference_field()
-    return (
-        DESIGN_METHODS[method], generation_mode, request, reference_id,
-        required_uploads,
-    )
+    return DESIGN_METHODS[method], generation_mode, request, reference_id
 
 
 def _resume(decision: HumanDecision, message: str) -> None:
@@ -140,7 +115,7 @@ def _show_image(result: RunResult) -> None:
 
 def _start_page() -> None:
     st.subheader("开始一个实验")
-    profile, generation_mode, request, reference_id, uploads = _natural_request_inputs()
+    profile, generation_mode, request, reference_id = _natural_request_inputs()
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
         return
@@ -149,9 +124,6 @@ def _start_page() -> None:
         return
     if generation_mode == "with_corpus" and not reference_id:
         st.error("实验输入有误：有语料库生成需要选择一张参考图像。")
-        return
-    if len(uploads) > 3:
-        st.error("实验输入有误：每次最多上传 3 张必含图片。")
         return
     try:
         reference = None
@@ -172,10 +144,6 @@ def _start_page() -> None:
                 generation_mode=generation_mode,
                 snapshot=snapshot,
                 reference=reference,
-                required_images=tuple(
-                    RequiredImage(upload.name, upload.getvalue())
-                    for upload in uploads
-                ),
             ))
         st.session_state.atelier_app = app
         st.session_state.result = result
@@ -234,30 +202,6 @@ def _generation_preview_page(result: RunResult) -> None:
         if reference_image:
             with st.expander("参考图片", expanded=True):
                 st.image(reference_image, width="stretch")
-        required_assets = manifest.get("required_assets", [])
-        if required_assets:
-            composition = read_json_artifact(result, "composition_preview")
-            placements = {
-                item["asset_id"]: item
-                for item in composition.get("placements", [])
-            }
-            with st.expander("必含图片素材", expanded=True):
-                for asset in required_assets:
-                    key = asset["asset_id"].replace("-", "_")
-                    preview = result.artifacts.get(f"{key}_preview")
-                    if preview:
-                        st.image(
-                            preview,
-                            caption=asset["original_filename"],
-                            width="stretch",
-                        )
-                    placement = placements.get(asset["asset_id"])
-                    if placement:
-                        st.caption(
-                            "生成背景后按已批准的位置确定性合成；"
-                            f"区域：左 {placement['left']:.0%}、上 {placement['top']:.0%}、"
-                            f"宽 {placement['width']:.0%}、高 {placement['height']:.0%}。"
-                        )
         if generation_prompt:
             with st.expander("完整提示词", expanded=True):
                 st.code(generation_prompt, language=None, wrap_lines=True)

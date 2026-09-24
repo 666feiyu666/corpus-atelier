@@ -23,9 +23,7 @@ whole rather than mechanically assigning phrases to fields.
 
 ## Visible copy
 
-Treat `exact_copy` as the exhaustive wording approved for the renderer to create as readable
-artwork text. Unchanged wording already embedded in a supplied required image is outside this
-array because deterministic composition adds those pixels after rendering.
+Treat `exact_copy` as the exhaustive wording approved for the finished image.
 
 - Preserve user-supplied wording exactly, including its language and punctuation.
 - If the user explicitly requests no readable text, return an empty array.
@@ -34,8 +32,6 @@ array because deterministic composition adds those pixels after rendering.
   in `exact_copy`.
 - Do not include explanatory notes, alternatives, placeholders, or quotation marks that are not
   intended to appear in the image.
-- Do not transcribe, repeat, or infer wording from a supplied required image into `exact_copy`
-  unless the user explicitly requests the same wording as separate designed text outside it.
 
 ## Boundaries
 

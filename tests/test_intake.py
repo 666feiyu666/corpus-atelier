@@ -71,7 +71,7 @@ class IntakeTests(unittest.TestCase):
                 Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
             )
             self.assertEqual(manifest["input_mode"], "natural_language")
-            self.assertEqual(manifest["workflow_version"], 12)
+            self.assertEqual(manifest["workflow_version"], 13)
             self.assertIn("intake_prompt", manifest["artifacts"])
             self.assertIn("intake_response", manifest["artifacts"])
 

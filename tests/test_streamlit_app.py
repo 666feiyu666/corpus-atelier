@@ -1,5 +1,4 @@
 import json
-from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -37,20 +36,6 @@ class FailingStartApplication:
         raise ValueError("Design proposal requested an unavailable source.")
 
 
-class CapturingStartApplication:
-    last_job = None
-
-    def __init__(self, **kwargs):
-        pass
-
-    def start_request(self, job):
-        type(self).last_job = job
-        return RunResult(
-            run_id="captured", status="rejected", run_dir=ROOT,
-            message="captured", artifacts={},
-        )
-
-
 class StreamlitAppTests(unittest.TestCase):
     def test_streamlit_source_does_not_expose_protocol_details(self):
         source = ROOT / "src/corpus_atelier/streamlit_app.py"
@@ -73,13 +58,9 @@ class StreamlitAppTests(unittest.TestCase):
             app.segmented_control(key="design_method").value,
             "修辞导向",
         )
+        self.assertEqual(len(app.get("file_uploader")), 0)
         self.assertEqual(len(app.text_input), 0)
         self.assertEqual(len(app.multiselect), 0)
-        self.assertEqual(len(app.file_uploader), 1)
-        self.assertEqual(
-            app.file_uploader(key="required_image_uploads").label,
-            "必须原样出现在成品中的图片（可选）",
-        )
         app.segmented_control(key="new_generation_mode").set_value("有语料库生成").run()
         self.assertFalse(app.exception)
         self.assertEqual(
@@ -106,34 +87,6 @@ class StreamlitAppTests(unittest.TestCase):
             app.error[0].value,
             "无法生成设计方案：Design proposal requested an unavailable source.",
         )
-
-    def test_uploaded_required_image_reaches_the_application_contract(self):
-        buffer = BytesIO()
-        Image.new("RGBA", (20, 10), (20, 140, 80, 255)).save(buffer, format="PNG")
-        CapturingStartApplication.last_job = None
-        with patch(
-            "corpus_atelier.application.CorpusAtelierApplication",
-            CapturingStartApplication,
-        ):
-            app = AppTest.from_file(
-                str(ROOT / "src/corpus_atelier/streamlit_app.py"),
-                default_timeout=10,
-            ).run()
-            app.text_area(key="natural_request").set_value(
-                "设计一张中秋海报，使用上传的研究会 Logo。"
-            )
-            app.file_uploader(key="required_image_uploads").upload(
-                "logo.png", buffer.getvalue(), "image/png",
-            )
-            app.run()
-            app.button[0].click().run()
-
-        self.assertFalse(app.exception)
-        job = CapturingStartApplication.last_job
-        self.assertIsNotNone(job)
-        self.assertEqual(len(job.required_images), 1)
-        self.assertEqual(job.required_images[0].filename, "logo.png")
-        self.assertEqual(job.required_images[0].content, buffer.getvalue())
 
     def test_generation_preview_flows_directly_to_completed_result(self):
         with TemporaryDirectory() as directory:

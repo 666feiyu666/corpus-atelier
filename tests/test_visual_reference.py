@@ -5,7 +5,7 @@ import unittest
 
 from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.materials import build_reference_package
-from corpus_atelier.state import DesignJob, HumanDecision
+from corpus_atelier.state import DesignJob, HumanDecision, NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
@@ -21,6 +21,12 @@ def load_brief():
 
 
 class VisualReferenceTests(unittest.TestCase):
+    def test_corpus_reference_is_the_only_supported_image_input(self):
+        self.assertNotIn("required_images", DesignJob.__dataclass_fields__)
+        self.assertNotIn(
+            "required_images", NaturalLanguageDesignJob.__dataclass_fields__,
+        )
+
     def _start(self):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

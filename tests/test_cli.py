@@ -6,8 +6,6 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from PIL import Image
-
 from corpus_atelier.cli import main
 
 
@@ -15,10 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CliTests(unittest.TestCase):
-    @staticmethod
-    def _write_image(path: Path) -> None:
-        Image.new("RGBA", (20, 10), (20, 140, 80, 255)).save(path, format="PNG")
-
     def test_profiles(self):
         stream = io.StringIO()
         with patch("sys.stdout", stream):
@@ -86,28 +80,3 @@ class CliTests(unittest.TestCase):
         self.assertEqual(job.profile, "rhetoric-graphic")
         self.assertEqual(job.generation_mode, "without_corpus")
         self.assertEqual(job.request, "请做一张适合办公室工位的电脑壁纸。")
-
-    def test_request_command_accepts_a_required_image(self):
-        with TemporaryDirectory() as directory:
-            logo = Path(directory) / "logo.png"
-            self._write_image(logo)
-            application = Mock()
-            application.start_request.return_value = SimpleNamespace(
-                run_id="test-run", status="completed", message="completed", artifacts={},
-            )
-            with (
-                patch(
-                    "corpus_atelier.cli.CorpusAtelierApplication",
-                    return_value=application,
-                ),
-                patch("sys.stdout", io.StringIO()),
-            ):
-                code = main([
-                    "request", "--text", "请使用上传的 Logo。",
-                    "--required-image", str(logo),
-                ])
-        self.assertEqual(code, 0)
-        job = application.start_request.call_args.args[0]
-        self.assertEqual(len(job.required_images), 1)
-        self.assertEqual(job.required_images[0].filename, "logo.png")
-        self.assertTrue(job.required_images[0].content.startswith(b"\x89PNG"))

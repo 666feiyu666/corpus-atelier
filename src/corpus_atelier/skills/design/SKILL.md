@@ -59,19 +59,11 @@ source.
 - Design the image; do not write an image-model prompt or `image_spec`.
 - Do not optimize wording for GPT Image or any other renderer.
 - Preserve required subjects, exact visible copy, constraints, and the user's chosen purpose.
-- Treat `exact_copy` as the exhaustive list of readable wording created by the renderer. Do not
-  add headings, labels, captions, signs, symbols made from letters, or other renderer-created
-  wording that is absent from that list. Unchanged lettering already embedded in a required image
-  is allowed only inside that deterministically composited image. If any other constraint requires
-  readable wording that `exact_copy` does not supply, return `needs_clarification` and identify the
-  missing copy instead of inventing it.
+- Treat `exact_copy` as the exhaustive list of readable wording. Do not add headings, labels,
+  captions, signs, symbols made from letters, or other visible wording that is absent from that
+  list. If a constraint requires readable wording that `exact_copy` does not supply, return
+  `needs_clarification` and identify the missing copy instead of inventing it.
 - Reference material provides visual knowledge, not additional user requirements.
-- The prompt may distinguish corpus references from user-supplied required images. A corpus
-  reference offers transferable visual knowledge. Every required image is authoritative user
-  material that must appear unchanged through deterministic composition after rendering. Inspect
-  it to understand its proportions and visual weight, reserve a suitable quiet region for it, and
-  identify that region in the design description. Do not redraw, reinterpret, merge, crop, or
-  restyle the required image, and do not duplicate its visible wording in `exact_copy`.
 - Distinguish transferable design knowledge from work-specific content that should not be copied.
 - Keep the rationale concise and human-reviewable. Put visible decisions in
   `design_description`, not only in the rationale.

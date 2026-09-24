@@ -66,9 +66,7 @@ class FakeTextProvider:
             target = prompt.split("# Compilation target\n\n", 1)[1].split(
                 "\n\n# Completed design proposal", 1,
             )[0]
-            compilation_target = json.loads(target)
-            visible = compilation_target["exact_copy"]
-            required_assets = compilation_target.get("required_assets", [])
+            visible = json.loads(target)["exact_copy"]
             value = {
                 "communication_objective": "Invite the intended audience to engage.",
                 "audience_and_context": "The approved delivery and viewing context.",
@@ -78,17 +76,7 @@ class FakeTextProvider:
                 "typography": "High-contrast display title with restrained supporting type.",
                 "visual_treatment": "Contemporary editorial collage with flat organic forms.",
                 "allowed_variation": ["Texture density may vary"],
-                "required_asset_placements": [
-                    {
-                        "asset_id": asset["asset_id"],
-                        "left": 0.68,
-                        "top": 0.05 + index * 0.2,
-                        "width": 0.27,
-                        "height": 0.16,
-                    }
-                    for index, asset in enumerate(required_assets)
-                ],
-                "exclusions": ["No additional copy"],
+                "exclusions": ["No logos", "No additional copy"],
             }
             return value, {"status": "completed", "provider": "fake"}
         is_graphic = schema_name == "graphic-design-proposal.schema.json"

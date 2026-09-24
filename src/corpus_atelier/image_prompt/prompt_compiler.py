@@ -7,7 +7,6 @@ from ..skill_loader import load_skill, load_skill_reference
 
 def compile_image_spec_prompt(
     proposal: dict, *, brief: dict, canvas: dict, provider_profile: str,
-    required_assets: list[dict] | None = None,
 ) -> str:
     sections = [
         load_skill("image-llm-prompt"),
@@ -31,14 +30,6 @@ def compile_image_spec_prompt(
             "provider_profile": provider_profile,
             "canvas": canvas,
             "exact_copy": brief.get("exact_copy", []),
-            "required_assets": [
-                {
-                    "asset_id": item["asset_id"],
-                    "role": item["role"],
-                    "prepared_size": item["prepared_size"],
-                }
-                for item in (required_assets or [])
-            ],
         }, ensure_ascii=False, indent=2, allow_nan=False),
         "# Completed design proposal\n\n" + json.dumps(
             proposal, ensure_ascii=False, indent=2, allow_nan=False,

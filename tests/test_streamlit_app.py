@@ -19,12 +19,34 @@ class FakeUiApplication:
     def __init__(self, run_dir: Path, artifacts: dict[str, str]):
         self.run_dir = run_dir
         self.artifacts = artifacts
+        self.comparison_resume_calls = 0
 
     def resume(self, run_id, decision):
         status = "completed" if decision.approved else "rejected"
         return RunResult(
             run_id=run_id, status=status, run_dir=self.run_dir,
             message=status, artifacts=self.artifacts,
+        )
+
+    def resume_comparison(self, comparison, decision):
+        self.comparison_resume_calls += 1
+        status = "completed" if decision.approved else "rejected"
+
+        def update(result):
+            return RunResult(
+                run_id=result.run_id,
+                status=status,
+                run_dir=self.run_dir,
+                message=status,
+                artifacts=self.artifacts,
+            )
+
+        return ComparisonResult(
+            group_id=comparison.group_id,
+            group_dir=comparison.group_dir,
+            brief=comparison.brief,
+            baseline=update(comparison.baseline),
+            corpus=update(comparison.corpus),
         )
 
 
@@ -165,7 +187,7 @@ class StreamlitAppTests(unittest.TestCase):
             self.assertEqual(app.subheader[0].value, "生成完成")
             self.assertEqual([button.label for button in app.button], ["创建新设计"])
 
-    def test_paired_experiment_keeps_independent_approval_gates(self):
+    def test_paired_experiment_uses_two_columns_and_one_shared_approval(self):
         with TemporaryDirectory() as directory:
             run_dir = Path(directory)
             baseline = RunResult(
@@ -201,19 +223,25 @@ class StreamlitAppTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "有／无显式语料对比实验")
             self.assertEqual(
-                app.button(key="experiment_baseline_send_generation").label,
-                "发送并生成图片",
+                len(app.get("column")),
+                2,
             )
             self.assertEqual(
-                app.button(key="experiment_corpus_send_generation").label,
-                "发送并生成图片",
+                app.button(key="experiment_generate_comparison").label,
+                "确认并生成两张图片",
             )
+            self.assertEqual(
+                app.button(key="experiment_cancel_comparison").label,
+                "取消本次对比",
+            )
+            self.assertEqual(len(app.button), 2)
 
-            app.button(key="experiment_baseline_send_generation").click().run()
+            app.button(key="experiment_generate_comparison").click().run()
             updated = app.session_state["comparison_result"]
             self.assertEqual(updated.baseline.status, "completed")
-            self.assertEqual(updated.corpus.status, "awaiting_approval")
+            self.assertEqual(updated.corpus.status, "completed")
             self.assertEqual(
-                app.button(key="experiment_corpus_send_generation").label,
-                "发送并生成图片",
+                app.session_state["experiment_app"].comparison_resume_calls,
+                1,
             )
+            self.assertEqual([button.label for button in app.button], ["开始新实验"])

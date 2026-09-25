@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
+from threading import Barrier, BrokenBarrierError, Lock
 import unittest
 
 from corpus_atelier.application import CorpusAtelierApplication
@@ -22,6 +23,97 @@ REFERENCE = {
     "reference_id": "mucha-poster-124474232",
 }
 REQUEST = "制作一张穆夏风格的手表广告。"
+
+
+class ConcurrentTextProvider(FakeTextProvider):
+    concurrent_schemas = {
+        "graphic-design-proposal.schema.json",
+        "image-spec.schema.json",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.barriers = {
+            schema: Barrier(2) for schema in self.concurrent_schemas
+        }
+        self.completed_stages = set()
+        self.lock = Lock()
+
+    def propose(self, prompt: str, *, schema_name: str, reference_paths=None):
+        if schema_name in self.barriers:
+            try:
+                self.barriers[schema_name].wait(timeout=3)
+            except BrokenBarrierError as exc:
+                raise AssertionError(
+                    f"Experiment arms did not overlap at {schema_name}."
+                ) from exc
+            with self.lock:
+                self.completed_stages.add(schema_name)
+        return super().propose(
+            prompt,
+            schema_name=schema_name,
+            reference_paths=reference_paths,
+        )
+
+
+class BaselineFailingTextProvider(FakeTextProvider):
+    def propose(self, prompt: str, *, schema_name: str, reference_paths=None):
+        reference_paths = list(reference_paths or [])
+        if (
+            schema_name == "graphic-design-proposal.schema.json"
+            and not reference_paths
+        ):
+            raise RuntimeError("deliberate baseline failure")
+        return super().propose(
+            prompt,
+            schema_name=schema_name,
+            reference_paths=reference_paths,
+        )
+
+
+class ConcurrentImageProvider(FakeImageProvider):
+    def __init__(self):
+        super().__init__()
+        self.barrier = Barrier(2)
+        self.completed_calls = 0
+        self.lock = Lock()
+
+    def generate(self, prompt: str, *, size: str, output: Path,
+                 reference_paths=None):
+        try:
+            self.barrier.wait(timeout=3)
+        except BrokenBarrierError as exc:
+            raise AssertionError(
+                "Comparison image generations did not overlap."
+            ) from exc
+        response = super().generate(
+            prompt,
+            size=size,
+            output=output,
+            reference_paths=reference_paths,
+        )
+        with self.lock:
+            self.completed_calls += 1
+        return response
+
+
+class BaselineFailingImageProvider(FakeImageProvider):
+    def generate(self, prompt: str, *, size: str, output: Path,
+                 reference_paths=None):
+        manifest = json.loads(
+            (output.parent.parent / "manifest.json").read_text(encoding="utf-8")
+        )
+        if (
+            manifest.get("experiment", {}).get("condition")
+            == "baseline_no_explicit_corpus"
+        ):
+            raise RuntimeError("deliberate baseline image failure")
+        return super().generate(
+            prompt,
+            size=size,
+            output=output,
+            reference_paths=reference_paths,
+        )
 
 
 class CorpusExperimentTests(unittest.TestCase):
@@ -94,34 +186,189 @@ class CorpusExperimentTests(unittest.TestCase):
                 if call["schema_name"] == "graphic-design-proposal.schema.json"
             ]
             self.assertEqual(len(proposal_calls), 2)
-            self.assertEqual(proposal_calls[0]["reference_paths"], [])
-            self.assertEqual(len(proposal_calls[1]["reference_paths"]), 1)
+            baseline_call = next(
+                call for call in proposal_calls if not call["reference_paths"]
+            )
+            corpus_call = next(
+                call for call in proposal_calls if call["reference_paths"]
+            )
             self.assertNotIn(
                 "# Selected design knowledge — untrusted evidence",
-                proposal_calls[0]["prompt"],
+                baseline_call["prompt"],
             )
             self.assertIn(
                 "# Selected design knowledge — untrusted evidence",
-                proposal_calls[1]["prompt"],
+                corpus_call["prompt"],
             )
+            image_spec_calls = [
+                call for call in text.design_calls
+                if call["schema_name"] == "image-spec.schema.json"
+            ]
+            self.assertEqual(len(image_spec_calls), 2)
 
-            baseline = app.resume(
-                comparison.baseline.run_id,
+            completed = app.resume_comparison(
+                comparison,
                 HumanDecision(True, reviewer="test"),
             )
-            corpus = app.resume(
-                comparison.corpus.run_id,
-                HumanDecision(True, reviewer="test"),
-            )
-            self.assertEqual(baseline.status, "completed")
-            self.assertEqual(corpus.status, "completed")
+            self.assertEqual(completed.baseline.status, "completed")
+            self.assertEqual(completed.corpus.status, "completed")
             self.assertEqual(image.calls, 2)
             self.assertEqual(image.reference_paths, [])
+            for result in (completed.baseline, completed.corpus):
+                approval = json.loads(
+                    Path(result.artifacts["approval"]).read_text(encoding="utf-8")
+                )
+                self.assertTrue(approval["approved"])
             group_manifest = json.loads(
                 (comparison.group_dir / "manifest.json").read_text(encoding="utf-8")
             )
             self.assertEqual(group_manifest["status"], "completed")
             self.assertEqual(set(group_manifest["arm_statuses"].values()), {"completed"})
+
+    def test_paired_arms_overlap_at_both_model_call_stages(self):
+        with TemporaryDirectory() as directory:
+            text = ConcurrentTextProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=text,
+                image_provider=FakeImageProvider(),
+            )
+
+            comparison = app.start_comparison(CorpusComparisonJob(
+                case_id="parallel-comparison",
+                profile="rhetoric-graphic",
+                request=REQUEST,
+                snapshot=SNAPSHOT,
+                reference=REFERENCE,
+            ))
+
+            self.assertEqual(
+                text.completed_stages,
+                ConcurrentTextProvider.concurrent_schemas,
+            )
+            self.assertEqual(comparison.baseline.status, "awaiting_approval")
+            self.assertEqual(comparison.corpus.status, "awaiting_approval")
+
+    def test_paired_image_generations_overlap_after_one_approval(self):
+        with TemporaryDirectory() as directory:
+            image = ConcurrentImageProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=FakeTextProvider(),
+                image_provider=image,
+            )
+            comparison = app.start_comparison(CorpusComparisonJob(
+                case_id="parallel-generation-comparison",
+                profile="rhetoric-graphic",
+                request=REQUEST,
+                snapshot=SNAPSHOT,
+                reference=REFERENCE,
+            ))
+
+            completed = app.resume_comparison(
+                comparison,
+                HumanDecision(True, reviewer="test"),
+            )
+
+            self.assertEqual(image.completed_calls, 2)
+            self.assertEqual(completed.baseline.status, "completed")
+            self.assertEqual(completed.corpus.status, "completed")
+
+    def test_one_rejection_cancels_both_arms_without_image_calls(self):
+        with TemporaryDirectory() as directory:
+            app, _, image = self._app(directory)
+            comparison = app.start_comparison(CorpusComparisonJob(
+                case_id="rejected-comparison",
+                profile="rhetoric-graphic",
+                request=REQUEST,
+                snapshot=SNAPSHOT,
+                reference=REFERENCE,
+            ))
+
+            rejected = app.resume_comparison(
+                comparison,
+                HumanDecision(False, reviewer="test"),
+            )
+
+            self.assertEqual(rejected.baseline.status, "rejected")
+            self.assertEqual(rejected.corpus.status, "rejected")
+            self.assertEqual(image.calls, 0)
+
+    def test_paired_image_failure_preserves_the_other_arm_result(self):
+        with TemporaryDirectory() as directory:
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=FakeTextProvider(),
+                image_provider=BaselineFailingImageProvider(),
+            )
+            comparison = app.start_comparison(CorpusComparisonJob(
+                case_id="partial-generation-failure",
+                profile="rhetoric-graphic",
+                request=REQUEST,
+                snapshot=SNAPSHOT,
+                reference=REFERENCE,
+            ))
+
+            completed = app.resume_comparison(
+                comparison,
+                HumanDecision(True, reviewer="test"),
+            )
+
+            self.assertEqual(completed.baseline.status, "failed")
+            self.assertEqual(completed.corpus.status, "completed")
+            group_manifest = json.loads(
+                (comparison.group_dir / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(group_manifest["status"], "failed")
+            self.assertEqual(
+                group_manifest["arm_statuses"],
+                {
+                    "baseline_no_explicit_corpus": "failed",
+                    "explicit_corpus": "completed",
+                },
+            )
+
+    def test_paired_failure_records_both_arm_ids_and_observed_statuses(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = CorpusAtelierApplication(
+                runs_root=root,
+                text_provider=BaselineFailingTextProvider(),
+                image_provider=FakeImageProvider(),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "deliberate baseline failure"):
+                app.start_comparison(CorpusComparisonJob(
+                    case_id="partial-failure-comparison",
+                    profile="rhetoric-graphic",
+                    request=REQUEST,
+                    snapshot=SNAPSHOT,
+                    reference=REFERENCE,
+                ))
+
+            manifests = list(
+                (root / "_comparisons" / "partial-failure-comparison").glob(
+                    "comparison_*/manifest.json"
+                )
+            )
+            self.assertEqual(len(manifests), 1)
+            group_manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+            self.assertEqual(group_manifest["status"], "failed")
+            self.assertEqual(
+                set(group_manifest["arms"]),
+                {"baseline_no_explicit_corpus", "explicit_corpus"},
+            )
+            self.assertEqual(
+                group_manifest["arm_statuses"],
+                {
+                    "baseline_no_explicit_corpus": "failed",
+                    "explicit_corpus": "awaiting_approval",
+                },
+            )
+            for run_id in group_manifest["arms"].values():
+                self.assertTrue(
+                    (root / "partial-failure-comparison" / run_id / "manifest.json").is_file()
+                )
 
     def test_single_explicit_condition_is_labelled_and_bound_to_approval(self):
         with TemporaryDirectory() as directory:

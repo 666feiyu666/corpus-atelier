@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
 from pathlib import Path
 from typing import Any
@@ -132,30 +131,39 @@ def _resume(
     message: str,
     *,
     scope: str,
-    arm: str | None = None,
 ) -> None:
     app: CorpusAtelierApplication = st.session_state[f"{scope}_app"]
-    comparison: ComparisonResult | None = (
-        st.session_state.get("comparison_result") if scope == "experiment" else None
-    )
-    result: RunResult = (
-        getattr(comparison, arm)
-        if comparison is not None and arm
-        else st.session_state[f"{scope}_result"]
-    )
+    result: RunResult = st.session_state[f"{scope}_result"]
     st.session_state[f"{scope}_ui_error"] = ""
     try:
         with st.spinner(message):
             updated = app.resume(result.run_id, decision)
-            if comparison is not None and arm:
-                st.session_state.comparison_result = replace(
-                    comparison, **{arm: updated},
-                )
-            else:
-                st.session_state[f"{scope}_result"] = updated
+            st.session_state[f"{scope}_result"] = updated
     except Exception as exc:  # Streamlit turns provider failures into a recoverable page.
         st.session_state[f"{scope}_ui_error"] = str(exc)
         st.session_state[f"{scope}_ui_failed"] = True
+    st.rerun()
+
+
+def _resume_comparison(decision: HumanDecision, message: str) -> None:
+    app: CorpusAtelierApplication = st.session_state.experiment_app
+    comparison: ComparisonResult = st.session_state.comparison_result
+    st.session_state.experiment_ui_error = ""
+    try:
+        with st.spinner(message):
+            updated = app.resume_comparison(comparison, decision)
+        st.session_state.comparison_result = updated
+        if any(
+            getattr(updated, arm).status == "failed"
+            for arm in ("baseline", "corpus")
+        ):
+            st.session_state.experiment_ui_error = (
+                "至少一个实验条件生成失败；另一侧结果仍然保留。"
+            )
+        st.session_state.experiment_ui_failed = False
+    except Exception as exc:
+        st.session_state.experiment_ui_error = str(exc)
+        st.session_state.experiment_ui_failed = True
     st.rerun()
 
 
@@ -252,38 +260,39 @@ def _start_experiment() -> None:
         st.error(f"无法开始实验：{exc}")
 
 
-def _generation_preview_page(
+def _render_brief(brief: dict[str, Any], *, title: str) -> None:
+    if not brief:
+        return
+    with st.expander(title, expanded=False):
+        st.markdown(f"**交付物：** {brief.get('deliverable', '未记录')}")
+        st.markdown(f"**目的：** {brief.get('purpose', '未记录')}")
+        st.markdown(f"**受众：** {brief.get('audience', '未记录')}")
+        st.markdown(f"**使用场景：** {brief.get('use_context', '未记录')}")
+        exact_copy = brief.get("exact_copy", [])
+        if exact_copy:
+            st.markdown("**画面文字：**")
+            for item in exact_copy:
+                st.markdown(f"- {item}")
+
+
+def _render_generation_preview(
     result: RunResult,
     *,
-    scope: str,
-    key_prefix: str = "",
-    show_heading: bool = True,
+    show_brief: bool,
+    show_condition: bool,
 ) -> None:
-    action_key = f"{scope}_{key_prefix}_" if key_prefix else f"{scope}_"
     proposal = read_json_artifact(result, "proposal")
     brief = read_json_artifact(result, "brief")
-    if show_heading:
-        st.subheader("图像模型输入预览")
-    st.info("以下内容尚未发送给图像模型。确认无误后，再开始生成图片。")
     manifest = read_json_artifact(result, "manifest")
     condition = manifest.get("experiment", {}).get("condition")
-    if condition:
+    if show_condition and condition:
         label = {
             "baseline_no_explicit_corpus": "无显式语料基线",
             "explicit_corpus": "有显式语料",
         }[condition]
         st.caption(f"实验条件：{label}")
-    if brief:
-        with st.expander("系统理解的需求", expanded=False):
-            st.markdown(f"**交付物：** {brief.get('deliverable', '未记录')}")
-            st.markdown(f"**目的：** {brief.get('purpose', '未记录')}")
-            st.markdown(f"**受众：** {brief.get('audience', '未记录')}")
-            st.markdown(f"**使用场景：** {brief.get('use_context', '未记录')}")
-            exact_copy = brief.get("exact_copy", [])
-            if exact_copy:
-                st.markdown("**画面文字：**")
-                for item in exact_copy:
-                    st.markdown(f"- {item}")
+    if show_brief:
+        _render_brief(brief, title="系统理解的需求")
     st.markdown("**设计方案**")
     st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))
     description = proposal.get("design_description")
@@ -312,29 +321,37 @@ def _generation_preview_page(
         if generation_prompt:
             with st.expander("完整提示词", expanded=True):
                 st.code(generation_prompt, language=None, wrap_lines=True)
+
+
+def _generation_preview_page(result: RunResult, *, scope: str) -> None:
+    st.subheader("图像模型输入预览")
+    st.info("以下内容尚未发送给图像模型。确认无误后，再开始生成图片。")
+    _render_generation_preview(
+        result,
+        show_brief=True,
+        show_condition=True,
+    )
     with st.container(horizontal=True, horizontal_alignment="right"):
         if st.button(
             "取消本次生成",
-            key=f"{action_key}cancel_generation",
+            key=f"{scope}_cancel_generation",
             width="content",
         ):
             _resume(
                 HumanDecision(False, reviewer="streamlit-user"),
                 "正在取消本次生成…",
                 scope=scope,
-                arm=key_prefix or None,
             )
         if st.button(
             "发送并生成图片",
             type="primary",
-            key=f"{action_key}send_generation",
+            key=f"{scope}_send_generation",
             width="content",
         ):
             _resume(
                 HumanDecision(True, reviewer="streamlit-user"),
                 "正在生成图片…",
                 scope=scope,
-                arm=key_prefix or None,
             )
 
 
@@ -342,21 +359,28 @@ def _comparison_page(comparison: ComparisonResult) -> None:
     st.subheader("有／无显式语料对比实验")
     st.caption(
         "两个条件共享同一次自然语言解释和同一个冻结 brief；"
-        "每个条件仍需独立审批后才会调用图像模型。"
+        "确认后将同时生成两张图片。"
     )
-    for arm, label in (
-        ("baseline", "无显式语料基线"),
-        ("corpus", "有显式语料"),
+    statuses = [comparison.baseline.status, comparison.corpus.status]
+    if all(status == "awaiting_approval" for status in statuses):
+        st.info("以下两份请求均尚未发送给图像模型，请对照确认后统一生成。")
+    _render_brief(comparison.brief, title="共同的需求理解")
+
+    columns = st.columns(2, gap="large", vertical_alignment="top")
+    for column, arm, label in zip(
+        columns,
+        ("baseline", "corpus"),
+        ("无显式语料", "有显式语料"),
+        strict=True,
     ):
         result: RunResult = getattr(comparison, arm)
-        with st.container(border=True):
+        with column.container(border=True, height="stretch"):
             st.markdown(f"### {label}")
             if result.status == "awaiting_approval":
-                _generation_preview_page(
+                _render_generation_preview(
                     result,
-                    scope="experiment",
-                    key_prefix=arm,
-                    show_heading=False,
+                    show_brief=False,
+                    show_condition=False,
                 )
             elif result.status in TERMINAL_STATUSES:
                 terminal_label = {
@@ -368,13 +392,37 @@ def _comparison_page(comparison: ComparisonResult) -> None:
                 _show_image(result)
             else:
                 st.info("工作流正在处理，请稍候刷新。")
-    if all(
-        getattr(comparison, arm).status in TERMINAL_STATUSES
-        for arm in ("baseline", "corpus")
-    ):
+
+    if all(status == "awaiting_approval" for status in statuses):
+        st.caption("一次确认将同时批准两个已冻结的图像请求，并并行生成两张图片。")
+        with st.container(horizontal=True, horizontal_alignment="right"):
+            if st.button(
+                "取消本次对比",
+                key="experiment_cancel_comparison",
+                icon=":material/close:",
+                width="content",
+            ):
+                _resume_comparison(
+                    HumanDecision(False, reviewer="streamlit-user"),
+                    "正在取消本次对比…",
+                )
+            if st.button(
+                "确认并生成两张图片",
+                type="primary",
+                key="experiment_generate_comparison",
+                icon=":material/image:",
+                width="content",
+            ):
+                _resume_comparison(
+                    HumanDecision(True, reviewer="streamlit-user"),
+                    "正在并行生成两张图片…",
+                )
+    elif all(status in TERMINAL_STATUSES for status in statuses):
         if st.button("开始新实验", type="primary", width="stretch"):
             _reset_experiment()
             st.rerun()
+    else:
+        st.warning("两个实验条件当前不在同一个审批阶段，请检查运行状态。")
 
 
 def _terminal_page(result: RunResult, *, scope: str) -> None:
@@ -437,7 +485,7 @@ def render_experiment_page() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Corpus Atelier", page_icon="◫", layout="centered")
+    st.set_page_config(page_title="Corpus Atelier", page_icon="◫", layout="wide")
     page = st.navigation(
         [
             st.Page(

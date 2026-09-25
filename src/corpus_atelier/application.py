@@ -528,11 +528,11 @@ class CorpusAtelierApplication:
             }
         return record
 
-    def _start_experiment_arm(
+    def _prepare_experiment_arm(
         self, *, case_id: str, profile, brief: dict, experiment: dict,
         snapshot: Path | None = None, reference: dict | None = None,
         original_request: str | None = None,
-    ) -> RunResult:
+    ) -> tuple[str, Path, dict]:
         run_id, run_dir = self.store.create(
             case_id=case_id,
             brief=brief,
@@ -564,7 +564,7 @@ class CorpusAtelierApplication:
                 snapshot=str(snapshot),
                 reference_selection=reference,
             )
-        return self._invoke_start(run_id, run_dir, state)
+        return run_id, run_dir, state
 
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
@@ -704,40 +704,103 @@ class CorpusAtelierApplication:
             group_id=group_id,
             shared_brief_sha256=brief_sha256,
         )
+        baseline_start = self._prepare_experiment_arm(
+            case_id=job.case_id,
+            profile=profile,
+            brief=brief,
+            experiment=baseline_experiment,
+            original_request=job.request,
+        )
+        corpus_start = self._prepare_experiment_arm(
+            case_id=job.case_id,
+            profile=profile,
+            brief=brief,
+            experiment=corpus_experiment,
+            snapshot=snapshot,
+            reference=reference,
+            original_request=job.request,
+        )
+        starts = [baseline_start, corpus_start]
+        conditions = [
+            "baseline_no_explicit_corpus",
+            "explicit_corpus",
+        ]
+        arms = {
+            condition: start[0]
+            for condition, start in zip(conditions, starts, strict=True)
+        }
+        self.store.update(
+            group_dir,
+            "designing",
+            shared_brief_sha256=brief_sha256,
+            arms=arms,
+            arm_statuses={condition: "created" for condition in conditions},
+        )
+
+        configs = []
+        for run_id, run_dir, _ in starts:
+            config = {
+                "configurable": {"thread_id": run_id},
+                "max_concurrency": 2,
+            }
+            self._active[run_id] = {"config": config, "run_dir": run_dir}
+            configs.append(config)
+
         try:
-            baseline = self._start_experiment_arm(
-                case_id=job.case_id,
-                profile=profile,
-                brief=brief,
-                experiment=baseline_experiment,
-                original_request=job.request,
-            )
-            corpus = self._start_experiment_arm(
-                case_id=job.case_id,
-                profile=profile,
-                brief=brief,
-                experiment=corpus_experiment,
-                snapshot=snapshot,
-                reference=reference,
-                original_request=job.request,
+            outcomes = self.graph.batch(
+                [state for _, _, state in starts],
+                config=configs,
+                return_exceptions=True,
             )
         except Exception as exc:
+            statuses = {
+                condition: self.store.manifest(run_dir)["status"]
+                for condition, (_, run_dir, _) in zip(
+                    conditions, starts, strict=True,
+                )
+            }
             self.store.update(
-                group_dir, "failed", error_type=type(exc).__name__, error=str(exc),
+                group_dir,
+                "failed",
+                arm_statuses=statuses,
+                error_type=type(exc).__name__,
+                error=str(exc),
             )
             raise
+
+        failures = []
+        for (_, run_dir, _), outcome in zip(starts, outcomes, strict=True):
+            if isinstance(outcome, Exception):
+                self.store.update(
+                    run_dir,
+                    "failed",
+                    error_type=type(outcome).__name__,
+                    error=str(outcome),
+                )
+                failures.append(outcome)
+
+        results = [self._result(run_id) for run_id, _, _ in starts]
+        baseline, corpus = results
+        arm_statuses = {
+            condition: result.status
+            for condition, result in zip(conditions, results, strict=True)
+        }
+        if failures:
+            failure = failures[0]
+            self.store.update(
+                group_dir,
+                "failed",
+                arm_statuses=arm_statuses,
+                error_type=type(failure).__name__,
+                error=str(failure),
+            )
+            raise failure
         self.store.update(
             group_dir,
             "awaiting_approval",
             shared_brief_sha256=brief_sha256,
-            arms={
-                "baseline_no_explicit_corpus": baseline.run_id,
-                "explicit_corpus": corpus.run_id,
-            },
-            arm_statuses={
-                "baseline_no_explicit_corpus": baseline.status,
-                "explicit_corpus": corpus.status,
-            },
+            arms=arms,
+            arm_statuses=arm_statuses,
         )
         return ComparisonResult(
             group_id=group_id,
@@ -769,6 +832,92 @@ class CorpusAtelierApplication:
         if result.status in {"completed", "rejected", "failed"}:
             self._active.pop(run_id, None)
         return result
+
+    def resume_comparison(
+        self, comparison: ComparisonResult, decision: object,
+    ) -> ComparisonResult:
+        """Apply one human decision to both arms and resume them concurrently."""
+        if not hasattr(decision, "to_dict"):
+            raise TypeError("A resumable decision must provide to_dict().")
+        decision_payload = decision.to_dict()
+        if not isinstance(decision_payload, dict):
+            raise TypeError("A resumable decision must serialize to a dictionary.")
+
+        arm_records = []
+        for arm, condition in (
+            ("baseline", "baseline_no_explicit_corpus"),
+            ("corpus", "explicit_corpus"),
+        ):
+            result = getattr(comparison, arm)
+            if result.run_id not in self._active:
+                raise ValueError(
+                    f"This process has no resumable checkpoint for the {arm} arm."
+                )
+            active = self._active[result.run_id]
+            run_dir = Path(active["run_dir"])
+            manifest = self.store.manifest(run_dir)
+            experiment = manifest.get("experiment", {})
+            if (
+                experiment.get("group_id") != comparison.group_id
+                or experiment.get("condition") != condition
+            ):
+                raise ValueError(
+                    "Comparison approval does not match the active experiment arms."
+                )
+            if manifest["status"] != "awaiting_approval":
+                raise ValueError(
+                    f"The {arm} arm is not awaiting approval."
+                )
+            arm_records.append((arm, result.run_id, run_dir, active["config"]))
+
+        try:
+            outcomes = self.graph.batch(
+                [
+                    Command(resume=dict(decision_payload))
+                    for _ in arm_records
+                ],
+                config=[record[3] for record in arm_records],
+                return_exceptions=True,
+            )
+        except Exception as exc:
+            for _, _, run_dir, _ in arm_records:
+                status = self.store.manifest(run_dir)["status"]
+                if status not in {"completed", "rejected", "failed"}:
+                    self.store.update(
+                        run_dir,
+                        "failed",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+            self._update_comparison_group(arm_records[0][2])
+            raise
+
+        for (_, _, run_dir, _), outcome in zip(
+            arm_records, outcomes, strict=True,
+        ):
+            if isinstance(outcome, Exception):
+                self.store.update(
+                    run_dir,
+                    "failed",
+                    error_type=type(outcome).__name__,
+                    error=str(outcome),
+                )
+
+        updated = {
+            arm: self._result(run_id)
+            for arm, run_id, _, _ in arm_records
+        }
+        self._update_comparison_group(arm_records[0][2])
+        for result in updated.values():
+            if result.status in {"completed", "rejected", "failed"}:
+                self._active.pop(result.run_id, None)
+        return ComparisonResult(
+            group_id=comparison.group_id,
+            group_dir=comparison.group_dir,
+            brief=comparison.brief,
+            baseline=updated["baseline"],
+            corpus=updated["corpus"],
+        )
 
     def inspect(self, case_id: str, run_id: str) -> RunSummary:
         case_id = validate_case_id(case_id)

@@ -12,7 +12,7 @@ from tests.fakes import FakeImageProvider, FakeTextProvider
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
 CASES = ROOT / "experiments/cases/mucha-watch"
-REFERENCE_ID = "mucha-poster-124474277"
+REFERENCE_ID = "mucha-poster-124474232"
 REFERENCE = {"format_version": 1, "reference_id": REFERENCE_ID}
 
 
@@ -39,7 +39,7 @@ class VisualReferenceTests(unittest.TestCase):
         ))
         return app, text, image, result
 
-    def test_designer_reads_the_selected_image_without_a_predefined_relationship(self):
+    def test_designer_receives_selected_image_and_corresponding_corpus_evidence(self):
         _, text, image, result = self._start()
         self.assertEqual(result.status, "awaiting_approval")
         self.assertEqual(image.calls, 0)
@@ -48,8 +48,22 @@ class VisualReferenceTests(unittest.TestCase):
         self.assertEqual(text.design_calls[1]["schema_name"], "image-spec.schema.json")
         self.assertEqual(text.design_calls[1]["reference_paths"], [])
         self.assertNotIn("reference relationship", text.design_calls[0]["prompt"].lower())
+        self.assertIn(
+            "# Selected design knowledge — untrusted evidence",
+            text.design_calls[0]["prompt"],
+        )
+        self.assertIn("# Transferable design knowledge", text.design_calls[0]["prompt"])
+        self.assertIn("## Relational product meaning", text.design_calls[0]["prompt"])
+        self.assertIn("# Transfer boundaries", text.design_calls[0]["prompt"])
+        self.assertNotIn("# Selected design knowledge", text.design_calls[1]["prompt"])
         proposal = json.loads(Path(result.artifacts["proposal"]).read_text(encoding="utf-8"))
         self.assertNotIn("evidence_ids", proposal)
+        self.assertIn("wears the AURELIA wristwatch", proposal["design_description"])
+        image_spec = json.loads(Path(result.artifacts["image_spec"]).read_text(encoding="utf-8"))
+        self.assertIn("wears the AURELIA wristwatch", image_spec["subject_and_scene"])
+        generation_prompt = Path(result.artifacts["generation_prompt"]).read_text(encoding="utf-8")
+        self.assertIn("wears the AURELIA wristwatch", generation_prompt)
+        self.assertNotIn("mucha-poster-124474232", generation_prompt)
         self.assertIn("reference_package", result.artifacts)
         self.assertNotIn("reference_plan", result.artifacts)
         manifest = json.loads(
@@ -57,11 +71,17 @@ class VisualReferenceTests(unittest.TestCase):
         )
         self.assertNotIn("reference_mode", manifest)
 
-    def test_same_reference_is_used_for_design_and_generation(self):
+    def test_reference_is_used_for_design_but_not_sent_to_image_generation(self):
         app, text, image, result = self._start()
+        preview = json.loads(Path(
+            result.artifacts["generation_request_preview"]
+        ).read_text(encoding="utf-8"))
+        self.assertEqual(preview["operation"], "generation")
+        self.assertNotIn("references", preview)
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
         self.assertEqual(result.status, "completed")
-        self.assertEqual(image.reference_paths, text.design_calls[0]["reference_paths"])
+        self.assertEqual(len(text.design_calls[0]["reference_paths"]), 1)
+        self.assertEqual(image.reference_paths, [])
 
     def test_without_corpus_uses_the_same_brief_without_reference_instructions(self):
         with TemporaryDirectory() as directory:
@@ -94,10 +114,20 @@ class VisualReferenceTests(unittest.TestCase):
                 "reference_id": "missing",
             })
 
-    def test_reference_package_contains_no_text_knowledge(self):
+    def test_reference_package_contains_traceable_design_evidence(self):
         package, path = build_reference_package(SNAPSHOT, REFERENCE)
         self.assertEqual(package["reference"]["id"], REFERENCE_ID)
-        self.assertNotIn("knowledge", package)
+        self.assertEqual(
+            package["reference"]["design_knowledge_file"], "design-knowledge.md",
+        )
+        self.assertIn(
+            "# Transferable design knowledge",
+            package["reference"]["design_knowledge"],
+        )
+        self.assertIn(
+            "## Relational product meaning",
+            package["reference"]["design_knowledge"],
+        )
         self.assertTrue(path.is_file())
 
     def test_reference_package_change_invalidates_approval(self):

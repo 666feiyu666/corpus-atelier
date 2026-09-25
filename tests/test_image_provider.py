@@ -13,27 +13,25 @@ from corpus_atelier.providers.image import OpenAIImageProvider
 class _FakeImages:
     def __init__(self, encoded_png: str):
         self.encoded_png = encoded_png
-        self.edit_files = []
+        self.edit_calls = 0
         self.generate_calls = 0
 
     def edit(self, *, image, **request):
-        self.edit_files = [item.name for item in image]
-        return SimpleNamespace(
-            data=[SimpleNamespace(b64_json=self.encoded_png, revised_prompt=None)],
-            usage=None, _request_id="image-edit-test",
-        )
+        self.edit_calls += 1
+        raise AssertionError("The generation provider must not receive reference images.")
 
     def generate(self, **request):
         self.generate_calls += 1
-        raise AssertionError("Reference generation must use images.edit.")
+        return SimpleNamespace(
+            data=[SimpleNamespace(b64_json=self.encoded_png, revised_prompt=None)],
+            usage=None, _request_id="image-generation-test",
+        )
 
 
 class ImageProviderTests(unittest.TestCase):
-    def test_reference_generation_uses_edit_with_selected_images(self):
+    def test_generation_provider_uses_text_only_generate_endpoint(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            reference = root / "reference.jpg"
-            Image.new("RGB", (8, 8), "gold").save(reference)
             rendered = root / "rendered.png"
             Image.new("RGB", (8, 8), "white").save(rendered)
             encoded = base64.b64encode(rendered.read_bytes()).decode("ascii")
@@ -45,21 +43,19 @@ class ImageProviderTests(unittest.TestCase):
             provider = OpenAIImageProvider(client=client)
             preview = provider.describe_request(
                 "Create a new poster.", size="1024x1536",
-                reference_paths=[reference],
             )
             response = provider.generate(
                 "Create a new poster.", size="1024x1536", output=output,
-                reference_paths=[reference],
             )
 
-            self.assertEqual(images.edit_files, [str(reference)])
-            self.assertEqual(images.generate_calls, 0)
+            self.assertEqual(images.edit_calls, 0)
+            self.assertEqual(images.generate_calls, 1)
             self.assertEqual(response["status"], "generated")
             request = json.loads(
                 (output / "request.json").read_text(encoding="utf-8"))
             self.assertEqual(request, preview)
-            self.assertEqual(request["operation"], "reference_generation")
-            self.assertEqual(len(request["references"]), 1)
+            self.assertEqual(request["operation"], "generation")
+            self.assertNotIn("references", request)
 
 
 if __name__ == "__main__":

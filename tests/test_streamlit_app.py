@@ -35,16 +35,18 @@ class StreamlitAppTests(unittest.TestCase):
         poster = load_case("工作坊海报")
         cover = load_case("文章封面")
         watch = load_case("AURELIA 女士手表广告")
+        sunglasses = load_case("Sunnet 墨镜广告")
         therapy = load_case("Therapy for Desire")
         event = load_case("活动海报")
         self.assertEqual(list(CASES), [
             "工作坊海报", "文章封面", "AURELIA 女士手表广告",
-            "Therapy for Desire", "活动海报",
+            "Sunnet 墨镜广告", "Therapy for Desire", "活动海报",
         ])
         self.assertEqual(poster["topic"], "Corpus Atelier")
         self.assertEqual(cover["article_title"], "从语料到视觉修辞")
         self.assertNotIn("reference_mode", watch)
         self.assertNotIn("corpus", watch["purpose"].lower())
+        self.assertEqual(sunglasses["exact_copy"], ["Sunnet"])
         self.assertEqual(therapy["deliverable"], "微信公众号封面")
         self.assertEqual(CASES["Therapy for Desire"].case_id, "therapy-for-desire")
         self.assertEqual(CASES["Therapy for Desire"].profile, "art-graphic")
@@ -104,12 +106,12 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(
             app.selectbox(key="selected_reference_id").value,
-            "mucha-poster-124474229",
+            "mucha-poster-124474232",
         )
         app.segmented_control(key="start_mode").set_value("使用示例").run()
         self.assertEqual(app.selectbox(key="case_label").options, [
             "工作坊海报", "文章封面", "AURELIA 女士手表广告",
-            "Therapy for Desire", "活动海报",
+            "Sunnet 墨镜广告", "Therapy for Desire", "活动海报",
         ])
         app.selectbox(key="case_label").select("文章封面").run()
         self.assertFalse(app.exception)
@@ -124,7 +126,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(
             app.selectbox(key="selected_reference_id").value,
-            "mucha-poster-124474277",
+            "mucha-poster-124474232",
         )
         self.assertFalse(any(
             item.label == "参考图使用策略" for item in app.selectbox

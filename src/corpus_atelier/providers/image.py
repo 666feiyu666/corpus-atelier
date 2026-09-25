@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-from contextlib import ExitStack
 from pathlib import Path
 from typing import Protocol
 
@@ -11,11 +10,9 @@ from ..artifacts.hashing import digest_file
 
 
 class ImageProvider(Protocol):
-    def describe_request(self, prompt: str, *, size: str,
-                         reference_paths: list[Path] | None = None) -> dict: ...
+    def describe_request(self, prompt: str, *, size: str) -> dict: ...
 
-    def generate(self, prompt: str, *, size: str, output: Path,
-                 reference_paths: list[Path] | None = None) -> dict: ...
+    def generate(self, prompt: str, *, size: str, output: Path) -> dict: ...
 
 
 class OpenAIImageProvider:
@@ -24,29 +21,17 @@ class OpenAIImageProvider:
         self.quality = quality
         self.client = client
 
-    def describe_request(self, prompt: str, *, size: str,
-                         reference_paths: list[Path] | None = None) -> dict:
+    def describe_request(self, prompt: str, *, size: str) -> dict:
         """Return the persisted, human-reviewable form of the provider request."""
-        reference_paths = list(reference_paths or [])
-        if len(reference_paths) > 3:
-            raise ValueError("Image generation accepts at most three reference images.")
         return {
             "prompt": prompt, "model": self.model, "quality": self.quality,
             "size": size, "output_format": "png", "n": 1,
-            "operation": "reference_generation" if reference_paths else "generation",
-            "references": [
-                {"file": path.name, "sha256": digest_file(path)}
-                for path in reference_paths
-            ],
+            "operation": "generation",
         }
 
-    def generate(self, prompt: str, *, size: str, output: Path,
-                 reference_paths: list[Path] | None = None) -> dict:
+    def generate(self, prompt: str, *, size: str, output: Path) -> dict:
         from ..artifacts.records import write_json, write_text
-        reference_paths = list(reference_paths or [])
-        request = self.describe_request(
-            prompt, size=size, reference_paths=reference_paths,
-        )
+        request = self.describe_request(prompt, size=size)
         write_json(output / "request.json", request)
         write_text(output / "prompt.md", prompt)
         response_record = {"status": "requested"}
@@ -61,15 +46,7 @@ class OpenAIImageProvider:
                 "prompt": prompt, "model": self.model, "quality": self.quality,
                 "size": size, "output_format": "png", "n": 1,
             }
-            if reference_paths:
-                with ExitStack() as stack:
-                    images = [
-                        stack.enter_context(path.open("rb"))
-                        for path in reference_paths
-                    ]
-                    response = client.images.edit(image=images, **api_request)
-            else:
-                response = client.images.generate(**api_request)
+            response = client.images.generate(**api_request)
             if not response.data or not response.data[0].b64_json:
                 raise ValueError("The image provider returned no image.")
             data = base64.b64decode(response.data[0].b64_json, validate=True)

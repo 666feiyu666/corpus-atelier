@@ -13,7 +13,7 @@ SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
 CASES = ROOT / "experiments/cases"
 REFERENCE = {
     "format_version": 1,
-    "reference_id": "mucha-poster-124474277",
+    "reference_id": "mucha-poster-124474232",
 }
 
 
@@ -50,7 +50,8 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(preview["prompt"], Path(
             result.artifacts["generation_prompt"]
         ).read_text(encoding="utf-8"))
-        self.assertEqual(len(preview["references"]), 1)
+        self.assertEqual(preview["operation"], "generation")
+        self.assertNotIn("references", preview)
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
         self.assertEqual(result.status, "completed")
         self.assertEqual(image.calls, 1)

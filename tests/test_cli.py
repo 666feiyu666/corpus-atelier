@@ -33,7 +33,7 @@ class CliTests(unittest.TestCase):
             selection = Path(directory) / "selection.json"
             selection.write_text(json.dumps({
                 "format_version": 1,
-                "reference_id": "mucha-poster-124474277",
+                "reference_id": "mucha-poster-124474232",
             }), encoding="utf-8")
             output = Path(directory) / "output"
             stream = io.StringIO()
@@ -48,5 +48,5 @@ class CliTests(unittest.TestCase):
             self.assertTrue((output / "reference-selection.json").is_file())
             package = json.loads(
                 (output / "reference-package.json").read_text(encoding="utf-8"))
-            self.assertEqual(package["reference"]["id"], "mucha-poster-124474277")
+            self.assertEqual(package["reference"]["id"], "mucha-poster-124474232")
             self.assertNotIn("knowledge", package)

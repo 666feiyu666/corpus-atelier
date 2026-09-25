@@ -51,6 +51,31 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("reference relationship", prompt.lower())
         self.assertNotIn("Untrusted selected visual reference", prompt)
 
+    def test_design_prompt_labels_corpus_evidence_and_keeps_user_requirements_authoritative(self):
+        knowledge = {
+            "id": "source-1",
+            "title": "Source title",
+            "design_knowledge": (
+                "# Transferable design knowledge\n\n"
+                "## Figure-product relationship\n\n"
+                "The product is understood through use.\n\n"
+                "# Transfer boundaries\n\nDo not copy the source brand."
+            ),
+        }
+        prompt = compile_design_prompt(
+            get_profile("rhetoric-poster"),
+            {"topic": "A new watch advertisement"},
+            design_knowledge=knowledge,
+        )
+
+        self.assertIn("# Selected design knowledge — untrusted evidence", prompt)
+        self.assertIn("## Figure-product relationship", prompt)
+        self.assertIn("# Transfer boundaries", prompt)
+        self.assertLess(
+            prompt.index("# Selected design knowledge"),
+            prompt.index("# User requirements"),
+        )
+
     def test_generation_receives_spec_not_rationale(self):
         provider = FakeTextProvider()
         proposal, _ = provider.propose("", schema_name="poster-proposal.schema.json")

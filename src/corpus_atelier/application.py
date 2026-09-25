@@ -102,6 +102,7 @@ class _Runtime:
                 state["brief"],
                 self.text_provider,
                 [Path(path) for path in state.get("reference_image_paths", [])],
+                design_knowledge=(state.get("reference_package") or {}).get("reference"),
                 canvas=canvas,
             )
             request = {
@@ -189,9 +190,6 @@ class _Runtime:
             generation_request = self.image_provider.describe_request(
                 generation_prompt,
                 size=state["generation_size"],
-                reference_paths=[
-                    Path(path) for path in state.get("reference_image_paths", [])
-                ],
             )
             self.store.json(
                 run_dir, "generation/request-preview.json", generation_request,
@@ -294,9 +292,6 @@ class _Runtime:
         current_request = self.image_provider.describe_request(
             state["generation_prompt"],
             size=state["generation_size"],
-            reference_paths=[
-                Path(path) for path in state.get("reference_image_paths", [])
-            ],
         )
         if (
             saved_prompt != state["generation_prompt"]
@@ -339,7 +334,6 @@ class _Runtime:
             state["generation_prompt"],
             size=state["generation_size"],
             output=attempt,
-            reference_paths=[Path(path) for path in state.get("reference_image_paths", [])],
         )
         image_path = (attempt / response["file"]).resolve()
         image_path, render_record = normalize_canvas(

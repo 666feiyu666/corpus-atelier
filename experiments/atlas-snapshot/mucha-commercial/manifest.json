@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "snapshot_id": "mucha-job-design-knowledge-v1",
+  "title": "Mucha JOB Design Knowledge",
+  "reference": {
+    "id": "mucha-poster-124474232",
+    "title": "JOB",
+    "image_file": "poster/124474232__Mucha - Bridges, A06 -c.jpg",
+    "image_sha256": "fd20fb532ddc6829284d9f2e9b82cb665112cae2b440351912208db8e0f2b016",
+    "design_knowledge_file": "design-knowledge.md",
+    "design_knowledge_sha256": "d79d11739c0511a864770c2ac73ce8b040ce9dbf9b46ffbd13fe1402c4183239"
+  }
+}

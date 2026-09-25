@@ -7,8 +7,11 @@ from .prompt_compiler import compile_design_prompt
 
 def synthesize(profile, brief: dict, provider,
                reference_paths: list[Path] | None = None,
+               design_knowledge: dict | None = None,
                canvas: dict | None = None) -> tuple[str, dict, dict]:
-    prompt = compile_design_prompt(profile, brief, canvas=canvas)
+    prompt = compile_design_prompt(
+        profile, brief, canvas=canvas, design_knowledge=design_knowledge,
+    )
     proposal, response = provider.propose(
         prompt,
         schema_name=profile.proposal_schema,

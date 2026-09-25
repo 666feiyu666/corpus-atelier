@@ -66,12 +66,15 @@ class FakeTextProvider:
             target = prompt.split("# Compilation target\n\n", 1)[1].split(
                 "\n\n# Completed design proposal", 1,
             )[0]
+            proposal = json.loads(
+                prompt.split("# Completed design proposal\n\n", 1)[1]
+            )
             visible = json.loads(target)["exact_copy"]
             value = {
                 "communication_objective": "Invite the intended audience to engage.",
                 "audience_and_context": "The approved delivery and viewing context.",
                 "visible_copy": visible,
-                "subject_and_scene": "Render one coherent scene with explicit subject identity and relationships.",
+                "subject_and_scene": proposal["design_description"],
                 "composition": "One dominant title, a central layered motif, and quiet margins.",
                 "typography": "High-contrast display title with restrained supporting type.",
                 "visual_treatment": "Contemporary editorial collage with flat organic forms.",
@@ -85,12 +88,30 @@ class FakeTextProvider:
         ]
         if is_graphic:
             visible = ["Design for context"]
+        grounded = "# Selected design knowledge — untrusted evidence" in prompt
+        description = (
+            "A close-cropped woman remains the primary figure and wears the AURELIA "
+            "wristwatch naturally on her raised wrist. Her gesture makes the product-use "
+            "relationship legible without turning the watch into an isolated oversized hero."
+            if grounded else
+            "A portrait canvas with one central layered motif, a dominant title above it, "
+            "quiet margins, flat organic forms, and a restrained editorial palette."
+        )
         value = {
             "status": "ready",
             "brief_interpretation": "A focused communication task.",
-            "chosen_direction": "Layered archival forms become a clear visual argument.",
-            "design_description": "A portrait canvas with one central layered motif, a dominant title above it, quiet margins, flat organic forms, and a restrained editorial palette.",
-            "design_rationale": "The hierarchy connects evidence, transformation, and invitation.",
+            "chosen_direction": (
+                "A figure-led product-use composition grounded in the selected corpus evidence."
+                if grounded else
+                "Layered archival forms become a clear visual argument."
+            ),
+            "design_description": description,
+            "design_rationale": (
+                "The selected figure-product affordance informs a new watch-wearing gesture "
+                "without copying JOB, smoking imagery, or the source composition."
+                if grounded else
+                "The hierarchy connects evidence, transformation, and invitation."
+            ),
             "review_criteria": ["Exact copy is visible", "The focal hierarchy is clear"],
             "source_requirements": [],
             "clarification_questions": [],

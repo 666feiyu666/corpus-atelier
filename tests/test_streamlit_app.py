@@ -49,48 +49,54 @@ class StreamlitAppTests(unittest.TestCase):
         ).run()
         self.assertFalse(app.exception)
         self.assertEqual(app.title[0].value, "Corpus Atelier")
-        self.assertEqual(app.text_area(key="natural_request").value, "")
+        self.assertEqual(app.subheader[0].value, "创建设计")
+        self.assertEqual(app.text_area(key="design_request").value, "")
         self.assertEqual(
             app.segmented_control(key="design_method").value,
             "修辞导向",
         )
-        self.assertEqual(
-            app.segmented_control(key="experiment_mode").value,
-            "普通生成",
-        )
-        self.assertEqual(len(app.segmented_control), 2)
+        self.assertEqual(len(app.segmented_control), 1)
+        self.assertEqual(app.button(key="start_design").label, "生成设计方案")
         self.assertEqual(len(app.selectbox), 0)
         self.assertEqual(len(app.get("file_uploader")), 0)
         self.assertEqual(len(app.text_input), 0)
         self.assertEqual(len(app.multiselect), 0)
 
-    def test_corpus_conditions_are_explicitly_labelled_as_experimental(self):
+    def test_corpus_controls_are_isolated_on_the_experiment_page(self):
         app = AppTest.from_file(
             str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
         ).run()
-        mode = app.segmented_control(key="experiment_mode")
-        self.assertIn("无显式语料基线（实验性）", mode.options)
-        self.assertIn("有显式语料（实验性）", mode.options)
-        self.assertIn("成对运行两种条件（实验性）", mode.options)
+        app.switch_page("app_pages/corpus_experiment.py").run()
 
-        mode.set_value("有显式语料（实验性）").run()
-        self.assertTrue(any(
-            "实验功能" in caption.value for caption in app.caption
-        ))
+        self.assertEqual(app.subheader[0].value, "语料对比实验")
+        self.assertEqual(app.text_area(key="experiment_request").value, "")
+        mode = app.segmented_control(key="experiment_mode")
+        self.assertEqual(
+            mode.options,
+            ["成对比较", "无显式语料", "有显式语料"],
+        )
+        self.assertEqual(mode.value, "成对比较")
+        source = (ROOT / "src/corpus_atelier/streamlit_app.py").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn('st.badge("实验性"', source)
+
+        mode.set_value("有显式语料").run()
+        self.assertEqual(app.button(key="start_experiment").label, "开始实验")
 
     def test_model_failure_is_not_reported_as_invalid_user_input(self):
         with patch(
-            "corpus_atelier.application.CorpusAtelierApplication",
+            "corpus_atelier.streamlit_app.CorpusAtelierApplication",
             FailingStartApplication,
         ):
             app = AppTest.from_file(
                 str(ROOT / "src/corpus_atelier/streamlit_app.py"),
                 default_timeout=10,
             ).run()
-            app.text_area(key="natural_request").set_value(
+            app.text_area(key="design_request").set_value(
                 "请做一张超现实主义电脑壁纸。"
             ).run()
-            app.button[0].click().run()
+            app.button(key="start_design").click().run()
 
         self.assertFalse(app.exception)
         self.assertEqual(
@@ -138,20 +144,26 @@ class StreamlitAppTests(unittest.TestCase):
             app = AppTest.from_file(
                 str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
             )
-            app.session_state["atelier_app"] = FakeUiApplication(run_dir, artifacts)
-            app.session_state["result"] = result
+            app.session_state["design_app"] = FakeUiApplication(run_dir, artifacts)
+            app.session_state["design_result"] = result
             app.run()
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "图像模型输入预览")
             self.assertIn("尚未发送", app.info[0].value)
             self.assertEqual(app.code[0].value, generation_prompt)
-            self.assertEqual(app.button(key="send_generation").label, "发送并生成图片")
-            self.assertEqual(app.button(key="cancel_generation").label, "取消本次生成")
+            self.assertEqual(
+                app.button(key="design_send_generation").label,
+                "发送并生成图片",
+            )
+            self.assertEqual(
+                app.button(key="design_cancel_generation").label,
+                "取消本次生成",
+            )
 
-            app.button(key="send_generation").click().run()
+            app.button(key="design_send_generation").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "生成完成")
-            self.assertEqual([button.label for button in app.button], ["开始新实验"])
+            self.assertEqual([button.label for button in app.button], ["创建新设计"])
 
     def test_paired_experiment_keeps_independent_approval_gates(self):
         with TemporaryDirectory() as directory:
@@ -180,27 +192,28 @@ class StreamlitAppTests(unittest.TestCase):
             app = AppTest.from_file(
                 str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
             )
-            app.session_state["atelier_app"] = FakeUiApplication(run_dir, {})
-            app.session_state["comparison_result"] = comparison
-            app.session_state["result"] = None
             app.run()
+            app.session_state["experiment_app"] = FakeUiApplication(run_dir, {})
+            app.session_state["comparison_result"] = comparison
+            app.session_state["experiment_result"] = None
+            app.switch_page("app_pages/corpus_experiment.py").run()
 
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "有／无显式语料对比实验")
             self.assertEqual(
-                app.button(key="baselinesend_generation").label,
+                app.button(key="experiment_baseline_send_generation").label,
                 "发送并生成图片",
             )
             self.assertEqual(
-                app.button(key="corpussend_generation").label,
+                app.button(key="experiment_corpus_send_generation").label,
                 "发送并生成图片",
             )
 
-            app.button(key="baselinesend_generation").click().run()
+            app.button(key="experiment_baseline_send_generation").click().run()
             updated = app.session_state["comparison_result"]
             self.assertEqual(updated.baseline.status, "completed")
             self.assertEqual(updated.corpus.status, "awaiting_approval")
             self.assertEqual(
-                app.button(key="corpussend_generation").label,
+                app.button(key="experiment_corpus_send_generation").label,
                 "发送并生成图片",
             )

@@ -22,7 +22,13 @@ from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
-from .state import DesignJob, RunResult, RunSummary
+from .state import (
+    ComparisonResult,
+    CorpusComparisonJob,
+    DesignJob,
+    RunResult,
+    RunSummary,
+)
 
 
 class _Runtime:
@@ -376,6 +382,79 @@ class CorpusAtelierApplication:
         self.graph = build_graph(self.runtime, self.checkpointer)
         self._active: dict[str, dict] = {}
 
+    @staticmethod
+    def _experiment_record(
+        *, condition: str, group_id: str, shared_brief_sha256: str,
+        snapshot: Path | None = None, reference: dict | None = None,
+    ) -> dict:
+        record = {
+            "kind": "corpus_generation_comparison",
+            "status": "experimental",
+            "condition": condition,
+            "group_id": group_id,
+            "shared_brief_sha256": shared_brief_sha256,
+        }
+        if snapshot is not None and reference is not None:
+            snapshot_manifest, _ = load_snapshot(snapshot)
+            record["corpus"] = {
+                "snapshot_id": snapshot_manifest["snapshot_id"],
+                "snapshot_path": str(snapshot),
+                "reference_id": reference["reference_id"],
+            }
+        return record
+
+    def _prepare_comparison_arm(
+        self, *, case_id: str, profile, brief: dict, generation_mode: str,
+        experiment: dict, snapshot: Path | None = None,
+        reference: dict | None = None,
+    ) -> tuple[str, Path, dict]:
+        run_id, run_dir = self.store.create(
+            case_id=case_id,
+            brief=brief,
+            profile=profile,
+            generation_mode=generation_mode,
+            snapshot=snapshot,
+            experiment=experiment,
+        )
+        state = {
+            "case_id": case_id,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "profile": profile.name,
+            "generation_mode": generation_mode,
+            "brief": brief,
+            "experiment": experiment,
+            "status": "created",
+        }
+        if snapshot is not None and reference is not None:
+            state.update(
+                snapshot=str(snapshot),
+                reference_selection=reference,
+            )
+        return run_id, run_dir, state
+
+    def _update_comparison_group(self, run_dir: Path) -> None:
+        manifest = self.store.manifest(run_dir)
+        group_id = manifest.get("experiment", {}).get("group_id")
+        if not group_id:
+            return
+        group_dir = self.store.root / "_comparisons" / manifest["case_id"] / group_id
+        group_manifest = self.store.manifest(group_dir)
+        statuses = {
+            condition: self.store.manifest(
+                self.store.root / manifest["case_id"] / arm_run_id
+            )["status"]
+            for condition, arm_run_id in group_manifest.get("arms", {}).items()
+        }
+        terminal = {"completed", "rejected", "failed"}
+        if "failed" in statuses.values():
+            group_status = "failed"
+        elif statuses and all(status in terminal for status in statuses.values()):
+            group_status = "completed"
+        else:
+            group_status = "awaiting_approval"
+        self.store.update(group_dir, group_status, arm_statuses=statuses)
+
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
         validate(job.brief, profile.brief_schema)
@@ -424,6 +503,129 @@ class CorpusAtelierApplication:
             raise
         return self._result(run_id)
 
+    def start_comparison(self, job: CorpusComparisonJob) -> ComparisonResult:
+        """Start no-corpus and explicit-corpus arms from one frozen brief."""
+        profile = get_profile(job.profile)
+        brief = validate(job.brief, profile.brief_schema)
+        validate(job.reference, "reference-selection.schema.json")
+        snapshot = Path(job.snapshot).resolve(strict=True)
+        load_snapshot(snapshot)
+        group_id, group_dir = self.store.create_comparison(
+            case_id=job.case_id,
+            profile=profile,
+            brief=brief,
+        )
+        brief_sha256 = digest_json(brief)
+        conditions = ["baseline_no_explicit_corpus", "explicit_corpus"]
+        baseline = self._prepare_comparison_arm(
+            case_id=job.case_id,
+            profile=profile,
+            brief=brief,
+            generation_mode="without_corpus",
+            experiment=self._experiment_record(
+                condition=conditions[0],
+                group_id=group_id,
+                shared_brief_sha256=brief_sha256,
+            ),
+        )
+        corpus = self._prepare_comparison_arm(
+            case_id=job.case_id,
+            profile=profile,
+            brief=brief,
+            generation_mode="with_corpus",
+            experiment=self._experiment_record(
+                condition=conditions[1],
+                group_id=group_id,
+                shared_brief_sha256=brief_sha256,
+                snapshot=snapshot,
+                reference=job.reference,
+            ),
+            snapshot=snapshot,
+            reference=job.reference,
+        )
+        starts = [baseline, corpus]
+        arms = {
+            condition: start[0]
+            for condition, start in zip(conditions, starts, strict=True)
+        }
+        self.store.update(
+            group_dir,
+            "designing",
+            shared_brief_sha256=brief_sha256,
+            arms=arms,
+            arm_statuses={condition: "created" for condition in conditions},
+        )
+
+        configs = []
+        for run_id, run_dir, _ in starts:
+            config = {
+                "configurable": {"thread_id": run_id},
+                "max_concurrency": 2,
+            }
+            self._active[run_id] = {"config": config, "run_dir": run_dir}
+            configs.append(config)
+        try:
+            outcomes = self.graph.batch(
+                [state for _, _, state in starts],
+                config=configs,
+                return_exceptions=True,
+            )
+        except Exception as exc:
+            statuses = {
+                condition: self.store.manifest(run_dir)["status"]
+                for condition, (_, run_dir, _) in zip(
+                    conditions, starts, strict=True,
+                )
+            }
+            self.store.update(
+                group_dir,
+                "failed",
+                arm_statuses=statuses,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise
+
+        failures = []
+        for (_, run_dir, _), outcome in zip(starts, outcomes, strict=True):
+            if isinstance(outcome, Exception):
+                self.store.update(
+                    run_dir,
+                    "failed",
+                    error_type=type(outcome).__name__,
+                    error=str(outcome),
+                )
+                failures.append(outcome)
+        results = [self._result(run_id) for run_id, _, _ in starts]
+        arm_statuses = {
+            condition: result.status
+            for condition, result in zip(conditions, results, strict=True)
+        }
+        if failures:
+            failure = failures[0]
+            self.store.update(
+                group_dir,
+                "failed",
+                arm_statuses=arm_statuses,
+                error_type=type(failure).__name__,
+                error=str(failure),
+            )
+            raise failure
+        self.store.update(
+            group_dir,
+            "awaiting_approval",
+            shared_brief_sha256=brief_sha256,
+            arms=arms,
+            arm_statuses=arm_statuses,
+        )
+        return ComparisonResult(
+            group_id=group_id,
+            group_dir=group_dir,
+            brief=brief,
+            baseline=results[0],
+            corpus=results[1],
+        )
+
     def resume(self, run_id: str, decision: object) -> RunResult:
         if run_id not in self._active:
             raise ValueError("This process has no resumable checkpoint for the run.")
@@ -439,11 +641,93 @@ class CorpusAtelierApplication:
             self.store.update(
                 run_dir, "failed", error_type=type(exc).__name__, error=str(exc),
             )
+            self._update_comparison_group(run_dir)
             raise
         result = self._result(run_id)
+        self._update_comparison_group(run_dir)
         if result.status in {"completed", "rejected", "failed"}:
             self._active.pop(run_id, None)
         return result
+
+    def resume_comparison(
+        self, comparison: ComparisonResult, decision: object,
+    ) -> ComparisonResult:
+        """Apply one human decision and resume both arms concurrently."""
+        if not hasattr(decision, "to_dict"):
+            raise TypeError("A resumable decision must provide to_dict().")
+        decision_payload = decision.to_dict()
+        if not isinstance(decision_payload, dict):
+            raise TypeError("A resumable decision must serialize to a dictionary.")
+
+        arm_records = []
+        for arm, condition in (
+            ("baseline", "baseline_no_explicit_corpus"),
+            ("corpus", "explicit_corpus"),
+        ):
+            result = getattr(comparison, arm)
+            if result.run_id not in self._active:
+                raise ValueError(
+                    f"This process has no resumable checkpoint for the {arm} arm."
+                )
+            active = self._active[result.run_id]
+            run_dir = Path(active["run_dir"])
+            manifest = self.store.manifest(run_dir)
+            experiment = manifest.get("experiment", {})
+            if (
+                experiment.get("group_id") != comparison.group_id
+                or experiment.get("condition") != condition
+            ):
+                raise ValueError(
+                    "Comparison approval does not match the active experiment arms."
+                )
+            if manifest["status"] != "awaiting_approval":
+                raise ValueError(f"The {arm} arm is not awaiting approval.")
+            arm_records.append((arm, result.run_id, run_dir, active["config"]))
+
+        try:
+            outcomes = self.graph.batch(
+                [Command(resume=dict(decision_payload)) for _ in arm_records],
+                config=[record[3] for record in arm_records],
+                return_exceptions=True,
+            )
+        except Exception as exc:
+            for _, _, run_dir, _ in arm_records:
+                status = self.store.manifest(run_dir)["status"]
+                if status not in {"completed", "rejected", "failed"}:
+                    self.store.update(
+                        run_dir,
+                        "failed",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+            self._update_comparison_group(arm_records[0][2])
+            raise
+
+        for (_, _, run_dir, _), outcome in zip(
+            arm_records, outcomes, strict=True,
+        ):
+            if isinstance(outcome, Exception):
+                self.store.update(
+                    run_dir,
+                    "failed",
+                    error_type=type(outcome).__name__,
+                    error=str(outcome),
+                )
+        updated = {
+            arm: self._result(run_id)
+            for arm, run_id, _, _ in arm_records
+        }
+        self._update_comparison_group(arm_records[0][2])
+        for result in updated.values():
+            if result.status in {"completed", "rejected", "failed"}:
+                self._active.pop(result.run_id, None)
+        return ComparisonResult(
+            group_id=comparison.group_id,
+            group_dir=comparison.group_dir,
+            brief=comparison.brief,
+            baseline=updated["baseline"],
+            corpus=updated["corpus"],
+        )
 
     def inspect(self, case_id: str, run_id: str) -> RunSummary:
         case_id = validate_case_id(case_id)

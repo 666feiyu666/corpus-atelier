@@ -13,7 +13,13 @@ from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.artifacts.store import validate_case_id
 from corpus_atelier.cases import discover_cases
 from corpus_atelier.materials import list_references
-from corpus_atelier.state import DesignJob, HumanDecision, RunResult
+from corpus_atelier.state import (
+    ComparisonResult,
+    CorpusComparisonJob,
+    DesignJob,
+    HumanDecision,
+    RunResult,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +45,7 @@ DELIVERY_RATIOS = {
     "微信公众号封面": (47, 20),
 }
 GENERATION_MODES = {
+    "成对比较": "paired",
     "无语料库生成": "without_corpus",
     "有语料库生成": "with_corpus",
 }
@@ -120,7 +127,9 @@ def read_text_artifact(result: RunResult, name: str) -> str:
 
 
 def _reset() -> None:
-    for key in ("atelier_app", "result", "ui_error", "ui_failed"):
+    for key in (
+        "atelier_app", "result", "comparison_result", "ui_error", "ui_failed",
+    ):
         st.session_state.pop(key, None)
 
 
@@ -133,7 +142,7 @@ def _change_case() -> None:
     st.session_state.selected_reference_id = selected.default_reference_id
     has_corpus = selected.default_reference_id is not None
     st.session_state.example_generation_mode = (
-        "有语料库生成" if has_corpus else "无语料库生成"
+        "成对比较" if has_corpus else "无语料库生成"
     )
 
 
@@ -161,7 +170,7 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
         key="design_method",
     )
     generation_label = st.segmented_control(
-        "研究模式", list(GENERATION_MODES), default="无语料库生成",
+        "研究模式", list(GENERATION_MODES), default="成对比较",
         key="new_generation_mode",
     )
     generation_mode = GENERATION_MODES[generation_label]
@@ -217,7 +226,7 @@ def _new_design_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
         validate_required=False,
     )
     reference_id: str | None = None
-    if generation_mode == "with_corpus":
+    if generation_mode in {"with_corpus", "paired"}:
         with st.expander("选择参考图", expanded=True):
             reference_id = _reference_field()
     return DESIGN_METHODS[method], generation_mode, brief, reference_id, case_id
@@ -239,7 +248,7 @@ def _example_inputs() -> tuple[str, str, dict[str, Any], str | None, str]:
         st.text_area("Brief（JSON）", height=280, key="brief_editor")
     brief = parse_brief(st.session_state.brief_editor)
     reference_id: str | None = None
-    if generation_mode == "with_corpus":
+    if generation_mode in {"with_corpus", "paired"}:
         with st.expander("选择参考图", expanded=True):
             reference_id = _reference_field()
     selected = CASES[st.session_state.case_label]
@@ -267,8 +276,8 @@ def _validate_start_inputs(
         missing = [label for label, value in required.items() if not value.strip()]
         if missing:
             raise ValueError(f"请填写：{'、'.join(missing)}。")
-    if generation_mode == "with_corpus" and not reference_id:
-        raise ValueError("有语料库生成需要选择一张参考图像。")
+    if generation_mode in {"with_corpus", "paired"} and not reference_id:
+        raise ValueError("有语料库生成或成对比较需要选择一张参考图像。")
 
 
 def _resume(decision: HumanDecision, message: str) -> None:
@@ -278,6 +287,21 @@ def _resume(decision: HumanDecision, message: str) -> None:
     try:
         with st.spinner(message):
             st.session_state.result = app.resume(result.run_id, decision)
+    except Exception as exc:  # Streamlit turns provider failures into a recoverable page.
+        st.session_state.ui_error = str(exc)
+        st.session_state.ui_failed = True
+    st.rerun()
+
+
+def _resume_comparison(decision: HumanDecision, message: str) -> None:
+    app: CorpusAtelierApplication = st.session_state.atelier_app
+    comparison: ComparisonResult = st.session_state.comparison_result
+    st.session_state.ui_error = ""
+    try:
+        with st.spinner(message):
+            st.session_state.comparison_result = app.resume_comparison(
+                comparison, decision,
+            )
     except Exception as exc:  # Streamlit turns provider failures into a recoverable page.
         st.session_state.ui_error = str(exc)
         st.session_state.ui_failed = True
@@ -322,7 +346,7 @@ def _start_page() -> None:
         )
         reference = None
         snapshot = None
-        if generation_mode == "with_corpus":
+        if generation_mode in {"with_corpus", "paired"}:
             reference = {
                 "format_version": 1,
                 "reference_id": reference_id,
@@ -331,16 +355,28 @@ def _start_page() -> None:
         load_dotenv(ROOT / ".env")
         app = CorpusAtelierApplication(runs_root=ROOT / "experiments/runs")
         with st.spinner("正在准备设计方案…"):
-            result = app.start(DesignJob(
-                case_id=case_id,
-                profile=profile,
-                brief=brief,
-                generation_mode=generation_mode,
-                snapshot=snapshot,
-                reference=reference,
-            ))
+            if generation_mode == "paired":
+                comparison = app.start_comparison(CorpusComparisonJob(
+                    case_id=case_id,
+                    profile=profile,
+                    brief=brief,
+                    snapshot=snapshot,
+                    reference=reference,
+                ))
+                result = None
+            else:
+                comparison = None
+                result = app.start(DesignJob(
+                    case_id=case_id,
+                    profile=profile,
+                    brief=brief,
+                    generation_mode=generation_mode,
+                    snapshot=snapshot,
+                    reference=reference,
+                ))
         st.session_state.atelier_app = app
         st.session_state.result = result
+        st.session_state.comparison_result = comparison
         st.session_state.ui_error = ""
         st.session_state.ui_failed = False
         st.rerun()
@@ -407,6 +443,62 @@ def _generation_preview_page(result: RunResult) -> None:
             )
 
 
+def _comparison_arm_preview(result: RunResult, title: str) -> None:
+    st.markdown(f"### {title}")
+    proposal = read_json_artifact(result, "proposal")
+    st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))
+    description = proposal.get("design_description")
+    if description:
+        with st.expander("完整视觉描述", expanded=True):
+            st.write(description)
+    rationale = proposal.get("design_rationale")
+    if rationale:
+        st.caption(rationale)
+    request = read_json_artifact(result, "generation_request_preview")
+    if request:
+        st.caption(
+            f"{request.get('model', '未记录')} · "
+            f"{request.get('quality', '未记录')} · "
+            f"{request.get('size', '未记录')}"
+        )
+    reference_image = result.artifacts.get("reference_image")
+    if reference_image:
+        with st.expander("参考图片", expanded=True):
+            st.image(reference_image, width="stretch")
+    generation_prompt = read_text_artifact(result, "generation_prompt")
+    if generation_prompt:
+        with st.expander("完整提示词", expanded=False):
+            st.code(generation_prompt, language=None, wrap_lines=True)
+
+
+def _comparison_preview_page(comparison: ComparisonResult) -> None:
+    st.subheader("有／无语料库成对比较")
+    st.info("两条分支使用同一份 brief，并已并行推进到图像生成前。一次确认会同时生成两张图片。")
+    columns = st.columns(2)
+    with columns[0]:
+        with st.container(border=True):
+            _comparison_arm_preview(comparison.baseline, "无语料库")
+    with columns[1]:
+        with st.container(border=True):
+            _comparison_arm_preview(comparison.corpus, "有语料库")
+    with st.container(horizontal=True, horizontal_alignment="right"):
+        if st.button(
+            "取消本次对比", key="cancel_comparison", width="content",
+        ):
+            _resume_comparison(
+                HumanDecision(False, reviewer="streamlit-user"),
+                "正在取消本次对比…",
+            )
+        if st.button(
+            "确认并生成两张图片", type="primary", key="send_comparison",
+            width="content",
+        ):
+            _resume_comparison(
+                HumanDecision(True, reviewer="streamlit-user"),
+                "正在并行生成两张图片…",
+            )
+
+
 def _terminal_page(result: RunResult) -> None:
     labels = {
         "completed": "生成完成",
@@ -415,6 +507,31 @@ def _terminal_page(result: RunResult) -> None:
     }
     st.subheader(labels.get(result.status, "本次实验已结束"))
     _show_image(result)
+    if st.button("开始新实验", type="primary", width="stretch"):
+        _reset()
+        st.rerun()
+
+
+def _comparison_terminal_page(comparison: ComparisonResult) -> None:
+    statuses = {comparison.baseline.status, comparison.corpus.status}
+    if statuses == {"completed"}:
+        title = "两张图片生成完成"
+    elif statuses == {"rejected"}:
+        title = "本次对比已取消"
+    else:
+        title = "本次对比已结束"
+    st.subheader(title)
+    columns = st.columns(2)
+    for column, label, result in zip(
+        columns,
+        ("无语料库", "有语料库"),
+        (comparison.baseline, comparison.corpus),
+        strict=True,
+    ):
+        with column:
+            st.markdown(f"### {label}")
+            st.caption(f"状态：{result.status}")
+            _show_image(result)
     if st.button("开始新实验", type="primary", width="stretch"):
         _reset()
         st.rerun()
@@ -434,7 +551,16 @@ def main() -> None:
         return
 
     result: RunResult | None = st.session_state.get("result")
-    if result is None:
+    comparison: ComparisonResult | None = st.session_state.get("comparison_result")
+    if comparison is not None:
+        statuses = {comparison.baseline.status, comparison.corpus.status}
+        if statuses == {"awaiting_approval"}:
+            _comparison_preview_page(comparison)
+        elif statuses.issubset(TERMINAL_STATUSES):
+            _comparison_terminal_page(comparison)
+        else:
+            st.info("成对工作流正在处理，请稍候刷新。")
+    elif result is None:
         _start_page()
     elif result.status == "awaiting_approval":
         _generation_preview_page(result)

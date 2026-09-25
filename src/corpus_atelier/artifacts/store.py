@@ -36,7 +36,8 @@ class ArtifactStore:
         self.root = Path(root).resolve()
 
     def create(self, *, case_id: str, brief: dict, profile, generation_mode: str,
-               snapshot: Path | None = None) -> tuple[str, Path]:
+               snapshot: Path | None = None,
+               experiment: dict | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
         case_root = self.root / case_id
         case_root.mkdir(parents=True, exist_ok=True)
@@ -60,8 +61,11 @@ class ArtifactStore:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,
             "generation_mode": generation_mode,
-            "status": "created", "artifacts": {},
+            "status": "created",
+            "artifacts": {"brief": "brief.json", "profile": "profile.json"},
         }
+        if experiment is not None:
+            manifest["experiment"] = experiment
         if generation_mode == "with_corpus":
             if snapshot is None:
                 raise ValueError("With-corpus runs require an atlas snapshot.")
@@ -72,6 +76,47 @@ class ArtifactStore:
             )
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
+
+    def create_comparison(
+        self, *, case_id: str, profile, brief: dict,
+    ) -> tuple[str, Path]:
+        """Create the durable parent record for a paired corpus experiment."""
+        case_id = validate_case_id(case_id)
+        comparison_root = self.root / "_comparisons" / case_id
+        comparison_root.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        while True:
+            group_id = f"comparison_{stamp}_{uuid4().hex[:8]}"
+            group_dir = comparison_root / group_id
+            try:
+                group_dir.mkdir()
+                break
+            except FileExistsError:
+                continue
+        write_json(group_dir / "brief.json", brief)
+        write_json(group_dir / "profile.json", {
+            "name": profile.name,
+            "objective": profile.objective,
+            "deliverable": profile.deliverable,
+            "description": profile.description,
+        })
+        write_json(group_dir / "manifest.json", {
+            "format_version": 1,
+            "workflow_version": 11,
+            "experiment": {
+                "kind": "corpus_generation_comparison",
+                "status": "experimental",
+            },
+            "case_id": case_id,
+            "group_id": group_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "created",
+            "artifacts": {
+                "brief": "brief.json",
+                "profile": "profile.json",
+            },
+        })
+        return group_id, group_dir
 
     def manifest(self, run_dir: Path) -> dict:
         return json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))

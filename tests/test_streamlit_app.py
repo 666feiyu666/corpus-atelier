@@ -9,7 +9,7 @@ from streamlit.testing.v1 import AppTest
 from corpus_atelier.streamlit_app import (
     CASES, build_general_brief, delivery_ratio, load_case, parse_brief,
 )
-from corpus_atelier.state import RunResult
+from corpus_atelier.state import ComparisonResult, RunResult
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,12 +21,34 @@ class FakeUiApplication:
     def __init__(self, run_dir: Path, artifacts: dict[str, str]):
         self.run_dir = run_dir
         self.artifacts = artifacts
+        self.comparison_resume_calls = 0
 
     def resume(self, run_id, decision):
         status = "completed" if decision.approved else "rejected"
         return RunResult(
             run_id=run_id, status=status, run_dir=self.run_dir,
             message=status, artifacts=self.artifacts,
+        )
+
+    def resume_comparison(self, comparison, decision):
+        self.comparison_resume_calls += 1
+        status = "completed" if decision.approved else "rejected"
+
+        def update(result):
+            return RunResult(
+                run_id=result.run_id,
+                status=status,
+                run_dir=self.run_dir,
+                message=status,
+                artifacts=self.artifacts,
+            )
+
+        return ComparisonResult(
+            group_id=comparison.group_id,
+            group_dir=comparison.group_dir,
+            brief=comparison.brief,
+            baseline=update(comparison.baseline),
+            corpus=update(comparison.corpus),
         )
 
 
@@ -98,7 +120,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(app.title[0].value, "Corpus Atelier")
         self.assertEqual(
             app.segmented_control(key="new_generation_mode").value,
-            "无语料库生成",
+            "成对比较",
         )
         self.assertEqual(app.text_input(key="new_case_id").value, "")
         self.assertEqual(len(app.multiselect), 0)
@@ -213,4 +235,59 @@ class StreamlitAppTests(unittest.TestCase):
             app.button(key="send_generation").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "生成完成")
+            self.assertEqual([button.label for button in app.button], ["开始新实验"])
+
+    def test_paired_preview_uses_two_columns_and_one_shared_approval(self):
+        with TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            baseline = RunResult(
+                run_id="baseline-run",
+                status="awaiting_approval",
+                run_dir=run_dir,
+                message="awaiting approval",
+                artifacts={},
+            )
+            corpus = RunResult(
+                run_id="corpus-run",
+                status="awaiting_approval",
+                run_dir=run_dir,
+                message="awaiting approval",
+                artifacts={},
+            )
+            comparison = ComparisonResult(
+                group_id="comparison-test",
+                group_dir=run_dir,
+                brief={},
+                baseline=baseline,
+                corpus=corpus,
+            )
+            app = AppTest.from_file(
+                str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
+            )
+            app.session_state["atelier_app"] = FakeUiApplication(run_dir, {})
+            app.session_state["comparison_result"] = comparison
+            app.session_state["result"] = None
+            app.run()
+
+            self.assertFalse(app.exception)
+            self.assertEqual(app.subheader[0].value, "有／无语料库成对比较")
+            self.assertEqual(len(app.get("column")), 2)
+            self.assertEqual(
+                app.button(key="send_comparison").label,
+                "确认并生成两张图片",
+            )
+            self.assertEqual(
+                app.button(key="cancel_comparison").label,
+                "取消本次对比",
+            )
+            self.assertEqual(len(app.button), 2)
+
+            app.button(key="send_comparison").click().run()
+            updated = app.session_state["comparison_result"]
+            self.assertEqual(updated.baseline.status, "completed")
+            self.assertEqual(updated.corpus.status, "completed")
+            self.assertEqual(
+                app.session_state["atelier_app"].comparison_resume_calls,
+                1,
+            )
             self.assertEqual([button.label for button in app.button], ["开始新实验"])

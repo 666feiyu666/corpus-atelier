@@ -26,6 +26,17 @@ class DesignJob:
 
 
 @dataclass(frozen=True)
+class CorpusComparisonJob:
+    """A paired run whose two arms share one structured brief."""
+
+    case_id: str
+    profile: str
+    brief: dict[str, Any]
+    snapshot: Path
+    reference: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class HumanDecision:
     approved: bool
     reviewer: str = "cli-user"
@@ -52,6 +63,15 @@ class RunSummary:
     manifest: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ComparisonResult:
+    group_id: str
+    group_dir: Path
+    brief: dict[str, Any]
+    baseline: RunResult
+    corpus: RunResult
+
+
 class AtelierState(TypedDict, total=False):
     case_id: str
     run_id: str
@@ -59,6 +79,7 @@ class AtelierState(TypedDict, total=False):
     profile: str
     generation_mode: GenerationMode
     brief: dict[str, Any]
+    experiment: dict[str, Any]
     snapshot: str
     reference_selection: dict[str, Any]
     reference_package: dict[str, Any] | None

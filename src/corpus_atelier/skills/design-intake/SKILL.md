@@ -38,5 +38,4 @@ Treat `exact_copy` as the exhaustive wording approved for the finished image.
 - Output only the object required by the supplied schema, with no additional fields.
 - Do not write an image-model prompt, image specification, design proposal, or rationale.
 - Do not change the active profile or its schema.
-- Do not introduce corpus references as user requirements.
 - Keep the brief independent of any particular text or image provider.

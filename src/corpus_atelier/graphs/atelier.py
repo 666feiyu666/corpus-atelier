@@ -8,7 +8,6 @@ from ..state import AtelierState
 def build_graph(runtime, checkpointer):
     graph = StateGraph(AtelierState)
     graph.add_node("interpret_request", runtime.interpret_request)
-    graph.add_node("prepare_inputs", runtime.prepare_inputs)
     graph.add_node("design", runtime.design)
     graph.add_node("compile_image_spec", runtime.compile_image_spec)
     graph.add_node("approval", runtime.approval)
@@ -17,15 +16,14 @@ def build_graph(runtime, checkpointer):
     graph.add_conditional_edges(
         START,
         lambda state: (
-            "interpret_request" if state.get("user_request") else "prepare_inputs"
+            "interpret_request" if state.get("user_request") else "design"
         ),
         {
             "interpret_request": "interpret_request",
-            "prepare_inputs": "prepare_inputs",
+            "design": "design",
         },
     )
-    graph.add_edge("interpret_request", "prepare_inputs")
-    graph.add_edge("prepare_inputs", "design")
+    graph.add_edge("interpret_request", "design")
     graph.add_edge("design", "compile_image_spec")
     graph.add_edge("compile_image_spec", "approval")
     graph.add_conditional_edges(

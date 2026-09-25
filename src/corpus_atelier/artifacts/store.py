@@ -35,9 +35,9 @@ class ArtifactStore:
     def __init__(self, root: Path | str = "experiments/runs"):
         self.root = Path(root).resolve()
 
-    def create(self, *, case_id: str, profile, generation_mode: str,
-               brief: dict | None = None, request: str | None = None,
-               snapshot: Path | None = None) -> tuple[str, Path]:
+    def create(self, *, case_id: str, profile,
+               brief: dict | None = None,
+               request: str | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
         if (brief is None) == (request is None):
             raise ValueError(
@@ -67,21 +67,13 @@ class ArtifactStore:
             "deliverable": profile.deliverable, "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 13,
+            "format_version": 1, "workflow_version": 14,
             "case_id": case_id, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,
-            "generation_mode": generation_mode, "input_mode": input_mode,
+            "input_mode": input_mode,
             "status": "created", "artifacts": initial_artifacts,
         }
-        if generation_mode == "with_corpus":
-            if snapshot is None:
-                raise ValueError("With-corpus runs require an atlas snapshot.")
-            manifest.update(
-                corpus_source="atlas_snapshot",
-                reference_selection_mode="explicit-single-image",
-                atlas_snapshot=str(snapshot.resolve()),
-            )
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 

@@ -9,14 +9,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .application import CorpusAtelierApplication
-from .artifacts.records import write_json
 from .design.validation import validate
-from .materials import build_reference_package
 from .registry import PROFILES, get_profile
 from .state import DesignJob, HumanDecision, NaturalLanguageDesignJob
-
-
-DEFAULT_SNAPSHOT = Path("experiments/atlas-snapshot/mucha-commercial")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,19 +22,11 @@ def _parser() -> argparse.ArgumentParser:
     validate_cmd = commands.add_parser("validate", help="Validate inputs without model calls.")
     validate_cmd.add_argument("--profile", required=True, choices=PROFILES)
     validate_cmd.add_argument("--brief", required=True, type=Path)
-    validate_cmd.add_argument("--reference", type=Path)
 
     run = commands.add_parser("run", help="Run one approval-gated design experiment.")
     run.add_argument("--case-id", required=True)
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
-    run.add_argument(
-        "--generation-mode",
-        choices=("without_corpus", "with_corpus"),
-        default="without_corpus",
-    )
-    run.add_argument("--reference", type=Path)
-    run.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
 
     request = commands.add_parser(
         "request", help="Run one experiment from an informal design request.",
@@ -53,20 +40,6 @@ def _parser() -> argparse.ArgumentParser:
     source = request.add_mutually_exclusive_group(required=True)
     source.add_argument("--text")
     source.add_argument("--request-file", type=Path)
-    request.add_argument(
-        "--generation-mode",
-        choices=("without_corpus", "with_corpus"),
-        default="without_corpus",
-    )
-    request.add_argument("--reference", type=Path)
-    request.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
-
-    preview = commands.add_parser(
-        "preview-reference", help="Resolve one selected reference without provider calls.",
-    )
-    preview.add_argument("--reference", required=True, type=Path)
-    preview.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
-    preview.add_argument("--output", required=True, type=Path)
 
     inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
     inspect.add_argument("run_id")
@@ -100,21 +73,7 @@ def main(argv=None) -> int:
     if args.command == "validate":
         profile = get_profile(args.profile)
         validate(_read_object(args.brief, "Brief"), profile.brief_schema)
-        if args.reference:
-            validate(
-                _read_object(args.reference, "Reference selection"),
-                "reference-selection.schema.json",
-            )
         print(f"Valid {profile.name} brief: {args.brief.resolve()}")
-        return 0
-
-    if args.command == "preview-reference":
-        selection = _read_object(args.reference, "Reference selection")
-        package, _ = build_reference_package(args.snapshot, selection)
-        output = args.output.resolve()
-        write_json(output / "reference-selection.json", selection)
-        write_json(output / "reference-package.json", package)
-        print(f"Reference preview: {output}")
         return 0
 
     app = CorpusAtelierApplication(
@@ -126,10 +85,6 @@ def main(argv=None) -> int:
         return 0
 
     load_dotenv()
-    reference = (
-        _read_object(args.reference, "Reference selection")
-        if args.reference is not None else None
-    )
     if args.command == "request":
         request_text = (
             args.text
@@ -140,18 +95,12 @@ def main(argv=None) -> int:
             case_id=args.case_id,
             profile=args.profile,
             request=request_text,
-            generation_mode=args.generation_mode,
-            snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
-            reference=reference,
         ))
     else:
         result = app.start(DesignJob(
             case_id=args.case_id,
             profile=args.profile,
             brief=_read_object(args.brief, "Brief"),
-            generation_mode=args.generation_mode,
-            snapshot=args.snapshot if args.generation_mode == "with_corpus" else None,
-            reference=reference,
         ))
     while True:
         _print_result(result)

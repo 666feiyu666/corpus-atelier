@@ -1,6 +1,6 @@
 ---
 name: design
-description: Form a complete, provider-independent visual design from a brief and optional corpus reference. Use for the design stage before any image-model prompt is written.
+description: Form a complete, provider-independent visual design from a brief. Use for the design stage before any image-model prompt is written.
 ---
 
 # Design
@@ -50,7 +50,7 @@ sufficient. Do not request repository paths, files under `references/objectives/
 `references/deliverables/`, or any other internal skill resources.
 
 Use `needs_sources` only when the user's requirements explicitly depend on work-specific external
-material that is absent from both the prompt and the supplied visual references. A requested
+material that is absent from the prompt. A requested
 artistic style, genre, medium, or general body of cultural knowledge is not by itself a missing
 source.
 
@@ -63,8 +63,6 @@ source.
   captions, signs, symbols made from letters, or other visible wording that is absent from that
   list. If a constraint requires readable wording that `exact_copy` does not supply, return
   `needs_clarification` and identify the missing copy instead of inventing it.
-- Reference material provides visual knowledge, not additional user requirements.
-- Distinguish transferable design knowledge from work-specific content that should not be copied.
 - Keep the rationale concise and human-reviewable. Put visible decisions in
   `design_description`, not only in the rationale.
 - Mark the proposal ready only when no blocking source or clarification issue remains.

@@ -10,30 +10,16 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.materials import list_references
 from corpus_atelier.state import HumanDecision, NaturalLanguageDesignJob, RunResult
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SNAPSHOT = ROOT / "experiments/atlas-snapshot/mucha-commercial"
 PRODUCT_CASE_ID = "natural-language"
 TERMINAL_STATUSES = {"completed", "rejected", "failed"}
 DESIGN_METHODS = {
     "修辞导向": "rhetoric-graphic",
     "艺术指导导向": "art-graphic",
 }
-GENERATION_MODES = {
-    "无语料库生成": "without_corpus",
-    "有语料库生成": "with_corpus",
-}
-
-
-@st.cache_data(max_entries=4)
-def load_reference_choices(snapshot: str) -> list[dict[str, str]]:
-    """Load verified reference labels once per snapshot path."""
-    return list_references(snapshot)
-
-
 def read_json_artifact(result: RunResult, name: str) -> dict[str, Any]:
     path = result.artifacts.get(name)
     if not path:
@@ -51,24 +37,12 @@ def read_text_artifact(result: RunResult, name: str) -> str:
 def _reset() -> None:
     for key in (
         "atelier_app", "result", "ui_error", "ui_failed", "natural_request",
-        "design_method", "new_generation_mode", "selected_reference_id",
+        "design_method",
     ):
         st.session_state.pop(key, None)
 
 
-def _reference_field() -> str | None:
-    choices = load_reference_choices(str(SNAPSHOT))
-    references = [item["id"] for item in choices]
-    titles = {item["id"]: item["title"] for item in choices}
-    return st.selectbox(
-        "参考图像",
-        references,
-        key="selected_reference_id",
-        format_func=lambda reference_id: titles[reference_id],
-    )
-
-
-def _natural_request_inputs() -> tuple[str, str, str, str | None]:
+def _natural_request_inputs() -> tuple[str, str]:
     request = st.text_area(
         "描述你的设计需求",
         height=220,
@@ -78,20 +52,12 @@ def _natural_request_inputs() -> tuple[str, str, str, str | None]:
         ),
         key="natural_request",
     )
-    reference_id: str | None = None
     with st.expander("研究设置", expanded=False):
         method = st.segmented_control(
             "设计方法", list(DESIGN_METHODS), default=list(DESIGN_METHODS)[0],
             key="design_method",
         )
-        generation_label = st.segmented_control(
-            "研究模式", list(GENERATION_MODES), default="无语料库生成",
-            key="new_generation_mode",
-        )
-        generation_mode = GENERATION_MODES[generation_label]
-        if generation_mode == "with_corpus":
-            reference_id = _reference_field()
-    return DESIGN_METHODS[method], generation_mode, request, reference_id
+    return DESIGN_METHODS[method], request
 
 
 def _resume(decision: HumanDecision, message: str) -> None:
@@ -115,25 +81,14 @@ def _show_image(result: RunResult) -> None:
 
 def _start_page() -> None:
     st.subheader("开始一个实验")
-    profile, generation_mode, request, reference_id = _natural_request_inputs()
+    profile, request = _natural_request_inputs()
 
     if not st.button("生成设计方案", type="primary", width="stretch"):
         return
     if not request.strip():
         st.error("实验输入有误：请先描述你的设计需求。")
         return
-    if generation_mode == "with_corpus" and not reference_id:
-        st.error("实验输入有误：有语料库生成需要选择一张参考图像。")
-        return
     try:
-        reference = None
-        snapshot = None
-        if generation_mode == "with_corpus":
-            reference = {
-                "format_version": 1,
-                "reference_id": reference_id,
-            }
-            snapshot = SNAPSHOT
         load_dotenv(ROOT / ".env")
         app = CorpusAtelierApplication(runs_root=ROOT / "experiments/runs")
         with st.spinner("正在理解需求并准备设计方案…"):
@@ -141,9 +96,6 @@ def _start_page() -> None:
                 case_id=PRODUCT_CASE_ID,
                 profile=profile,
                 request=request,
-                generation_mode=generation_mode,
-                snapshot=snapshot,
-                reference=reference,
             ))
         st.session_state.atelier_app = app
         st.session_state.result = result
@@ -159,13 +111,6 @@ def _generation_preview_page(result: RunResult) -> None:
     brief = read_json_artifact(result, "brief")
     st.subheader("图像模型输入预览")
     st.info("以下内容尚未发送给图像模型。确认无误后，再开始生成图片。")
-    manifest = read_json_artifact(result, "manifest")
-    mode_label = {
-        "without_corpus": "无语料库生成",
-        "with_corpus": "有语料库生成",
-    }.get(manifest.get("generation_mode"))
-    if mode_label:
-        st.caption(f"研究模式：{mode_label}")
     if brief:
         with st.expander("系统理解的需求", expanded=False):
             st.markdown(f"**交付物：** {brief.get('deliverable', '未记录')}")
@@ -198,10 +143,6 @@ def _generation_preview_page(result: RunResult) -> None:
                 f"格式：`{request.get('output_format', '未记录')}`",
             ]
             st.markdown(" · ".join(parameters))
-        reference_image = result.artifacts.get("reference_image")
-        if reference_image:
-            with st.expander("参考图片", expanded=True):
-                st.image(reference_image, width="stretch")
         if generation_prompt:
             with st.expander("完整提示词", expanded=True):
                 st.code(generation_prompt, language=None, wrap_lines=True)

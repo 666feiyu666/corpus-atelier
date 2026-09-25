@@ -14,7 +14,6 @@ class ArtifactTests(unittest.TestCase):
             args = dict(
                 case_id="poster-01",
                 brief={"topic": "x"}, profile=get_profile("rhetoric-poster"),
-                generation_mode="without_corpus",
             )
             first, first_dir = store.create(**args)
             second, second_dir = store.create(**args)
@@ -30,7 +29,6 @@ class ArtifactTests(unittest.TestCase):
                     case_id="../poster-01",
                     brief={"topic": "x"},
                     profile=get_profile("rhetoric-poster"),
-                    generation_mode="without_corpus",
                 )
 
     def test_atomic_json_rejects_nan(self):

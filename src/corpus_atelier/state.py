@@ -7,13 +7,10 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
-    "created", "interpreting_request", "preparing_inputs", "loading_reference",
-    "designing",
+    "created", "interpreting_request", "designing",
     "compiling_image_spec",
     "awaiting_approval", "rejected", "generating", "completed", "failed",
 ]
-
-GenerationMode = Literal["without_corpus", "with_corpus"]
 
 
 @dataclass(frozen=True)
@@ -21,9 +18,6 @@ class DesignJob:
     case_id: str
     profile: str
     brief: dict[str, Any]
-    generation_mode: GenerationMode
-    snapshot: Path | None = None
-    reference: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -31,9 +25,6 @@ class NaturalLanguageDesignJob:
     case_id: str
     profile: str
     request: str
-    generation_mode: GenerationMode
-    snapshot: Path | None = None
-    reference: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -69,12 +60,7 @@ class AtelierState(TypedDict, total=False):
     run_dir: str
     profile: str
     user_request: str
-    generation_mode: GenerationMode
     brief: dict[str, Any]
-    snapshot: str
-    reference_selection: dict[str, Any]
-    reference_package: dict[str, Any] | None
-    reference_image_paths: list[str]
     design_prompt: str
     proposal: dict[str, Any]
     image_prompt: str

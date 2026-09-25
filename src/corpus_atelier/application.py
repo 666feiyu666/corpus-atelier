@@ -20,7 +20,6 @@ from .design.validation import validate, validate_image_spec, validate_proposal
 from .graphs import build_graph
 from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .intake import compile_intake_prompt
-from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
 from .state import DesignJob, NaturalLanguageDesignJob, RunResult, RunSummary
@@ -68,7 +67,7 @@ class _Runtime:
                 intake_response="intake/response.json",
                 brief="brief.json",
             )
-            return {"brief": brief, "status": "preparing_inputs"}
+            return {"brief": brief, "status": "designing"}
         except Exception as exc:
             self.store.json(run_dir, "intake/response.json", {
                 "status": "failed",
@@ -78,37 +77,9 @@ class _Runtime:
             self.store.register(run_dir, intake_response="intake/response.json")
             raise
 
-    def prepare_inputs(self, state):
-        run_dir = self._dir(state)
-        self.store.update(run_dir, "preparing_inputs")
-        if state["generation_mode"] == "without_corpus":
-            return {
-                "reference_package": None,
-                "reference_image_paths": [],
-                "status": "designing",
-            }
-
-        self.store.update(run_dir, "loading_reference")
-        package, path = build_reference_package(
-            Path(state["snapshot"]), state["reference_selection"],
-        )
-        self.store.json(run_dir, "reference/selection.json", state["reference_selection"])
-        self.store.json(run_dir, "reference/package.json", package)
-        self.store.register(
-            run_dir,
-            reference_selection="reference/selection.json",
-            reference_package="reference/package.json",
-        )
-        return {
-            "reference_package": package,
-            "reference_image_paths": [str(path)],
-            "status": "designing",
-        }
-
     @staticmethod
     def _generation_binding(state, *, proposal, image_spec, prompt, request):
-        binding = {
-            "generation_mode": state["generation_mode"],
+        return {
             "prompt": prompt,
             "request": request,
             "proposal": proposal,
@@ -117,11 +88,6 @@ class _Runtime:
             "output_ratio": list(state["output_ratio"]),
             "canvas": state["canvas"],
         }
-        if state["generation_mode"] == "with_corpus":
-            binding.update(
-                reference=state["reference_package"],
-            )
-        return binding
 
     def design(self, state):
         run_dir = self._dir(state)
@@ -144,14 +110,12 @@ class _Runtime:
                 profile,
                 state["brief"],
                 self.text_provider,
-                [Path(path) for path in state.get("reference_image_paths", [])],
                 canvas=canvas,
             )
             request = {
                 "model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
                 "profile": profile.name,
                 "schema": profile.proposal_schema,
-                "references": state.get("reference_package"),
             }
             self.store.json(run_dir, "design/request.json", request)
             self.store.text(run_dir, "design/prompt.md", prompt)
@@ -232,9 +196,6 @@ class _Runtime:
             generation_request = self.image_provider.describe_request(
                 generation_prompt,
                 size=state["generation_size"],
-                reference_paths=[
-                    Path(path) for path in state.get("reference_image_paths", [])
-                ],
             )
             self.store.json(
                 run_dir, "generation/request-preview.json", generation_request,
@@ -285,7 +246,6 @@ class _Runtime:
         payload = {
             "run_id": state["run_id"],
             "profile": profile.name,
-            "generation_mode": state["generation_mode"],
             "generation_digest": state["generation_digest"],
             "artifacts": {
                 "proposal": str((run_dir / "design/proposal.json").resolve()),
@@ -298,11 +258,6 @@ class _Runtime:
                 "canvas": str((run_dir / "generation/canvas.json").resolve()),
             },
         }
-        if state["generation_mode"] == "with_corpus":
-            payload["artifacts"].update({
-                "reference_selection": str((run_dir / "reference/selection.json").resolve()),
-                "reference_package": str((run_dir / "reference/package.json").resolve()),
-            })
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
@@ -337,9 +292,6 @@ class _Runtime:
         current_request = self.image_provider.describe_request(
             state["generation_prompt"],
             size=state["generation_size"],
-            reference_paths=[
-                Path(path) for path in state.get("reference_image_paths", [])
-            ],
         )
         if (
             saved_prompt != state["generation_prompt"]
@@ -350,19 +302,6 @@ class _Runtime:
             or current_request != state["generation_request"]
         ):
             raise ValueError("Approved generation artifacts changed after preview.")
-        if state["generation_mode"] == "with_corpus":
-            saved_selection = json.loads(
-                (run_dir / "reference/selection.json").read_text(encoding="utf-8")
-            )
-            saved_reference = json.loads(
-                (run_dir / "reference/package.json").read_text(encoding="utf-8")
-            )
-            if (
-                saved_selection != state["reference_selection"]
-                or saved_reference != state["reference_package"]
-            ):
-                raise ValueError("Approved generation artifacts changed after preview.")
-            load_snapshot(Path(state["snapshot"]))
         actual = digest_json(self._generation_binding(
             state,
             proposal=state["proposal"],
@@ -382,7 +321,6 @@ class _Runtime:
             state["generation_prompt"],
             size=state["generation_size"],
             output=attempt,
-            reference_paths=[Path(path) for path in state.get("reference_image_paths", [])],
         )
         image_path = (attempt / response["file"]).resolve()
         image_path, render_record = normalize_canvas(
@@ -425,19 +363,6 @@ class CorpusAtelierApplication:
         self.graph = build_graph(self.runtime, self.checkpointer)
         self._active: dict[str, dict] = {}
 
-    @staticmethod
-    def _corpus_inputs(generation_mode, snapshot, reference):
-        if generation_mode not in {"without_corpus", "with_corpus"}:
-            raise ValueError(f"Unsupported generation mode: {generation_mode!r}.")
-        if generation_mode == "without_corpus":
-            if snapshot is not None or reference is not None:
-                raise ValueError("Without-corpus runs cannot include a snapshot or reference.")
-            return None, None
-        if snapshot is None or reference is None:
-            raise ValueError("With-corpus runs require a snapshot and reference selection.")
-        validate(reference, "reference-selection.schema.json")
-        return Path(snapshot).resolve(strict=True), reference
-
     def _invoke_start(self, run_id: str, run_dir: Path, state: dict) -> RunResult:
         config = {"configurable": {"thread_id": run_id}}
         self._active[run_id] = {"config": config, "run_dir": run_dir}
@@ -453,45 +378,29 @@ class CorpusAtelierApplication:
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
         validate(job.brief, profile.brief_schema)
-        snapshot, reference = self._corpus_inputs(
-            job.generation_mode, job.snapshot, job.reference,
-        )
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
             brief=job.brief,
             profile=profile,
-            generation_mode=job.generation_mode,
-            snapshot=snapshot,
         )
         state = {
             "case_id": job.case_id,
             "run_id": run_id,
             "run_dir": str(run_dir),
             "profile": profile.name,
-            "generation_mode": job.generation_mode,
             "brief": job.brief,
             "status": "created",
         }
-        if snapshot is not None and reference is not None:
-            state.update(
-                snapshot=str(snapshot),
-                reference_selection=reference,
-            )
         return self._invoke_start(run_id, run_dir, state)
 
     def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:
         if not isinstance(job.request, str) or not job.request.strip():
             raise ValueError("Natural-language design request must not be empty.")
         profile = get_profile(job.profile)
-        snapshot, reference = self._corpus_inputs(
-            job.generation_mode, job.snapshot, job.reference,
-        )
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
             request=job.request,
             profile=profile,
-            generation_mode=job.generation_mode,
-            snapshot=snapshot,
         )
         state = {
             "case_id": job.case_id,
@@ -499,14 +408,8 @@ class CorpusAtelierApplication:
             "run_dir": str(run_dir),
             "profile": profile.name,
             "user_request": job.request,
-            "generation_mode": job.generation_mode,
             "status": "created",
         }
-        if snapshot is not None and reference is not None:
-            state.update(
-                snapshot=str(snapshot),
-                reference_selection=reference,
-            )
         return self._invoke_start(run_id, run_dir, state)
 
     def resume(self, run_id: str, decision: object) -> RunResult:
@@ -563,28 +466,9 @@ class CorpusAtelierApplication:
             "image": Path(summary.manifest.get("latest_image", "")),
             "review": summary.run_dir / registered.get("review", "review/review.json"),
         }
-        for name in (
-            "reference_selection",
-            "reference_package",
-            "reference_prompt",
-            "reference_plan",
-        ):
-            if name in registered:
-                paths[name] = summary.run_dir / registered[name]
-
         # Keep every registered artifact from archived workflow versions inspectable.
         for name, relative in registered.items():
             paths.setdefault(name, summary.run_dir / relative)
-
-        package_path = paths.get("reference_package") or paths.get("materials_package")
-        if package_path and package_path.is_file():
-            package = json.loads(package_path.read_text(encoding="utf-8"))
-            snapshot = Path(summary.manifest["atlas_snapshot"])
-            if "reference" in package:
-                paths["reference_image"] = snapshot / package["reference"]["file"]
-            else:
-                for index, row in enumerate(package.get("references", []), start=1):
-                    paths[f"reference_image_{index:02d}"] = snapshot / row["file"]
 
         artifacts = {
             name: str(path.resolve())

@@ -51,22 +51,14 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(app.title[0].value, "Corpus Atelier")
         self.assertEqual(app.text_area(key="natural_request").value, "")
         self.assertEqual(
-            app.segmented_control(key="new_generation_mode").value,
-            "无语料库生成",
-        )
-        self.assertEqual(
             app.segmented_control(key="design_method").value,
             "修辞导向",
         )
+        self.assertEqual(len(app.segmented_control), 1)
+        self.assertEqual(len(app.selectbox), 0)
         self.assertEqual(len(app.get("file_uploader")), 0)
         self.assertEqual(len(app.text_input), 0)
         self.assertEqual(len(app.multiselect), 0)
-        app.segmented_control(key="new_generation_mode").set_value("有语料库生成").run()
-        self.assertFalse(app.exception)
-        self.assertEqual(
-            app.selectbox(key="selected_reference_id").value,
-            "mucha-poster-124474229",
-        )
 
     def test_model_failure_is_not_reported_as_invalid_user_input(self):
         with patch(

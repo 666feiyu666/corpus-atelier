@@ -15,8 +15,6 @@ class ProfileTests(unittest.TestCase):
     def test_structured_output_constants_and_enums_have_explicit_types(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {
-            "reference-selection.schema.json",
         }
 
         def check_node(node, path):
@@ -35,8 +33,6 @@ class ProfileTests(unittest.TestCase):
     def test_openai_schema_omits_unsupported_unique_items_keyword(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {
-            "reference-selection.schema.json",
         }
 
         def check_node(node, path):

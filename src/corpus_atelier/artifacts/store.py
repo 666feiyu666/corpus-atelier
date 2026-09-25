@@ -65,13 +65,13 @@ class ArtifactStore:
             initial_artifacts = {"user_request": "input/request.txt"}
         write_json(run_dir / "profile.json", {
             "name": profile.name, "objective": profile.objective,
-            "deliverable": profile.deliverable, "description": profile.description,
+            "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 15,
+            "format_version": 1, "workflow_version": 16,
             "case_id": case_id, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "objective_profile": profile.objective, "deliverable_profile": profile.deliverable,
+            "objective_profile": profile.objective,
             "input_mode": input_mode,
             "status": "created", "artifacts": initial_artifacts,
         }
@@ -97,11 +97,11 @@ class ArtifactStore:
         write_text(group_dir / "input/request.txt", request)
         write_json(group_dir / "profile.json", {
             "name": profile.name, "objective": profile.objective,
-            "deliverable": profile.deliverable, "description": profile.description,
+            "description": profile.description,
         })
         write_json(group_dir / "manifest.json", {
             "format_version": 1,
-            "workflow_version": 15,
+            "workflow_version": 16,
             "experiment": {
                 "kind": "corpus_generation_comparison",
                 "status": "experimental",

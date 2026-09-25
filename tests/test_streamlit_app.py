@@ -22,7 +22,21 @@ class FakeUiApplication:
         self.comparison_resume_calls = 0
 
     def resume(self, run_id, decision):
-        status = "completed" if decision.approved else "rejected"
+        if hasattr(decision, "approved"):
+            status = "awaiting_selection" if decision.approved else "rejected"
+            if decision.approved and self.artifacts.get("candidate_index"):
+                path = Path(self.artifacts["candidate_index"])
+                candidates = json.loads(path.read_text(encoding="utf-8"))
+                for candidate in candidates:
+                    if candidate.get("status") == "ready":
+                        candidate.update(
+                            status="generated",
+                            image_path=self.artifacts["image"],
+                            image_sha256="test-sha",
+                        )
+                path.write_text(json.dumps(candidates), encoding="utf-8")
+        else:
+            status = "completed"
         return RunResult(
             run_id=run_id, status=status, run_dir=self.run_dir,
             message=status, artifacts=self.artifacts,
@@ -77,7 +91,8 @@ class StreamlitAppTests(unittest.TestCase):
             app.segmented_control(key="design_method").value,
             "修辞导向",
         )
-        self.assertEqual(len(app.segmented_control), 1)
+        self.assertEqual(app.segmented_control(key="design_candidate_count").value, 3)
+        self.assertEqual(len(app.segmented_control), 2)
         self.assertEqual(app.button(key="start_design").label, "生成设计方案")
         self.assertEqual(len(app.selectbox), 0)
         self.assertEqual(len(app.get("file_uploader")), 0)
@@ -153,11 +168,27 @@ class StreamlitAppTests(unittest.TestCase):
             }), encoding="utf-8")
             image = run_dir / "image.png"
             Image.new("RGB", (12, 18), "white").save(image)
+            candidate_index = run_dir / "candidates.json"
+            candidate_index.write_text(json.dumps([{
+                "candidate_id": "c01",
+                "status": "ready",
+                "direction_seed": {
+                    "label": "Quiet hierarchy",
+                    "primary_variation_axes": ["composition"],
+                },
+                "proposal": {
+                    "chosen_direction": "A restrained editorial composition.",
+                    "design_rationale": "Clear hierarchy for a small screen.",
+                },
+                "generation_request": json.loads(request_preview.read_text()),
+                "generation_prompt": generation_prompt,
+            }]), encoding="utf-8")
             artifacts = {
                 "proposal": str(proposal),
                 "generation_prompt": str(prompt),
                 "generation_request_preview": str(request_preview),
                 "image": str(image),
+                "candidate_index": str(candidate_index),
             }
             result = RunResult(
                 run_id="ui-test", status="awaiting_approval", run_dir=run_dir,
@@ -175,7 +206,7 @@ class StreamlitAppTests(unittest.TestCase):
             self.assertEqual(app.code[0].value, generation_prompt)
             self.assertEqual(
                 app.button(key="design_send_generation").label,
-                "发送并生成图片",
+                "发送并生成 1 张图片",
             )
             self.assertEqual(
                 app.button(key="design_cancel_generation").label,
@@ -183,6 +214,9 @@ class StreamlitAppTests(unittest.TestCase):
             )
 
             app.button(key="design_send_generation").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.subheader[0].value, "选择设计")
+            app.button(key="select_c01").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.subheader[0].value, "生成完成")
             self.assertEqual([button.label for button in app.button], ["创建新设计"])
@@ -224,7 +258,7 @@ class StreamlitAppTests(unittest.TestCase):
             self.assertEqual(app.subheader[0].value, "有／无显式语料对比实验")
             self.assertEqual(
                 len(app.get("column")),
-                2,
+                4,
             )
             self.assertEqual(
                 app.button(key="experiment_generate_comparison").label,

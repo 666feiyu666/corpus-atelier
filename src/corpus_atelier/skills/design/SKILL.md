@@ -8,6 +8,12 @@ description: Form a complete, provider-independent visual design from a brief. U
 Act as the designer of the complete image. Resolve what the finished design looks like before
 another skill translates it for an image model.
 
+When an approved direction seed is supplied, develop that direction rather than selecting a
+replacement. Repeat its `candidate_id` exactly. A direction may differ through concept,
+composition, palette, typography, image-making, movement knowledge, or any meaningful
+combination of these. Do not force a named movement when other visual decisions provide the
+intended contrast.
+
 ## Completion standard
 
 The `design_description` is the primary deliverable. Write it so that a reader can form a
@@ -42,12 +48,11 @@ side, count, coordinate, camera setting, material, or decorative feature solely 
 specified. A complete design resolves what matters and identifies meaningful latitude; it does not
 turn every optional detail into a requirement.
 
-## Supplied profile policies
+## Supplied objective policy
 
-The runtime prompt already supplies the active profile's complete objective and deliverable
-policies in explicitly labeled sections. Treat those supplied sections as authoritative and
-sufficient. Do not request repository paths, files under `references/objectives/` or
-`references/deliverables/`, or any other internal skill resources.
+The runtime prompt supplies the active profile's objective policy in an explicitly labeled
+section. Treat it as authoritative and sufficient. Do not request repository paths, files under
+`references/objectives/`, or other internal skill resources.
 
 Use `needs_sources` only when the user's requirements explicitly depend on work-specific external
 material that is absent from the prompt. A requested

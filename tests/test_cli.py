@@ -54,3 +54,4 @@ class CliTests(unittest.TestCase):
         self.assertEqual(job.case_id, "natural-language")
         self.assertEqual(job.profile, "rhetoric-graphic")
         self.assertEqual(job.request, "请做一张适合办公室工位的电脑壁纸。")
+        self.assertEqual(job.candidate_count, 1)

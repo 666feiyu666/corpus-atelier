@@ -1,4 +1,4 @@
-"""Profile contracts compose an objective with a deliverable."""
+"""Profile contracts compose an objective with canvas behavior."""
 
 from dataclasses import dataclass
 
@@ -7,11 +7,10 @@ from dataclasses import dataclass
 class DesignProfile:
     name: str
     objective: str
-    deliverable: str
     brief_schema: str
     proposal_schema: str
     description: str
     objective_reference: str
-    deliverable_references: tuple[str, ...]
+    canvas_mode: str
     default_size: str
     output_ratio: tuple[int, int]

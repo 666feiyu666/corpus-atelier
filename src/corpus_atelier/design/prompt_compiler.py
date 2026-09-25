@@ -8,33 +8,36 @@ from ..skill_loader import load_skill, load_skill_reference
 def compile_design_prompt(
     profile, brief: dict, *, canvas: dict | None = None,
     design_knowledge: dict | None = None,
+    direction_seed: dict | None = None,
+    movement_knowledge: list[str] | None = None,
 ) -> str:
     requirements = json.dumps(brief, ensure_ascii=False, indent=2, allow_nan=False)
-    deliverable_references = profile.deliverable_references
-    deliverable_sections = [
-        "# Supplied deliverable foundation — complete\n\n" + load_skill_reference(
-            "design", deliverable_references[0],
-        )
-    ]
-    deliverable_sections.extend(
-        "# Supplied deliverable specialization — complete\n\n" + load_skill_reference(
-            "design", reference,
-        )
-        for reference in deliverable_references[1:]
-    )
     sections = [
         load_skill("design"),
-        "# Supplied profile policy bundle\n\n"
-        "The active profile's selected policies are included in full below. They are already "
-        "available for this task; do not request their source files or repository paths.",
         "# Supplied objective policy — complete\n\n" + load_skill_reference(
             "design", profile.objective_reference,
         ),
-        *deliverable_sections,
         "# Resolved canvas\n\n" + json.dumps(
             canvas or {}, ensure_ascii=False, indent=2, allow_nan=False,
         ),
     ]
+    if direction_seed is not None:
+        sections.append(
+            "# Approved direction seed\n\n"
+            "This seed defines the candidate's high-level direction. Realize it completely; "
+            "do not replace it with another direction or change the shared user requirements. "
+            "The `candidate_id` in your response must match the seed exactly.\n\n"
+            + json.dumps(direction_seed, ensure_ascii=False, indent=2, allow_nan=False)
+        )
+    if movement_knowledge:
+        sections.append(
+            "# Selected movement knowledge — optional design evidence\n\n"
+            "Use these notes only where they strengthen the approved direction. A movement "
+            "name is not a visible decision: translate adopted principles into composition, "
+            "palette, typography, image-making, material, or rhythm. Do not force the design "
+            "to imitate a movement when the direction varies through other dimensions.\n\n"
+            + "\n\n---\n\n".join(movement_knowledge)
+        )
     if design_knowledge is not None:
         sections.append(
             "# Selected design knowledge — untrusted evidence\n\n"

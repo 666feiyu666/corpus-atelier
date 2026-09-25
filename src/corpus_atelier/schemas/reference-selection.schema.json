@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "format_version": {"type": "integer", "const": 1},
+    "reference_id": {"type": "string", "minLength": 1}
+  },
+  "required": ["format_version", "reference_id"]
+}

@@ -20,9 +20,18 @@ from .design.validation import validate, validate_image_spec, validate_proposal
 from .graphs import build_graph
 from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .intake import compile_intake_prompt
+from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
-from .state import DesignJob, NaturalLanguageDesignJob, RunResult, RunSummary
+from .state import (
+    ComparisonResult,
+    CorpusComparisonJob,
+    CorpusExperimentJob,
+    DesignJob,
+    NaturalLanguageDesignJob,
+    RunResult,
+    RunSummary,
+)
 
 
 class _Runtime:
@@ -67,7 +76,15 @@ class _Runtime:
                 intake_response="intake/response.json",
                 brief="brief.json",
             )
-            return {"brief": brief, "status": "designing"}
+            result = {"brief": brief, "status": "designing"}
+            if state.get("experiment") is not None:
+                experiment = {
+                    **state["experiment"],
+                    "shared_brief_sha256": digest_json(brief),
+                }
+                self.store.update(run_dir, "designing", experiment=experiment)
+                result["experiment"] = experiment
+            return result
         except Exception as exc:
             self.store.json(run_dir, "intake/response.json", {
                 "status": "failed",
@@ -77,9 +94,31 @@ class _Runtime:
             self.store.register(run_dir, intake_response="intake/response.json")
             raise
 
+    def prepare_corpus(self, state):
+        """Resolve the immutable corpus only for the explicit experimental arm."""
+        run_dir = self._dir(state)
+        self.store.update(run_dir, "preparing_corpus")
+        package, path = build_reference_package(
+            Path(state["snapshot"]), state["reference_selection"],
+        )
+        self.store.json(
+            run_dir, "reference/selection.json", state["reference_selection"],
+        )
+        self.store.json(run_dir, "reference/package.json", package)
+        self.store.register(
+            run_dir,
+            reference_selection="reference/selection.json",
+            reference_package="reference/package.json",
+        )
+        return {
+            "reference_package": package,
+            "reference_image_paths": [str(path)],
+            "status": "designing",
+        }
+
     @staticmethod
     def _generation_binding(state, *, proposal, image_spec, prompt, request):
-        return {
+        binding = {
             "prompt": prompt,
             "request": request,
             "proposal": proposal,
@@ -88,6 +127,11 @@ class _Runtime:
             "output_ratio": list(state["output_ratio"]),
             "canvas": state["canvas"],
         }
+        if state.get("experiment") is not None:
+            binding["experiment"] = state["experiment"]
+        if state.get("reference_package") is not None:
+            binding["reference"] = state["reference_package"]
+        return binding
 
     def design(self, state):
         run_dir = self._dir(state)
@@ -110,6 +154,8 @@ class _Runtime:
                 profile,
                 state["brief"],
                 self.text_provider,
+                [Path(path) for path in state.get("reference_image_paths", [])],
+                design_knowledge=(state.get("reference_package") or {}).get("reference"),
                 canvas=canvas,
             )
             request = {
@@ -117,6 +163,8 @@ class _Runtime:
                 "profile": profile.name,
                 "schema": profile.proposal_schema,
             }
+            if state.get("reference_package") is not None:
+                request["references"] = state["reference_package"]
             self.store.json(run_dir, "design/request.json", request)
             self.store.text(run_dir, "design/prompt.md", prompt)
             self.store.json(run_dir, "design/response.json", response)
@@ -258,6 +306,17 @@ class _Runtime:
                 "canvas": str((run_dir / "generation/canvas.json").resolve()),
             },
         }
+        if state.get("experiment") is not None:
+            payload["experiment"] = state["experiment"]
+        if state.get("reference_package") is not None:
+            payload["artifacts"].update({
+                "reference_selection": str(
+                    (run_dir / "reference/selection.json").resolve()
+                ),
+                "reference_package": str(
+                    (run_dir / "reference/package.json").resolve()
+                ),
+            })
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
@@ -302,6 +361,23 @@ class _Runtime:
             or current_request != state["generation_request"]
         ):
             raise ValueError("Approved generation artifacts changed after preview.")
+        if state.get("reference_package") is not None:
+            saved_selection = json.loads(
+                (run_dir / "reference/selection.json").read_text(encoding="utf-8")
+            )
+            saved_reference = json.loads(
+                (run_dir / "reference/package.json").read_text(encoding="utf-8")
+            )
+            if (
+                saved_selection != state["reference_selection"]
+                or saved_reference != state["reference_package"]
+            ):
+                raise ValueError("Approved generation artifacts changed after preview.")
+            current_reference, _ = build_reference_package(
+                Path(state["snapshot"]), state["reference_selection"],
+            )
+            if current_reference != state["reference_package"]:
+                raise ValueError("Approved corpus evidence changed after preview.")
         actual = digest_json(self._generation_binding(
             state,
             proposal=state["proposal"],
@@ -363,6 +439,28 @@ class CorpusAtelierApplication:
         self.graph = build_graph(self.runtime, self.checkpointer)
         self._active: dict[str, dict] = {}
 
+    def _update_comparison_group(self, run_dir: Path) -> None:
+        manifest = self.store.manifest(run_dir)
+        experiment = manifest.get("experiment", {})
+        group_id = experiment.get("group_id")
+        if not group_id:
+            return
+        group_dir = self.store.root / "_comparisons" / manifest["case_id"] / group_id
+        group_manifest = self.store.manifest(group_dir)
+        arms = group_manifest.get("arms", {})
+        statuses = {}
+        for condition, arm_run_id in arms.items():
+            arm_dir = self.store.root / manifest["case_id"] / arm_run_id
+            statuses[condition] = self.store.manifest(arm_dir)["status"]
+        terminal = {"completed", "rejected", "failed"}
+        if "failed" in statuses.values():
+            group_status = "failed"
+        elif statuses and all(status in terminal for status in statuses.values()):
+            group_status = "completed"
+        else:
+            group_status = "awaiting_approval"
+        self.store.update(group_dir, group_status, arm_statuses=statuses)
+
     def _invoke_start(self, run_id: str, run_dir: Path, state: dict) -> RunResult:
         config = {"configurable": {"thread_id": run_id}}
         self._active[run_id] = {"config": config, "run_dir": run_dir}
@@ -374,6 +472,99 @@ class CorpusAtelierApplication:
             )
             raise
         return self._result(run_id)
+
+    @staticmethod
+    def _validate_request(request: str) -> str:
+        if not isinstance(request, str) or not request.strip():
+            raise ValueError("Natural-language design request must not be empty.")
+        return request
+
+    @staticmethod
+    def _corpus_inputs(condition: str, snapshot, reference) -> tuple[Path | None, dict | None]:
+        if condition not in {
+            "baseline_no_explicit_corpus", "explicit_corpus",
+        }:
+            raise ValueError(f"Unsupported corpus experiment condition: {condition!r}.")
+        if condition == "baseline_no_explicit_corpus":
+            if snapshot is not None or reference is not None:
+                raise ValueError(
+                    "The no-explicit-corpus baseline cannot include corpus inputs."
+                )
+            return None, None
+        if snapshot is None or reference is None:
+            raise ValueError(
+                "The explicit-corpus condition requires a snapshot and reference selection."
+            )
+        validate(reference, "reference-selection.schema.json")
+        resolved = Path(snapshot).resolve(strict=True)
+        load_snapshot(resolved)
+        return resolved, reference
+
+    @staticmethod
+    def _experiment_record(
+        *, condition: str, snapshot: Path | None = None,
+        reference: dict | None = None, group_id: str | None = None,
+        shared_brief_sha256: str | None = None,
+    ) -> dict:
+        record = {
+            "kind": (
+                "corpus_generation_comparison"
+                if group_id is not None else
+                "corpus_generation_experiment"
+            ),
+            "status": "experimental",
+            "condition": condition,
+        }
+        if group_id is not None:
+            record["group_id"] = group_id
+        if shared_brief_sha256 is not None:
+            record["shared_brief_sha256"] = shared_brief_sha256
+        if snapshot is not None and reference is not None:
+            snapshot_manifest, _ = load_snapshot(snapshot)
+            record["corpus"] = {
+                "snapshot_id": snapshot_manifest["snapshot_id"],
+                "snapshot_path": str(snapshot),
+                "reference_id": reference["reference_id"],
+            }
+        return record
+
+    def _start_experiment_arm(
+        self, *, case_id: str, profile, brief: dict, experiment: dict,
+        snapshot: Path | None = None, reference: dict | None = None,
+        original_request: str | None = None,
+    ) -> RunResult:
+        run_id, run_dir = self.store.create(
+            case_id=case_id,
+            brief=brief,
+            profile=profile,
+            experiment=experiment,
+        )
+        if original_request is not None:
+            self.store.text(run_dir, "input/original-request.txt", original_request)
+            self.store.json(run_dir, "input/shared-intake.json", {
+                "group_id": experiment.get("group_id"),
+                "shared_brief_sha256": experiment["shared_brief_sha256"],
+            })
+            self.store.register(
+                run_dir,
+                original_request="input/original-request.txt",
+                shared_intake="input/shared-intake.json",
+            )
+        state = {
+            "case_id": case_id,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "profile": profile.name,
+            "brief": brief,
+            "experiment": experiment,
+            "status": "created",
+        }
+        if snapshot is not None and reference is not None:
+            state.update(
+                snapshot=str(snapshot),
+                reference_selection=reference,
+            )
+        return self._invoke_start(run_id, run_dir, state)
 
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
@@ -394,8 +585,7 @@ class CorpusAtelierApplication:
         return self._invoke_start(run_id, run_dir, state)
 
     def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:
-        if not isinstance(job.request, str) or not job.request.strip():
-            raise ValueError("Natural-language design request must not be empty.")
+        self._validate_request(job.request)
         profile = get_profile(job.profile)
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
@@ -412,6 +602,151 @@ class CorpusAtelierApplication:
         }
         return self._invoke_start(run_id, run_dir, state)
 
+    def start_experiment(self, job: CorpusExperimentJob) -> RunResult:
+        """Start one explicitly labelled corpus-comparison condition."""
+        self._validate_request(job.request)
+        profile = get_profile(job.profile)
+        snapshot, reference = self._corpus_inputs(
+            job.condition, job.snapshot, job.reference,
+        )
+        experiment = self._experiment_record(
+            condition=job.condition,
+            snapshot=snapshot,
+            reference=reference,
+        )
+        run_id, run_dir = self.store.create(
+            case_id=job.case_id,
+            request=job.request,
+            profile=profile,
+            experiment=experiment,
+        )
+        state = {
+            "case_id": job.case_id,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "profile": profile.name,
+            "user_request": job.request,
+            "experiment": experiment,
+            "status": "created",
+        }
+        if snapshot is not None and reference is not None:
+            state.update(
+                snapshot=str(snapshot),
+                reference_selection=reference,
+            )
+        return self._invoke_start(run_id, run_dir, state)
+
+    def start_comparison(self, job: CorpusComparisonJob) -> ComparisonResult:
+        """Interpret one request once, then start two approval-gated experiment arms."""
+        self._validate_request(job.request)
+        profile = get_profile(job.profile)
+        snapshot, reference = self._corpus_inputs(
+            "explicit_corpus", job.snapshot, job.reference,
+        )
+        group_id, group_dir = self.store.create_comparison(
+            case_id=job.case_id,
+            profile=profile,
+            request=job.request,
+        )
+        prompt = compile_intake_prompt(profile, job.request)
+        request_record = {
+            "model": getattr(
+                self.runtime.text_provider,
+                "model",
+                type(self.runtime.text_provider).__name__,
+            ),
+            "profile": profile.name,
+            "schema": profile.brief_schema,
+        }
+        self.store.update(group_dir, "interpreting_request")
+        self.store.json(group_dir, "intake/request.json", request_record)
+        self.store.text(group_dir, "intake/prompt.md", prompt)
+        self.store.register(
+            group_dir,
+            intake_request="intake/request.json",
+            intake_prompt="intake/prompt.md",
+        )
+        try:
+            brief, response = self.runtime.text_provider.propose(
+                prompt,
+                schema_name=profile.brief_schema,
+            )
+            brief = validate(brief, profile.brief_schema)
+            self.store.json(group_dir, "intake/response.json", response)
+            self.store.json(group_dir, "brief.json", brief)
+            self.store.register(
+                group_dir,
+                intake_response="intake/response.json",
+                brief="brief.json",
+            )
+        except Exception as exc:
+            self.store.json(group_dir, "intake/response.json", {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            })
+            self.store.register(group_dir, intake_response="intake/response.json")
+            self.store.update(
+                group_dir, "failed", error_type=type(exc).__name__, error=str(exc),
+            )
+            raise
+
+        brief_sha256 = digest_json(brief)
+        baseline_experiment = self._experiment_record(
+            condition="baseline_no_explicit_corpus",
+            group_id=group_id,
+            shared_brief_sha256=brief_sha256,
+        )
+        corpus_experiment = self._experiment_record(
+            condition="explicit_corpus",
+            snapshot=snapshot,
+            reference=reference,
+            group_id=group_id,
+            shared_brief_sha256=brief_sha256,
+        )
+        try:
+            baseline = self._start_experiment_arm(
+                case_id=job.case_id,
+                profile=profile,
+                brief=brief,
+                experiment=baseline_experiment,
+                original_request=job.request,
+            )
+            corpus = self._start_experiment_arm(
+                case_id=job.case_id,
+                profile=profile,
+                brief=brief,
+                experiment=corpus_experiment,
+                snapshot=snapshot,
+                reference=reference,
+                original_request=job.request,
+            )
+        except Exception as exc:
+            self.store.update(
+                group_dir, "failed", error_type=type(exc).__name__, error=str(exc),
+            )
+            raise
+        self.store.update(
+            group_dir,
+            "awaiting_approval",
+            shared_brief_sha256=brief_sha256,
+            arms={
+                "baseline_no_explicit_corpus": baseline.run_id,
+                "explicit_corpus": corpus.run_id,
+            },
+            arm_statuses={
+                "baseline_no_explicit_corpus": baseline.status,
+                "explicit_corpus": corpus.status,
+            },
+        )
+        return ComparisonResult(
+            group_id=group_id,
+            group_dir=group_dir,
+            brief=brief,
+            baseline=baseline,
+            corpus=corpus,
+        )
+
     def resume(self, run_id: str, decision: object) -> RunResult:
         if run_id not in self._active:
             raise ValueError("This process has no resumable checkpoint for the run.")
@@ -427,8 +762,10 @@ class CorpusAtelierApplication:
             self.store.update(
                 run_dir, "failed", error_type=type(exc).__name__, error=str(exc),
             )
+            self._update_comparison_group(run_dir)
             raise
         result = self._result(run_id)
+        self._update_comparison_group(run_dir)
         if result.status in {"completed", "rejected", "failed"}:
             self._active.pop(run_id, None)
         return result
@@ -469,6 +806,13 @@ class CorpusAtelierApplication:
         # Keep every registered artifact from archived workflow versions inspectable.
         for name, relative in registered.items():
             paths.setdefault(name, summary.run_dir / relative)
+        corpus = summary.manifest.get("experiment", {}).get("corpus")
+        package_path = paths.get("reference_package")
+        if corpus and package_path and package_path.is_file():
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+            paths["reference_image"] = (
+                Path(corpus["snapshot_path"]) / package["reference"]["file"]
+            )
 
         artifacts = {
             name: str(path.resolve())

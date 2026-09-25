@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -17,6 +18,11 @@ from .design.canvas import resolve_canvas
 from .design.rendering import normalize_canvas
 from .design.synthesis import synthesize
 from .design.validation import validate, validate_image_spec, validate_proposal
+from .direction_planning import (
+    load_movement_cards,
+    synthesize_directions,
+    validate_direction_plan,
+)
 from .graphs import build_graph
 from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .intake import compile_intake_prompt
@@ -117,12 +123,26 @@ class _Runtime:
         }
 
     @staticmethod
-    def _generation_binding(state, *, proposal, image_spec, prompt, request):
+    def _resolve_canvas(profile, brief):
+        if profile.canvas_mode == "brief":
+            return resolve_canvas(brief)
+        generation_size = profile.default_size
+        output_ratio = profile.output_ratio
+        return generation_size, output_ratio, {
+            "size": generation_size,
+            "ratio": list(output_ratio),
+            "mode": "profile_default",
+        }
+
+    @staticmethod
+    def _generation_binding(state, candidate):
         binding = {
-            "prompt": prompt,
-            "request": request,
-            "proposal": proposal,
-            "image_spec": image_spec,
+            "candidate_id": candidate["candidate_id"],
+            "direction_seed": candidate["direction_seed"],
+            "prompt": candidate["generation_prompt"],
+            "request": candidate["generation_request"],
+            "proposal": candidate["proposal"],
+            "image_spec": candidate["image_spec"],
             "generation_size": state["generation_size"],
             "output_ratio": list(state["output_ratio"]),
             "canvas": state["canvas"],
@@ -133,190 +153,304 @@ class _Runtime:
             binding["reference"] = state["reference_package"]
         return binding
 
-    def design(self, state):
+    @staticmethod
+    def _candidate_dir(run_dir: Path, candidate_id: str) -> Path:
+        return run_dir / "candidates" / candidate_id
+
+    def plan_directions(self, state):
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
-        self.store.update(run_dir, "designing")
+        candidate_count = state.get("candidate_count", 1)
+        if isinstance(candidate_count, bool) or candidate_count not in {1, 2, 3}:
+            raise ValueError("Candidate count must be 1, 2, or 3.")
+        generation_size, output_ratio, canvas = self._resolve_canvas(
+            profile, state["brief"],
+        )
+        self.store.update(
+            run_dir, "planning_directions", candidate_count=candidate_count,
+        )
         prompt = ""
         try:
-            if profile.deliverable == "graphic-design.v1":
-                generation_size, output_ratio, canvas = resolve_canvas(state["brief"])
-            else:
-                generation_size = profile.default_size
-                output_ratio = profile.output_ratio
-                canvas = {
-                    "size": generation_size,
-                    "ratio": list(output_ratio),
-                    "mode": "profile_default",
-                }
-            self.store.json(run_dir, "generation/canvas.json", canvas)
-            prompt, proposal, response = synthesize(
-                profile,
+            prompt, raw_plan, response = synthesize_directions(
                 state["brief"],
                 self.text_provider,
-                [Path(path) for path in state.get("reference_image_paths", [])],
-                design_knowledge=(state.get("reference_package") or {}).get("reference"),
                 canvas=canvas,
+                candidate_count=candidate_count,
+                design_knowledge=(state.get("reference_package") or {}).get("reference"),
             )
-            request = {
-                "model": getattr(self.text_provider, "model", type(self.text_provider).__name__),
-                "profile": profile.name,
-                "schema": profile.proposal_schema,
+            raw_plan = validate_direction_plan(raw_plan, candidate_count)
+            directions = [
+                {"candidate_id": f"c{index:02d}", **direction}
+                for index, direction in enumerate(raw_plan["directions"], start=1)
+            ]
+            plan = {
+                "candidate_count": candidate_count,
+                "brief_sha256": digest_json(state["brief"]),
+                "shared_invariants": {
+                    "exact_copy": state["brief"].get("exact_copy", []),
+                    "constraints": state["brief"].get("constraints", []),
+                    "canvas": canvas,
+                },
+                "directions": directions,
             }
-            if state.get("reference_package") is not None:
-                request["references"] = state["reference_package"]
-            self.store.json(run_dir, "design/request.json", request)
-            self.store.text(run_dir, "design/prompt.md", prompt)
-            self.store.json(run_dir, "design/response.json", response)
-            self.store.json(run_dir, "design/proposal.json", proposal)
-            proposal = validate_proposal(proposal, profile.proposal_schema)
-            self.store.text(run_dir, "design/presentation.md", render(proposal))
-            self.store.register(
-                run_dir,
-                design_request="design/request.json",
-                design_prompt="design/prompt.md",
-                design_response="design/response.json",
-                proposal="design/proposal.json",
-                presentation="design/presentation.md",
-            )
-            if proposal["status"] != "ready":
-                self.store.update(run_dir, proposal["status"])
-                raise ValueError(f"Design proposal is blocked: {proposal['status']}.")
-            self.store.register(
-                run_dir,
-                canvas="generation/canvas.json",
-            )
-            return {
-                "design_prompt": prompt,
-                "proposal": proposal,
-                "generation_size": generation_size,
-                "output_ratio": output_ratio,
-                "canvas": canvas,
-                "status": "compiling_image_spec",
-            }
-        except Exception as exc:
-            if prompt:
-                self.store.text(run_dir, "design/prompt.md", prompt)
-            error_path = (
-                "design/error.json"
-                if (run_dir / "design/response.json").exists()
-                else "design/response.json"
-            )
-            self.store.json(run_dir, error_path, {
-                "status": "failed",
-                "error_type": type(exc).__name__,
-                "message": str(exc),
-            })
-            self.store.register(run_dir, design_error=error_path)
-            raise
-
-    def compile_image_spec(self, state):
-        run_dir = self._dir(state)
-        target_model = getattr(
-            self.image_provider, "model", type(self.image_provider).__name__,
-        )
-        self.store.update(run_dir, "compiling_image_spec")
-        prompt = ""
-        try:
-            prompt, image_spec, response = synthesize_image_spec(
-                state["proposal"],
-                brief=state["brief"],
-                canvas=state["canvas"],
-                provider_profile=target_model,
-                provider=self.text_provider,
-            )
-            image_spec = validate_image_spec(
-                image_spec, state["brief"].get("exact_copy", []),
-            )
             request = {
                 "model": getattr(
                     self.text_provider, "model", type(self.text_provider).__name__,
                 ),
-                "target_image_model": target_model,
-                "schema": "image-spec.schema.json",
+                "schema": "direction-plan.schema.json",
+                "candidate_count": candidate_count,
             }
-            self.store.json(run_dir, "image-spec/request.json", request)
-            self.store.text(run_dir, "image-spec/prompt.md", prompt)
-            self.store.json(run_dir, "image-spec/response.json", response)
-            self.store.json(run_dir, "image-spec/image-spec.json", image_spec)
-            generation_prompt = compile_generation_prompt(image_spec)
-            self.store.text(run_dir, "generation/prompt.md", generation_prompt)
-            generation_request = self.image_provider.describe_request(
-                generation_prompt,
-                size=state["generation_size"],
-            )
-            self.store.json(
-                run_dir, "generation/request-preview.json", generation_request,
-            )
+            self.store.json(run_dir, "directions/request.json", request)
+            self.store.text(run_dir, "directions/prompt.md", prompt)
+            self.store.json(run_dir, "directions/response.json", response)
+            self.store.json(run_dir, "directions/plan.json", plan)
+            self.store.json(run_dir, "generation/canvas.json", canvas)
             self.store.register(
                 run_dir,
-                image_prompt_request="image-spec/request.json",
-                image_prompt="image-spec/prompt.md",
-                image_prompt_response="image-spec/response.json",
-                image_spec="image-spec/image-spec.json",
-                generation_prompt="generation/prompt.md",
-                generation_request_preview="generation/request-preview.json",
+                direction_request="directions/request.json",
+                direction_prompt="directions/prompt.md",
+                direction_response="directions/response.json",
+                direction_plan="directions/plan.json",
+                canvas="generation/canvas.json",
             )
-            digest = digest_json(self._generation_binding(
-                state,
-                proposal=state["proposal"],
-                image_spec=image_spec,
-                prompt=generation_prompt,
-                request=generation_request,
-            ))
             return {
-                "image_prompt": prompt,
-                "image_spec": image_spec,
-                "generation_prompt": generation_prompt,
-                "generation_request": generation_request,
-                "generation_digest": digest,
-                "status": "awaiting_approval",
+                "direction_plan": plan,
+                "generation_size": generation_size,
+                "output_ratio": output_ratio,
+                "canvas": canvas,
+                "status": "designing_candidates",
             }
         except Exception as exc:
             if prompt:
-                self.store.text(run_dir, "image-spec/prompt.md", prompt)
-            error_path = (
-                "image-spec/error.json"
-                if (run_dir / "image-spec/response.json").exists()
-                else "image-spec/response.json"
-            )
-            self.store.json(run_dir, error_path, {
+                self.store.text(run_dir, "directions/prompt.md", prompt)
+            self.store.json(run_dir, "directions/error.json", {
                 "status": "failed",
                 "error_type": type(exc).__name__,
                 "message": str(exc),
             })
-            self.store.register(run_dir, image_prompt_error=error_path)
+            self.store.register(run_dir, direction_error="directions/error.json")
             raise
+
+    def design_candidates(self, state):
+        run_dir = self._dir(state)
+        profile = get_profile(state["profile"])
+        self.store.update(run_dir, "designing_candidates")
+
+        def design_one(seed):
+            candidate_id = seed["candidate_id"]
+            root = self._candidate_dir(run_dir, candidate_id)
+            prompt = ""
+            try:
+                prompt, proposal, response = synthesize(
+                    profile,
+                    state["brief"],
+                    self.text_provider,
+                    [Path(path) for path in state.get("reference_image_paths", [])],
+                    design_knowledge=(state.get("reference_package") or {}).get("reference"),
+                    canvas=state["canvas"],
+                    direction_seed=seed,
+                    movement_knowledge=load_movement_cards(seed["movement_references"]),
+                )
+                proposal = validate_proposal(
+                    proposal, profile.proposal_schema, candidate_id=candidate_id,
+                )
+                request = {
+                    "model": getattr(
+                        self.text_provider, "model", type(self.text_provider).__name__,
+                    ),
+                    "profile": profile.name,
+                    "schema": profile.proposal_schema,
+                    "candidate_id": candidate_id,
+                }
+                if state.get("reference_package") is not None:
+                    request["references"] = state["reference_package"]
+                self.store.json(root, "design/request.json", request)
+                self.store.text(root, "design/prompt.md", prompt)
+                self.store.json(root, "design/response.json", response)
+                self.store.json(root, "design/proposal.json", proposal)
+                self.store.text(root, "design/presentation.md", render(proposal))
+                if proposal["status"] != "ready":
+                    raise ValueError(
+                        f"Design proposal is blocked: {proposal['status']}."
+                    )
+                return {
+                    "candidate_id": candidate_id,
+                    "direction_seed": seed,
+                    "proposal": proposal,
+                    "status": "designed",
+                    "error": None,
+                }
+            except Exception as exc:
+                if prompt:
+                    self.store.text(root, "design/prompt.md", prompt)
+                self.store.json(root, "design/error.json", {
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                })
+                return {
+                    "candidate_id": candidate_id,
+                    "direction_seed": seed,
+                    "status": "failed",
+                    "error": {"stage": "design", "type": type(exc).__name__, "message": str(exc)},
+                    "_exception": exc,
+                }
+
+        directions = state["direction_plan"]["directions"]
+        with ThreadPoolExecutor(max_workers=len(directions)) as executor:
+            candidates = list(executor.map(design_one, directions))
+        candidates.sort(key=lambda item: item["candidate_id"])
+        first_exception = next(
+            (candidate.get("_exception") for candidate in candidates if candidate.get("_exception")),
+            None,
+        )
+        for candidate in candidates:
+            candidate.pop("_exception", None)
+        self.store.json(run_dir, "candidates/index.json", candidates)
+        if not any(candidate["status"] == "designed" for candidate in candidates):
+            raise first_exception or ValueError("All candidate designs failed.")
+        return {"candidates": candidates, "status": "compiling_candidates"}
+
+    def compile_candidates(self, state):
+        run_dir = self._dir(state)
+        target_model = getattr(
+            self.image_provider, "model", type(self.image_provider).__name__,
+        )
+        self.store.update(run_dir, "compiling_candidates")
+
+        def compile_one(candidate):
+            if candidate["status"] != "designed":
+                return candidate
+            candidate_id = candidate["candidate_id"]
+            root = self._candidate_dir(run_dir, candidate_id)
+            prompt = ""
+            try:
+                prompt, image_spec, response = synthesize_image_spec(
+                    candidate["proposal"],
+                    brief=state["brief"],
+                    canvas=state["canvas"],
+                    provider_profile=target_model,
+                    provider=self.text_provider,
+                )
+                image_spec = validate_image_spec(
+                    image_spec, state["brief"].get("exact_copy", []),
+                )
+                request = {
+                    "model": getattr(
+                        self.text_provider, "model", type(self.text_provider).__name__,
+                    ),
+                    "target_image_model": target_model,
+                    "schema": "image-spec.schema.json",
+                    "candidate_id": candidate_id,
+                }
+                self.store.json(root, "image-spec/request.json", request)
+                self.store.text(root, "image-spec/prompt.md", prompt)
+                self.store.json(root, "image-spec/response.json", response)
+                self.store.json(root, "image-spec/image-spec.json", image_spec)
+                generation_prompt = compile_generation_prompt(image_spec)
+                self.store.text(root, "generation/prompt.md", generation_prompt)
+                generation_request = self.image_provider.describe_request(
+                    generation_prompt, size=state["generation_size"],
+                )
+                self.store.json(
+                    root, "generation/request-preview.json", generation_request,
+                )
+                prepared = {
+                    **candidate,
+                    "image_spec": image_spec,
+                    "generation_prompt": generation_prompt,
+                    "generation_request": generation_request,
+                    "status": "ready",
+                }
+                prepared["generation_digest"] = digest_json(
+                    self._generation_binding(state, prepared)
+                )
+                return prepared
+            except Exception as exc:
+                if prompt:
+                    self.store.text(root, "image-spec/prompt.md", prompt)
+                self.store.json(root, "image-spec/error.json", {
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                })
+                return {
+                    **candidate,
+                    "status": "failed",
+                    "error": {"stage": "image_spec", "type": type(exc).__name__, "message": str(exc)},
+                }
+
+        with ThreadPoolExecutor(max_workers=len(state["candidates"])) as executor:
+            candidates = list(executor.map(compile_one, state["candidates"]))
+        candidates.sort(key=lambda item: item["candidate_id"])
+        ready = [candidate for candidate in candidates if candidate["status"] == "ready"]
+        if not ready:
+            self.store.json(run_dir, "candidates/index.json", candidates)
+            raise ValueError("No candidate reached generation preview.")
+        batch_digest = digest_json([
+            {
+                "candidate_id": candidate["candidate_id"],
+                "status": candidate["status"],
+                "generation_digest": candidate.get("generation_digest"),
+            }
+            for candidate in candidates
+        ])
+        self.store.json(run_dir, "candidates/index.json", candidates)
+        first = ready[0]["candidate_id"]
+        self.store.register(
+            run_dir,
+            candidate_index="candidates/index.json",
+            proposal=f"candidates/{first}/design/proposal.json",
+            presentation=f"candidates/{first}/design/presentation.md",
+            design_prompt=f"candidates/{first}/design/prompt.md",
+            image_spec=f"candidates/{first}/image-spec/image-spec.json",
+            generation_prompt=f"candidates/{first}/generation/prompt.md",
+            generation_request_preview=f"candidates/{first}/generation/request-preview.json",
+        )
+        return {
+            "candidates": candidates,
+            "batch_digest": batch_digest,
+            "status": "awaiting_approval",
+        }
 
     def approval(self, state):
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
+        ready = [candidate for candidate in state["candidates"] if candidate["status"] == "ready"]
         payload = {
             "run_id": state["run_id"],
             "profile": profile.name,
-            "generation_digest": state["generation_digest"],
-            "artifacts": {
-                "proposal": str((run_dir / "design/proposal.json").resolve()),
-                "presentation": str((run_dir / "design/presentation.md").resolve()),
-                "image_spec": str((run_dir / "image-spec/image-spec.json").resolve()),
-                "generation_prompt": str((run_dir / "generation/prompt.md").resolve()),
-                "generation_request_preview": str(
-                    (run_dir / "generation/request-preview.json").resolve()
-                ),
-                "canvas": str((run_dir / "generation/canvas.json").resolve()),
-            },
+            "candidate_count": state["candidate_count"],
+            "generation_call_count": len(ready),
+            "batch_digest": state["batch_digest"],
+            "candidates": [
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "label": candidate["direction_seed"]["label"],
+                    "generation_digest": candidate["generation_digest"],
+                    "proposal": str((self._candidate_dir(run_dir, candidate["candidate_id"]) / "design/proposal.json").resolve()),
+                    "generation_prompt": str((self._candidate_dir(run_dir, candidate["candidate_id"]) / "generation/prompt.md").resolve()),
+                    "generation_request_preview": str((self._candidate_dir(run_dir, candidate["candidate_id"]) / "generation/request-preview.json").resolve()),
+                }
+                for candidate in ready
+            ],
+            "failed_candidates": [
+                candidate["candidate_id"]
+                for candidate in state["candidates"]
+                if candidate["status"] == "failed"
+            ],
         }
         if state.get("experiment") is not None:
             payload["experiment"] = state["experiment"]
         if state.get("reference_package") is not None:
-            payload["artifacts"].update({
+            payload["reference_artifacts"] = {
                 "reference_selection": str(
                     (run_dir / "reference/selection.json").resolve()
                 ),
                 "reference_package": str(
                     (run_dir / "reference/package.json").resolve()
                 ),
-            })
+            }
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
@@ -324,43 +458,40 @@ class _Runtime:
         record = {
             **decision,
             "decided_at": datetime.now(timezone.utc).isoformat(),
-            "generation_digest": state["generation_digest"],
+            "batch_digest": state["batch_digest"],
         }
-        self.store.json(run_dir, "generation/approval.json", record)
-        self.store.register(run_dir, approval="generation/approval.json")
+        self.store.json(run_dir, "approval/decision.json", record)
+        self.store.register(run_dir, approval="approval/decision.json")
         if not decision["approved"]:
             self.store.update(run_dir, "rejected", approval=record)
             return {"approval": record, "status": "rejected"}
-        return {"approval": record, "status": "generating"}
+        return {"approval": record, "status": "generating_candidates"}
 
-    def generate(self, state):
+    def _validate_candidate_preview(self, state, candidate):
         run_dir = self._dir(state)
-        saved_prompt = (run_dir / "generation/prompt.md").read_text(encoding="utf-8")
-        saved_proposal = json.loads(
-            (run_dir / "design/proposal.json").read_text(encoding="utf-8")
-        )
-        saved_image_spec = json.loads(
-            (run_dir / "image-spec/image-spec.json").read_text(encoding="utf-8")
-        )
-        saved_canvas = json.loads(
-            (run_dir / "generation/canvas.json").read_text(encoding="utf-8")
-        )
-        saved_request = json.loads(
-            (run_dir / "generation/request-preview.json").read_text(encoding="utf-8")
-        )
+        root = self._candidate_dir(run_dir, candidate["candidate_id"])
+        saved_prompt = (root / "generation/prompt.md").read_text(encoding="utf-8")
+        saved_proposal = json.loads((root / "design/proposal.json").read_text(encoding="utf-8"))
+        saved_image_spec = json.loads((root / "image-spec/image-spec.json").read_text(encoding="utf-8"))
+        saved_request = json.loads((root / "generation/request-preview.json").read_text(encoding="utf-8"))
         current_request = self.image_provider.describe_request(
-            state["generation_prompt"],
-            size=state["generation_size"],
+            candidate["generation_prompt"], size=state["generation_size"],
         )
         if (
-            saved_prompt != state["generation_prompt"]
-            or saved_proposal != state["proposal"]
-            or saved_image_spec != state["image_spec"]
-            or saved_canvas != state["canvas"]
-            or saved_request != state["generation_request"]
-            or current_request != state["generation_request"]
+            saved_prompt != candidate["generation_prompt"]
+            or saved_proposal != candidate["proposal"]
+            or saved_image_spec != candidate["image_spec"]
+            or saved_request != candidate["generation_request"]
+            or current_request != candidate["generation_request"]
         ):
             raise ValueError("Approved generation artifacts changed after preview.")
+        actual = digest_json(self._generation_binding(state, candidate))
+        if actual != candidate["generation_digest"]:
+            raise ValueError("Approved generation content changed.")
+        return actual
+
+    def generate_candidates(self, state):
+        run_dir = self._dir(state)
         if state.get("reference_package") is not None:
             saved_selection = json.loads(
                 (run_dir / "reference/selection.json").read_text(encoding="utf-8")
@@ -378,52 +509,156 @@ class _Runtime:
             )
             if current_reference != state["reference_package"]:
                 raise ValueError("Approved corpus evidence changed after preview.")
-        actual = digest_json(self._generation_binding(
-            state,
-            proposal=state["proposal"],
-            image_spec=state["image_spec"],
-            prompt=state["generation_prompt"],
-            request=state["generation_request"],
-        ))
-        if actual != state["generation_digest"]:
-            raise ValueError("Approved generation content changed.")
-        if state["approval"].get("generation_digest") != actual:
-            raise ValueError("Approval does not bind to the current generation content.")
+        if state["approval"].get("batch_digest") != state["batch_digest"]:
+            raise ValueError("Approval does not bind to the current candidate batch.")
 
-        self.store.update(run_dir, "generating")
-        attempt = self.store.next_attempt(run_dir, "generation")
-        write_json(attempt / "image-spec.json", state["image_spec"])
-        response = self.image_provider.generate(
-            state["generation_prompt"],
-            size=state["generation_size"],
-            output=attempt,
+        ready = [candidate for candidate in state["candidates"] if candidate["status"] == "ready"]
+        current_batch = digest_json([
+            {
+                "candidate_id": candidate["candidate_id"],
+                "status": candidate["status"],
+                "generation_digest": candidate.get("generation_digest"),
+            }
+            for candidate in state["candidates"]
+        ])
+        if current_batch != state["batch_digest"]:
+            raise ValueError("Approved candidate batch changed.")
+        for candidate in ready:
+            self._validate_candidate_preview(state, candidate)
+
+        self.store.update(run_dir, "generating_candidates")
+
+        def generate_one(candidate):
+            candidate_id = candidate["candidate_id"]
+            root = self._candidate_dir(run_dir, candidate_id)
+            attempt = self.store.next_attempt(root, "generation")
+            write_json(attempt / "image-spec.json", candidate["image_spec"])
+            try:
+                response = self.image_provider.generate(
+                    candidate["generation_prompt"],
+                    size=state["generation_size"],
+                    output=attempt,
+                )
+                image_path = (attempt / response["file"]).resolve()
+                image_path, render_record = normalize_canvas(
+                    image_path, tuple(state["output_ratio"]),
+                )
+                response.update(
+                    file=image_path.name,
+                    sha256=digest_file(image_path),
+                    render=render_record,
+                )
+                write_json(attempt / "response.json", response)
+                relative = attempt.relative_to(run_dir).as_posix()
+                return {
+                    **candidate,
+                    "status": "generated",
+                    "image_path": str(image_path),
+                    "image_sha256": digest_file(image_path),
+                    "generation_artifacts": {
+                        "request": f"{relative}/request.json",
+                        "response": f"{relative}/response.json",
+                        "render": f"{relative}/render.json",
+                        "image": f"{relative}/image.png",
+                    },
+                }
+            except Exception as exc:
+                return {
+                    **candidate,
+                    "status": "failed",
+                    "error": {"stage": "generation", "type": type(exc).__name__, "message": str(exc)},
+                }
+
+        with ThreadPoolExecutor(max_workers=len(ready)) as executor:
+            generated = list(executor.map(generate_one, ready))
+        updates = {candidate["candidate_id"]: candidate for candidate in generated}
+        candidates = [updates.get(candidate["candidate_id"], candidate) for candidate in state["candidates"]]
+        successful = [candidate for candidate in candidates if candidate["status"] == "generated"]
+        self.store.json(run_dir, "candidates/index.json", candidates)
+        if not successful:
+            self.store.update(run_dir, "failed", error="All candidate generations failed.")
+            raise RuntimeError("All candidate generations failed.")
+
+        if state.get("experiment") is not None:
+            selected = successful[0]
+            self.store.register(
+                run_dir,
+                generation_request=selected["generation_artifacts"]["request"],
+                generation_response=selected["generation_artifacts"]["response"],
+                render=selected["generation_artifacts"]["render"],
+                image=selected["generation_artifacts"]["image"],
+            )
+            self.store.update(
+                run_dir,
+                "completed",
+                latest_image=selected["image_path"],
+                image_sha256=selected["image_sha256"],
+                completed_at=datetime.now(timezone.utc).isoformat(),
+            )
+            return {"candidates": candidates, "image_path": selected["image_path"], "status": "completed"}
+
+        self.store.update(run_dir, "awaiting_selection")
+        return {"candidates": candidates, "status": "awaiting_selection"}
+
+    def selection(self, state):
+        run_dir = self._dir(state)
+        successful = [candidate for candidate in state["candidates"] if candidate["status"] == "generated"]
+        payload = {
+            "run_id": state["run_id"],
+            "candidates": [
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "label": candidate["direction_seed"]["label"],
+                    "image_path": candidate["image_path"],
+                    "image_sha256": candidate["image_sha256"],
+                }
+                for candidate in successful
+            ],
+        }
+        self.store.update(run_dir, "awaiting_selection", selection_request=payload)
+        decision = interrupt(payload)
+        if not isinstance(decision, dict):
+            raise ValueError("Candidate selection must be a dictionary.")
+        selected_id = decision.get("selected_candidate_id")
+        if selected_id is not None and not isinstance(selected_id, str):
+            raise ValueError("Selected candidate id must be a string or null.")
+        selected = next(
+            (candidate for candidate in successful if candidate["candidate_id"] == selected_id),
+            None,
         )
-        image_path = (attempt / response["file"]).resolve()
-        image_path, render_record = normalize_canvas(
-            image_path, tuple(state["output_ratio"]),
-        )
-        response.update(
-            file=image_path.name,
-            sha256=digest_file(image_path),
-            render=render_record,
-        )
-        write_json(attempt / "response.json", response)
-        relative = attempt.relative_to(run_dir).as_posix()
-        self.store.register(
-            run_dir,
-            generation_request=f"{relative}/request.json",
-            generation_response=f"{relative}/response.json",
-            render=f"{relative}/render.json",
-            image=f"{relative}/image.png",
-        )
-        self.store.update(
-            run_dir,
-            "completed",
-            latest_image=str(image_path),
-            image_sha256=digest_file(image_path),
-            completed_at=datetime.now(timezone.utc).isoformat(),
-        )
-        return {"image_path": str(image_path), "status": "completed"}
+        if selected_id is not None and selected is None:
+            raise ValueError("Cannot select a missing or failed candidate.")
+        if selected is not None and digest_file(Path(selected["image_path"])) != selected["image_sha256"]:
+            raise ValueError("Selected candidate image changed after generation.")
+        record = {
+            **decision,
+            "selected_image_sha256": selected["image_sha256"] if selected else None,
+            "decided_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.store.json(run_dir, "selection/decision.json", record)
+        self.store.register(run_dir, selection="selection/decision.json")
+        details = {
+            "selection": record,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if selected is not None:
+            details.update(
+                latest_image=selected["image_path"],
+                image_sha256=selected["image_sha256"],
+            )
+            self.store.register(
+                run_dir,
+                generation_request=selected["generation_artifacts"]["request"],
+                generation_response=selected["generation_artifacts"]["response"],
+                render=selected["generation_artifacts"]["render"],
+                image=selected["generation_artifacts"]["image"],
+            )
+        self.store.update(run_dir, "completed", **details)
+        return {
+            "selection": record,
+            "image_path": selected["image_path"] if selected else "",
+            "status": "completed",
+        }
 
 
 class CorpusAtelierApplication:
@@ -478,6 +713,12 @@ class CorpusAtelierApplication:
         if not isinstance(request, str) or not request.strip():
             raise ValueError("Natural-language design request must not be empty.")
         return request
+
+    @staticmethod
+    def _validate_candidate_count(candidate_count: int) -> int:
+        if isinstance(candidate_count, bool) or candidate_count not in {1, 2, 3}:
+            raise ValueError("Candidate count must be 1, 2, or 3.")
+        return candidate_count
 
     @staticmethod
     def _corpus_inputs(condition: str, snapshot, reference) -> tuple[Path | None, dict | None]:
@@ -557,6 +798,7 @@ class CorpusAtelierApplication:
             "profile": profile.name,
             "brief": brief,
             "experiment": experiment,
+            "candidate_count": 1,
             "status": "created",
         }
         if snapshot is not None and reference is not None:
@@ -568,6 +810,7 @@ class CorpusAtelierApplication:
 
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
+        candidate_count = self._validate_candidate_count(job.candidate_count)
         validate(job.brief, profile.brief_schema)
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
@@ -580,12 +823,14 @@ class CorpusAtelierApplication:
             "run_dir": str(run_dir),
             "profile": profile.name,
             "brief": job.brief,
+            "candidate_count": candidate_count,
             "status": "created",
         }
         return self._invoke_start(run_id, run_dir, state)
 
     def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:
         self._validate_request(job.request)
+        candidate_count = self._validate_candidate_count(job.candidate_count)
         profile = get_profile(job.profile)
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
@@ -598,6 +843,7 @@ class CorpusAtelierApplication:
             "run_dir": str(run_dir),
             "profile": profile.name,
             "user_request": job.request,
+            "candidate_count": candidate_count,
             "status": "created",
         }
         return self._invoke_start(run_id, run_dir, state)
@@ -627,6 +873,7 @@ class CorpusAtelierApplication:
             "profile": profile.name,
             "user_request": job.request,
             "experiment": experiment,
+            "candidate_count": 1,
             "status": "created",
         }
         if snapshot is not None and reference is not None:
@@ -954,7 +1201,7 @@ class CorpusAtelierApplication:
         }
         # Keep every registered artifact from archived workflow versions inspectable.
         for name, relative in registered.items():
-            paths.setdefault(name, summary.run_dir / relative)
+            paths[name] = summary.run_dir / relative
         corpus = summary.manifest.get("experiment", {}).get("corpus")
         package_path = paths.get("reference_package")
         if corpus and package_path and package_path.is_file():
@@ -970,6 +1217,7 @@ class CorpusAtelierApplication:
         }
         messages = {
             "awaiting_approval": "Review the saved proposal and generation prompt.",
+            "awaiting_selection": "Review the generated candidates and select one or discard all.",
             "rejected": "Image generation was rejected; the experiment remains recorded.",
             "completed": "Image generation completed and artifacts were saved.",
             "failed": "The experiment failed; inspect its manifest and saved attempts.",

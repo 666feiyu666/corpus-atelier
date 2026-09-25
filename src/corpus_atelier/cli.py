@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from .application import CorpusAtelierApplication
 from .design.validation import validate
 from .registry import PROFILES, get_profile
-from .state import DesignJob, HumanDecision, NaturalLanguageDesignJob
+from .state import CandidateSelection, DesignJob, HumanDecision, NaturalLanguageDesignJob
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,6 +27,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--case-id", required=True)
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
+    run.add_argument("--candidates", type=int, choices=(1, 2, 3), default=1)
 
     request = commands.add_parser(
         "request", help="Run one experiment from an informal design request.",
@@ -40,6 +41,7 @@ def _parser() -> argparse.ArgumentParser:
     source = request.add_mutually_exclusive_group(required=True)
     source.add_argument("--text")
     source.add_argument("--request-file", type=Path)
+    request.add_argument("--candidates", type=int, choices=(1, 2, 3), default=1)
 
     inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
     inspect.add_argument("run_id")
@@ -95,12 +97,14 @@ def main(argv=None) -> int:
             case_id=args.case_id,
             profile=args.profile,
             request=request_text,
+            candidate_count=args.candidates,
         ))
     else:
         result = app.start(DesignJob(
             case_id=args.case_id,
             profile=args.profile,
             brief=_read_object(args.brief, "Brief"),
+            candidate_count=args.candidates,
         ))
     while True:
         _print_result(result)
@@ -115,6 +119,32 @@ def main(argv=None) -> int:
             )
             result = app.resume(result.run_id, HumanDecision(
                 approved=answer in {"y", "yes"}, note=note,
+            ))
+            continue
+        if result.status == "awaiting_selection":
+            candidates = json.loads(Path(
+                result.artifacts["candidate_index"]
+            ).read_text(encoding="utf-8"))
+            available = [
+                candidate for candidate in candidates
+                if candidate.get("status") == "generated"
+            ]
+            print("Generated candidates:")
+            for candidate in available:
+                print(
+                    f"  {candidate['candidate_id']}: "
+                    f"{candidate['direction_seed']['label']} "
+                    f"({candidate['image_path']})"
+                )
+            selected = input(
+                "Select a candidate id, or press Enter to discard all: "
+            ).strip()
+            valid = {candidate["candidate_id"] for candidate in available}
+            if selected and selected not in valid:
+                print("Unknown or unavailable candidate id.")
+                continue
+            result = app.resume(result.run_id, CandidateSelection(
+                selected_candidate_id=selected or None,
             ))
             continue
         return 0 if result.status in {"completed", "rejected"} else 1

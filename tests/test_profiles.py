@@ -15,7 +15,7 @@ class ProfileTests(unittest.TestCase):
     def test_structured_output_constants_and_enums_have_explicit_types(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {"reference-selection.schema.json"}
+        } | {"direction-plan.schema.json", "reference-selection.schema.json"}
 
         def check_node(node, path):
             if isinstance(node, dict):
@@ -33,7 +33,7 @@ class ProfileTests(unittest.TestCase):
     def test_openai_schema_omits_unsupported_unique_items_keyword(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {"reference-selection.schema.json"}
+        } | {"direction-plan.schema.json", "reference-selection.schema.json"}
 
         def check_node(node, path):
             if isinstance(node, dict):
@@ -78,6 +78,7 @@ class ProfileTests(unittest.TestCase):
 
     def test_proposal_cannot_request_supplied_internal_policy_files(self):
         proposal = {
+            "candidate_id": "c01",
             "status": "needs_sources",
             "brief_interpretation": "A complete interpretation.",
             "chosen_direction": "A complete direction.",

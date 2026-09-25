@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import re
 
 from PIL import Image
 
@@ -82,6 +83,32 @@ class FakeTextProvider:
                 "exclusions": ["No logos", "No additional copy"],
             }
             return value, {"status": "completed", "provider": "fake"}
+        if schema_name == "direction-plan.schema.json":
+            match = re.search(r"Return exactly ([1-3]) direction", prompt)
+            count = int(match.group(1)) if match else 1
+            directions = []
+            palettes = [
+                "Warm paper, charcoal, and one vermilion accent.",
+                "Deep blue, pale cyan, and bright acidic yellow.",
+                "Near-black, cool white, and muted lavender.",
+            ]
+            for index in range(count):
+                directions.append({
+                    "label": f"Direction {index + 1}",
+                    "concept": f"A distinct visual argument number {index + 1}.",
+                    "primary_variation_axes": [
+                        "composition" if index % 2 == 0 else "palette",
+                    ],
+                    "variation_plan": {
+                        "composition": f"Composition strategy {index + 1} with a distinct hierarchy.",
+                        "palette": palettes[index],
+                        "typography": f"Typographic rhythm {index + 1} matched to the concept.",
+                        "image_making": f"Image-making method {index + 1} with concrete material logic.",
+                    },
+                    "movement_references": [],
+                    "contrast_statement": f"This direction differs through visual strategy {index + 1}.",
+                })
+            return {"directions": directions}, {"status": "completed", "provider": "fake"}
         is_graphic = schema_name == "graphic-design-proposal.schema.json"
         visible = ["CORPUS ATELIER"] if schema_name.startswith("poster") else [
             "从语料到视觉论证", "Corpus Atelier"
@@ -97,20 +124,23 @@ class FakeTextProvider:
             "A portrait canvas with one central layered motif, a dominant title above it, "
             "quiet margins, flat organic forms, and a restrained editorial palette."
         )
+        candidate_match = re.search(r'"candidate_id"\s*:\s*"(c0[1-3])"', prompt)
+        candidate_id = candidate_match.group(1) if candidate_match else "c01"
         value = {
+            "candidate_id": candidate_id,
             "status": "ready",
             "brief_interpretation": "A focused communication task.",
             "chosen_direction": (
                 "A figure-led product-use composition grounded in the selected corpus evidence."
                 if grounded else
-                "Layered archival forms become a clear visual argument."
+                f"{candidate_id}: layered archival forms become a clear visual argument."
             ),
             "design_description": description,
             "design_rationale": (
                 "The selected figure-product affordance informs a new watch-wearing gesture "
                 "without copying JOB, smoking imagery, or the source composition."
                 if grounded else
-                "The hierarchy connects evidence, transformation, and invitation."
+                f"The {candidate_id} hierarchy connects evidence, transformation, and invitation."
             ),
             "review_criteria": ["Exact copy is visible", "The focal hierarchy is clear"],
             "source_requirements": [],

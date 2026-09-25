@@ -1,0 +1,8 @@
+- `art-nouveau`: organic line, integrated ornament, asymmetric natural rhythm
+- `constructivism`: diagonal force, geometric hierarchy, photomontage, restricted high-contrast color
+- `de-stijl`: orthogonal structure, primary-color relationships, radical reduction
+- `bauhaus-new-typography`: functional hierarchy, asymmetric type systems, economy of form
+- `swiss-style`: modular grids, sans-serif clarity, photographic and typographic discipline
+- `art-deco`: geometric luxury, symmetry, stepped forms, polished material contrast
+- `psychedelic`: compressed figure-ground, vibrating color, distorted lettering, optical intensity
+- `postmodern-memphis`: deliberate instability, pattern collision, playful anti-functional geometry

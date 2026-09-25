@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.state import DesignJob, HumanDecision
+from corpus_atelier.state import CandidateSelection, DesignJob, HumanDecision
 from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
@@ -44,8 +44,13 @@ class GraphTests(unittest.TestCase):
         ).read_text(encoding="utf-8"))
         self.assertEqual(preview["references"], [])
         result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
-        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.status, "awaiting_selection")
         self.assertEqual(image.calls, 1)
+        result = app.resume(
+            result.run_id,
+            CandidateSelection("c01", reviewer="test"),
+        )
+        self.assertEqual(result.status, "completed")
         sent_request = json.loads(Path(
             result.artifacts["generation_request"]
         ).read_text(encoding="utf-8"))
@@ -65,7 +70,7 @@ class GraphTests(unittest.TestCase):
             self.assertEqual(opened.width * expected[1], opened.height * expected[0])
         self.assertEqual(result.run_dir.parent.name, case)
         self.assertEqual(manifest["case_id"], case)
-        self.assertEqual(manifest["workflow_version"], 15)
+        self.assertEqual(manifest["workflow_version"], 16)
         self.assertNotIn("generation_mode", manifest)
         self.assertNotIn("review", manifest["artifacts"])
         self.assertNotIn("final_decision", manifest["artifacts"])
@@ -111,6 +116,11 @@ class GraphTests(unittest.TestCase):
             self.assertEqual(canvas["ratio"], [4, 5])
 
             result = app.resume(result.run_id, HumanDecision(True, reviewer="test"))
+            self.assertEqual(result.status, "awaiting_selection")
+            result = app.resume(
+                result.run_id,
+                CandidateSelection("c01", reviewer="test"),
+            )
             self.assertEqual(result.status, "completed")
             self.assertEqual(image.last_size, canvas["size"])
             from PIL import Image
@@ -150,9 +160,9 @@ class GraphTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 1)
-            response = next(
-                Path(directory).glob("*/*/generation/attempt_01/response.json")
-            )
+            response = next(Path(directory).glob(
+                "*/*/candidates/c01/generation/attempt_01/response.json"
+            ))
             self.assertEqual(json.loads(response.read_text())["status"], "failed")
 
     def test_edited_generation_prompt_invalidates_approval(self):
@@ -168,7 +178,7 @@ class GraphTests(unittest.TestCase):
                 profile="rhetoric-poster",
                 brief=brief("poster-01"),
             ))
-            prompt = started.run_dir / "generation/prompt.md"
+            prompt = Path(started.artifacts["generation_prompt"])
             prompt.write_text(
                 prompt.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8",
             )

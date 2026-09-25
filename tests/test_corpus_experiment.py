@@ -100,9 +100,8 @@ class ConcurrentImageProvider(FakeImageProvider):
 class BaselineFailingImageProvider(FakeImageProvider):
     def generate(self, prompt: str, *, size: str, output: Path,
                  reference_paths=None):
-        manifest = json.loads(
-            (output.parent.parent / "manifest.json").read_text(encoding="utf-8")
-        )
+        run_dir = next(parent for parent in output.parents if (parent / "manifest.json").is_file())
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
         if (
             manifest.get("experiment", {}).get("condition")
             == "baseline_no_explicit_corpus"

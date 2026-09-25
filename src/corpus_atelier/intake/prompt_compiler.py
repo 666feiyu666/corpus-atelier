@@ -11,7 +11,6 @@ def compile_intake_prompt(profile, user_request: str) -> str:
     profile_context = {
         "name": profile.name,
         "objective": profile.objective,
-        "deliverable": profile.deliverable,
         "description": profile.description,
         "brief_schema": profile.brief_schema,
     }

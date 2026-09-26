@@ -91,7 +91,9 @@ class StreamlitAppTests(unittest.TestCase):
             app.segmented_control(key="design_method").value,
             "修辞导向",
         )
-        self.assertEqual(app.segmented_control(key="design_candidate_count").value, 3)
+        candidate_limit = app.segmented_control(key="design_candidate_count")
+        self.assertEqual(candidate_limit.label, "方案数量上限")
+        self.assertEqual(candidate_limit.value, 3)
         self.assertEqual(len(app.segmented_control), 2)
         self.assertEqual(app.button(key="start_design").label, "生成设计方案")
         self.assertEqual(len(app.selectbox), 0)
@@ -174,7 +176,10 @@ class StreamlitAppTests(unittest.TestCase):
                 "status": "ready",
                 "direction_seed": {
                     "label": "Quiet hierarchy",
-                    "primary_variation_axes": ["composition"],
+                    "direction_decisions": [{
+                        "axis": "composition",
+                        "decision": "Use one restrained editorial hierarchy.",
+                    }],
                 },
                 "proposal": {
                     "chosen_direction": "A restrained editorial composition.",

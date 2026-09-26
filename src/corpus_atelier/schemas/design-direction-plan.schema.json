@@ -1,0 +1,60 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "planning_mode": {
+      "type": "string",
+      "enum": ["open", "style_constrained", "structure_constrained", "convergent"]
+    },
+    "directions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {"type": "string", "minLength": 1},
+          "design_thesis": {"type": "string", "minLength": 1},
+          "objective_strategy": {"type": "string", "minLength": 1},
+          "direction_decisions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "axis": {
+                  "type": "string",
+                  "enum": ["concept", "composition", "palette", "typography", "image_making", "visual_language"]
+                },
+                "decision": {"type": "string", "minLength": 1}
+              },
+              "required": ["axis", "decision"]
+            }
+          },
+          "implementation_freedom": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+          },
+          "movement_references": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional IDs from the historical reference catalog supplied for the active design objective."
+          },
+          "portfolio_role": {"type": "string", "minLength": 1}
+        },
+        "required": [
+          "label",
+          "design_thesis",
+          "objective_strategy",
+          "direction_decisions",
+          "implementation_freedom",
+          "movement_references",
+          "portfolio_role"
+        ]
+      }
+    }
+  },
+  "required": ["planning_mode", "directions"]
+}

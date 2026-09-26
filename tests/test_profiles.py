@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import unittest
 
-from corpus_atelier.design.validation import (
+from corpus_atelier.design_support.validation import (
     load_schema,
     validate,
     validate_proposal,
@@ -15,7 +15,7 @@ class ProfileTests(unittest.TestCase):
     def test_structured_output_constants_and_enums_have_explicit_types(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {"direction-plan.schema.json", "reference-selection.schema.json"}
+        } | {"design-direction-plan.schema.json", "reference-selection.schema.json"}
 
         def check_node(node, path):
             if isinstance(node, dict):
@@ -33,7 +33,7 @@ class ProfileTests(unittest.TestCase):
     def test_openai_schema_omits_unsupported_unique_items_keyword(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {"direction-plan.schema.json", "reference-selection.schema.json"}
+        } | {"design-direction-plan.schema.json", "reference-selection.schema.json"}
 
         def check_node(node, path):
             if isinstance(node, dict):
@@ -76,7 +76,7 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate({"topic": "incomplete"}, profile.brief_schema)
 
-    def test_proposal_cannot_request_supplied_internal_policy_files(self):
+    def test_proposal_rejects_legacy_blocked_fields(self):
         proposal = {
             "candidate_id": "c01",
             "status": "needs_sources",
@@ -91,7 +91,20 @@ class ProfileTests(unittest.TestCase):
             "clarification_questions": [],
         }
 
-        with self.assertRaisesRegex(ValueError, "already supplied"):
+        with self.assertRaisesRegex(ValueError, "Additional properties"):
+            validate_proposal(proposal, "graphic-design-proposal.schema.json")
+
+    def test_proposal_requires_nonempty_implemented_design(self):
+        proposal = {
+            "candidate_id": "c01",
+            "brief_interpretation": "A complete interpretation.",
+            "chosen_direction": "A complete direction.",
+            "design_description": "",
+            "design_rationale": "A concise rationale.",
+            "review_criteria": [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "should be non-empty"):
             validate_proposal(proposal, "graphic-design-proposal.schema.json")
 
     def test_watch_has_one_mode_independent_brief(self):

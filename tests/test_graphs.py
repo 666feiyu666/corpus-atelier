@@ -70,7 +70,7 @@ class GraphTests(unittest.TestCase):
             self.assertEqual(opened.width * expected[1], opened.height * expected[0])
         self.assertEqual(result.run_dir.parent.name, case)
         self.assertEqual(manifest["case_id"], case)
-        self.assertEqual(manifest["workflow_version"], 16)
+        self.assertEqual(manifest["workflow_version"], 17)
         self.assertNotIn("generation_mode", manifest)
         self.assertNotIn("review", manifest["artifacts"])
         self.assertNotIn("final_decision", manifest["artifacts"])

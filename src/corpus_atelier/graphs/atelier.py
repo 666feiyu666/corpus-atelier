@@ -9,8 +9,8 @@ def build_graph(runtime, checkpointer):
     graph = StateGraph(AtelierState)
     graph.add_node("interpret_request", runtime.interpret_request)
     graph.add_node("prepare_corpus", runtime.prepare_corpus)
-    graph.add_node("plan_directions", runtime.plan_directions)
-    graph.add_node("design_candidates", runtime.design_candidates)
+    graph.add_node("design_directions", runtime.design_directions)
+    graph.add_node("implement_designs", runtime.implement_designs)
     graph.add_node("compile_candidates", runtime.compile_candidates)
     graph.add_node("approval", runtime.approval)
     graph.add_node("generate_candidates", runtime.generate_candidates)
@@ -22,12 +22,12 @@ def build_graph(runtime, checkpointer):
             "interpret_request" if state.get("user_request") else
             "prepare_corpus" if (
                 state.get("experiment", {}).get("condition") == "explicit_corpus"
-            ) else "plan_directions"
+            ) else "design_directions"
         ),
         {
             "interpret_request": "interpret_request",
             "prepare_corpus": "prepare_corpus",
-            "plan_directions": "plan_directions",
+            "design_directions": "design_directions",
         },
     )
     graph.add_conditional_edges(
@@ -35,13 +35,13 @@ def build_graph(runtime, checkpointer):
         lambda state: (
             "prepare_corpus" if (
                 state.get("experiment", {}).get("condition") == "explicit_corpus"
-            ) else "plan_directions"
+            ) else "design_directions"
         ),
-        {"prepare_corpus": "prepare_corpus", "plan_directions": "plan_directions"},
+        {"prepare_corpus": "prepare_corpus", "design_directions": "design_directions"},
     )
-    graph.add_edge("prepare_corpus", "plan_directions")
-    graph.add_edge("plan_directions", "design_candidates")
-    graph.add_edge("design_candidates", "compile_candidates")
+    graph.add_edge("prepare_corpus", "design_directions")
+    graph.add_edge("design_directions", "implement_designs")
+    graph.add_edge("implement_designs", "compile_candidates")
     graph.add_edge("compile_candidates", "approval")
     graph.add_conditional_edges(
         "approval",

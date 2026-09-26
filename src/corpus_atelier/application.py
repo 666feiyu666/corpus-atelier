@@ -13,16 +13,16 @@ from langgraph.types import Command, interrupt
 from .artifacts.hashing import digest_file, digest_json
 from .artifacts.records import write_json
 from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
-from .design.presentation import render
-from .design.canvas import resolve_canvas
-from .design.rendering import normalize_canvas
-from .design.synthesis import synthesize
-from .design.validation import validate, validate_image_spec, validate_proposal
-from .direction_planning import (
-    load_movement_cards,
-    synthesize_directions,
-    validate_direction_plan,
+from .design_direction import (
+    load_historical_cards,
+    synthesize_design_directions,
+    validate_design_direction_plan,
 )
+from .design_implementation.presentation import render
+from .design_implementation.synthesis import synthesize_design_implementation
+from .design_support.canvas import resolve_canvas
+from .design_support.rendering import normalize_canvas
+from .design_support.validation import validate, validate_image_spec, validate_proposal
 from .graphs import build_graph
 from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .intake import compile_intake_prompt
@@ -157,35 +157,42 @@ class _Runtime:
     def _candidate_dir(run_dir: Path, candidate_id: str) -> Path:
         return run_dir / "candidates" / candidate_id
 
-    def plan_directions(self, state):
+    def design_directions(self, state):
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
-        candidate_count = state.get("candidate_count", 1)
-        if isinstance(candidate_count, bool) or candidate_count not in {1, 2, 3}:
-            raise ValueError("Candidate count must be 1, 2, or 3.")
+        candidate_limit = state.get("candidate_limit", 1)
+        if isinstance(candidate_limit, bool) or candidate_limit not in {1, 2, 3}:
+            raise ValueError("Candidate limit must be 1, 2, or 3.")
         generation_size, output_ratio, canvas = self._resolve_canvas(
             profile, state["brief"],
         )
         self.store.update(
-            run_dir, "planning_directions", candidate_count=candidate_count,
+            run_dir, "designing_directions", candidate_limit=candidate_limit,
         )
         prompt = ""
         try:
-            prompt, raw_plan, response = synthesize_directions(
+            prompt, raw_plan, response = synthesize_design_directions(
+                profile,
                 state["brief"],
                 self.text_provider,
                 canvas=canvas,
-                candidate_count=candidate_count,
+                candidate_limit=candidate_limit,
                 design_knowledge=(state.get("reference_package") or {}).get("reference"),
             )
-            raw_plan = validate_direction_plan(raw_plan, candidate_count)
+            raw_plan = validate_design_direction_plan(
+                raw_plan, candidate_limit, objective=profile.objective,
+            )
             directions = [
                 {"candidate_id": f"c{index:02d}", **direction}
                 for index, direction in enumerate(raw_plan["directions"], start=1)
             ]
+            candidate_count = len(directions)
             plan = {
-                "candidate_count": candidate_count,
+                "planning_mode": raw_plan["planning_mode"],
+                "requested_candidate_limit": candidate_limit,
+                "actual_candidate_count": candidate_count,
                 "brief_sha256": digest_json(state["brief"]),
+                "objective": profile.objective,
                 "shared_invariants": {
                     "exact_copy": state["brief"].get("exact_copy", []),
                     "constraints": state["brief"].get("constraints", []),
@@ -197,51 +204,55 @@ class _Runtime:
                 "model": getattr(
                     self.text_provider, "model", type(self.text_provider).__name__,
                 ),
-                "schema": "direction-plan.schema.json",
-                "candidate_count": candidate_count,
+                "schema": "design-direction-plan.schema.json",
+                "candidate_limit": candidate_limit,
+                "objective": profile.objective,
             }
-            self.store.json(run_dir, "directions/request.json", request)
-            self.store.text(run_dir, "directions/prompt.md", prompt)
-            self.store.json(run_dir, "directions/response.json", response)
-            self.store.json(run_dir, "directions/plan.json", plan)
+            self.store.json(run_dir, "design-direction/request.json", request)
+            self.store.text(run_dir, "design-direction/prompt.md", prompt)
+            self.store.json(run_dir, "design-direction/response.json", response)
+            self.store.json(run_dir, "design-direction/plan.json", plan)
             self.store.json(run_dir, "generation/canvas.json", canvas)
             self.store.register(
                 run_dir,
-                direction_request="directions/request.json",
-                direction_prompt="directions/prompt.md",
-                direction_response="directions/response.json",
-                direction_plan="directions/plan.json",
+                design_direction_request="design-direction/request.json",
+                design_direction_prompt="design-direction/prompt.md",
+                design_direction_response="design-direction/response.json",
+                direction_plan="design-direction/plan.json",
                 canvas="generation/canvas.json",
             )
             return {
                 "direction_plan": plan,
+                "candidate_count": candidate_count,
                 "generation_size": generation_size,
                 "output_ratio": output_ratio,
                 "canvas": canvas,
-                "status": "designing_candidates",
+                "status": "implementing_designs",
             }
         except Exception as exc:
             if prompt:
-                self.store.text(run_dir, "directions/prompt.md", prompt)
-            self.store.json(run_dir, "directions/error.json", {
+                self.store.text(run_dir, "design-direction/prompt.md", prompt)
+            self.store.json(run_dir, "design-direction/error.json", {
                 "status": "failed",
                 "error_type": type(exc).__name__,
                 "message": str(exc),
             })
-            self.store.register(run_dir, direction_error="directions/error.json")
+            self.store.register(
+                run_dir, design_direction_error="design-direction/error.json",
+            )
             raise
 
-    def design_candidates(self, state):
+    def implement_designs(self, state):
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
-        self.store.update(run_dir, "designing_candidates")
+        self.store.update(run_dir, "implementing_designs")
 
-        def design_one(seed):
+        def implement_one(seed):
             candidate_id = seed["candidate_id"]
             root = self._candidate_dir(run_dir, candidate_id)
             prompt = ""
             try:
-                prompt, proposal, response = synthesize(
+                prompt, proposal, response = synthesize_design_implementation(
                     profile,
                     state["brief"],
                     self.text_provider,
@@ -249,7 +260,9 @@ class _Runtime:
                     design_knowledge=(state.get("reference_package") or {}).get("reference"),
                     canvas=state["canvas"],
                     direction_seed=seed,
-                    movement_knowledge=load_movement_cards(seed["movement_references"]),
+                    historical_knowledge=load_historical_cards(
+                        profile.objective, seed["movement_references"],
+                    ),
                 )
                 proposal = validate_proposal(
                     proposal, profile.proposal_schema, candidate_id=candidate_id,
@@ -264,26 +277,24 @@ class _Runtime:
                 }
                 if state.get("reference_package") is not None:
                     request["references"] = state["reference_package"]
-                self.store.json(root, "design/request.json", request)
-                self.store.text(root, "design/prompt.md", prompt)
-                self.store.json(root, "design/response.json", response)
-                self.store.json(root, "design/proposal.json", proposal)
-                self.store.text(root, "design/presentation.md", render(proposal))
-                if proposal["status"] != "ready":
-                    raise ValueError(
-                        f"Design proposal is blocked: {proposal['status']}."
-                    )
+                self.store.json(root, "design-implementation/request.json", request)
+                self.store.text(root, "design-implementation/prompt.md", prompt)
+                self.store.json(root, "design-implementation/response.json", response)
+                self.store.json(root, "design-implementation/proposal.json", proposal)
+                self.store.text(
+                    root, "design-implementation/presentation.md", render(proposal),
+                )
                 return {
                     "candidate_id": candidate_id,
                     "direction_seed": seed,
                     "proposal": proposal,
-                    "status": "designed",
+                    "status": "implemented",
                     "error": None,
                 }
             except Exception as exc:
                 if prompt:
-                    self.store.text(root, "design/prompt.md", prompt)
-                self.store.json(root, "design/error.json", {
+                    self.store.text(root, "design-implementation/prompt.md", prompt)
+                self.store.json(root, "design-implementation/error.json", {
                     "status": "failed",
                     "error_type": type(exc).__name__,
                     "message": str(exc),
@@ -292,13 +303,17 @@ class _Runtime:
                     "candidate_id": candidate_id,
                     "direction_seed": seed,
                     "status": "failed",
-                    "error": {"stage": "design", "type": type(exc).__name__, "message": str(exc)},
+                    "error": {
+                        "stage": "design_implementation",
+                        "type": type(exc).__name__,
+                        "message": str(exc),
+                    },
                     "_exception": exc,
                 }
 
         directions = state["direction_plan"]["directions"]
         with ThreadPoolExecutor(max_workers=len(directions)) as executor:
-            candidates = list(executor.map(design_one, directions))
+            candidates = list(executor.map(implement_one, directions))
         candidates.sort(key=lambda item: item["candidate_id"])
         first_exception = next(
             (candidate.get("_exception") for candidate in candidates if candidate.get("_exception")),
@@ -307,8 +322,8 @@ class _Runtime:
         for candidate in candidates:
             candidate.pop("_exception", None)
         self.store.json(run_dir, "candidates/index.json", candidates)
-        if not any(candidate["status"] == "designed" for candidate in candidates):
-            raise first_exception or ValueError("All candidate designs failed.")
+        if not any(candidate["status"] == "implemented" for candidate in candidates):
+            raise first_exception or ValueError("All design implementations failed.")
         return {"candidates": candidates, "status": "compiling_candidates"}
 
     def compile_candidates(self, state):
@@ -319,7 +334,7 @@ class _Runtime:
         self.store.update(run_dir, "compiling_candidates")
 
         def compile_one(candidate):
-            if candidate["status"] != "designed":
+            if candidate["status"] != "implemented":
                 return candidate
             candidate_id = candidate["candidate_id"]
             root = self._candidate_dir(run_dir, candidate_id)
@@ -400,9 +415,12 @@ class _Runtime:
         self.store.register(
             run_dir,
             candidate_index="candidates/index.json",
-            proposal=f"candidates/{first}/design/proposal.json",
-            presentation=f"candidates/{first}/design/presentation.md",
-            design_prompt=f"candidates/{first}/design/prompt.md",
+            proposal=f"candidates/{first}/design-implementation/proposal.json",
+            presentation=f"candidates/{first}/design-implementation/presentation.md",
+            design_prompt=f"candidates/{first}/design-implementation/prompt.md",
+            design_implementation_prompt=(
+                f"candidates/{first}/design-implementation/prompt.md"
+            ),
             image_spec=f"candidates/{first}/image-spec/image-spec.json",
             generation_prompt=f"candidates/{first}/generation/prompt.md",
             generation_request_preview=f"candidates/{first}/generation/request-preview.json",
@@ -428,9 +446,18 @@ class _Runtime:
                     "candidate_id": candidate["candidate_id"],
                     "label": candidate["direction_seed"]["label"],
                     "generation_digest": candidate["generation_digest"],
-                    "proposal": str((self._candidate_dir(run_dir, candidate["candidate_id"]) / "design/proposal.json").resolve()),
-                    "generation_prompt": str((self._candidate_dir(run_dir, candidate["candidate_id"]) / "generation/prompt.md").resolve()),
-                    "generation_request_preview": str((self._candidate_dir(run_dir, candidate["candidate_id"]) / "generation/request-preview.json").resolve()),
+                    "proposal": str((
+                        self._candidate_dir(run_dir, candidate["candidate_id"])
+                        / "design-implementation/proposal.json"
+                    ).resolve()),
+                    "generation_prompt": str((
+                        self._candidate_dir(run_dir, candidate["candidate_id"])
+                        / "generation/prompt.md"
+                    ).resolve()),
+                    "generation_request_preview": str((
+                        self._candidate_dir(run_dir, candidate["candidate_id"])
+                        / "generation/request-preview.json"
+                    ).resolve()),
                 }
                 for candidate in ready
             ],
@@ -471,7 +498,9 @@ class _Runtime:
         run_dir = self._dir(state)
         root = self._candidate_dir(run_dir, candidate["candidate_id"])
         saved_prompt = (root / "generation/prompt.md").read_text(encoding="utf-8")
-        saved_proposal = json.loads((root / "design/proposal.json").read_text(encoding="utf-8"))
+        saved_proposal = json.loads((
+            root / "design-implementation/proposal.json"
+        ).read_text(encoding="utf-8"))
         saved_image_spec = json.loads((root / "image-spec/image-spec.json").read_text(encoding="utf-8"))
         saved_request = json.loads((root / "generation/request-preview.json").read_text(encoding="utf-8"))
         current_request = self.image_provider.describe_request(
@@ -717,7 +746,7 @@ class CorpusAtelierApplication:
     @staticmethod
     def _validate_candidate_count(candidate_count: int) -> int:
         if isinstance(candidate_count, bool) or candidate_count not in {1, 2, 3}:
-            raise ValueError("Candidate count must be 1, 2, or 3.")
+            raise ValueError("Candidate limit must be 1, 2, or 3.")
         return candidate_count
 
     @staticmethod
@@ -798,7 +827,7 @@ class CorpusAtelierApplication:
             "profile": profile.name,
             "brief": brief,
             "experiment": experiment,
-            "candidate_count": 1,
+            "candidate_limit": 1,
             "status": "created",
         }
         if snapshot is not None and reference is not None:
@@ -823,7 +852,7 @@ class CorpusAtelierApplication:
             "run_dir": str(run_dir),
             "profile": profile.name,
             "brief": job.brief,
-            "candidate_count": candidate_count,
+            "candidate_limit": candidate_count,
             "status": "created",
         }
         return self._invoke_start(run_id, run_dir, state)
@@ -843,7 +872,7 @@ class CorpusAtelierApplication:
             "run_dir": str(run_dir),
             "profile": profile.name,
             "user_request": job.request,
-            "candidate_count": candidate_count,
+            "candidate_limit": candidate_count,
             "status": "created",
         }
         return self._invoke_start(run_id, run_dir, state)
@@ -873,7 +902,7 @@ class CorpusAtelierApplication:
             "profile": profile.name,
             "user_request": job.request,
             "experiment": experiment,
-            "candidate_count": 1,
+            "candidate_limit": 1,
             "status": "created",
         }
         if snapshot is not None and reference is not None:

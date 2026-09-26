@@ -1,17 +1,28 @@
 # Corpus Atelier
 
-Corpus Atelier is a downstream research workspace for turning domain knowledge—such as design, rhetoric, and semiotics—and structured visual corpora (see [Atelier Corpus](https://github.com/666feiyu666/atelier-corpus)) into reproducible graphic-design experiments.
+## Introduction
 
-The project focuses on one knowledge-transformation process:
+Corpus Atelier is a research-driven tool for knowledge-guided graphic design. It helps translate domain knowledge from fields such as design, rhetoric, and semiotics, together with structured visual corpora, including [Atelier Corpus](https://github.com/666feiyu666/atelier-corpus), into concrete design strategies, visual specifications, design proposals, and generated images.
 
-1. How can domain knowledge and corpus knowledge be transformed into a structured image-generation prompt?
-2. What does this structured prompt produce, and how can we understand the relationship between the input knowledge and the generated image?
-3. Based on this understanding, how can we reframe the structured prompt?
+The project has two closely connected purposes:
 
-My broader, long-term goal is to build an agentic tool that can help us make “better” graphic designs. Corpus Atelier is one research phase toward that goal. Before assembling such a tool, we first need to understand and test its core components separately.
+- to provide a practical workflow for developing graphic designs from explicit, inspectable knowledge;
+- to serve as an experimental workspace for studying how knowledge is interpreted and operationalized as visual decisions by LLMs, and how those decisions are realized through image-generation models.
 
-Basically, this project does not currently include:
+Corpus Atelier currently focuses on one central design process:
 
-- RAG: The current question is how selected corpus knowledge contributes to a design, rather than how that knowledge should be retrieved dynamically. Hopefully, these experiments will also help us understand how to mine and organize the corresponding corpus in the future. That being said, for a mature agentic tool, RAG is surely be included.
-- Multi-Round Agent: The current goal is to understand how knowledge is transformed into a prompt and how the image model responds to that prompt. Multi-round iteration may produce higher-quality designs, but it belongs to a later phase.
-- Multi-Agent Design: This phase does not divide the process among multiple specialized agents. Before introducing agent roles and coordination, we first need to understand the individual components and the relationships between them.
+**knowledge → design interpretation → visual specification and design proposal → generated image → critical analysis → revised design direction**
+
+This process supports both design practice and research. As a design tool, Corpus Atelier helps users turn theoretical and corpus-derived knowledge into visual proposals that can be examined and developed further. As a research environment, it preserves the relationships among source knowledge, design interpretations, visual specifications, and generated outputs for systematic comparison and analysis.
+
+The current research is organized around three questions:
+
+1. How can domain knowledge and corpus knowledge be interpreted and operationalized as design principles, constraints, and visual decisions?
+2. How do image-generation models realize these decisions, and what can the resulting images reveal about the relationship between source knowledge, design intention, and visual form?
+3. Based on this analysis, how can the underlying design interpretation and visual specification be reconsidered?
+
+The longer-term goal is to develop Corpus Atelier into an agentic system capable of supporting more informed, traceable, and critically reflective graphic-design processes. The present project isolates and studies several core components of that system before introducing dynamic retrieval, autonomous iteration, or coordination among specialized agents.
+
+## How to Use
+
+TBD

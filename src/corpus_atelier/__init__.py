@@ -1,6 +1,6 @@
-"""Corpus Atelier: approval-gated visual-design experiments."""
+"""Corpus Atelier: an approval-gated visual-design workspace."""
 
 from .application import CorpusAtelierApplication
 
 __all__ = ["CorpusAtelierApplication"]
-__version__ = "0.3.0"
+__version__ = "1.0.0"

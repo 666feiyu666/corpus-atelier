@@ -10,7 +10,8 @@ class CaseCatalogTests(unittest.TestCase):
     def test_poster_02_declares_all_required_visible_copy(self):
         brief_path = (
             Path(__file__).parents[1]
-            / "experiments"
+            / "tests"
+            / "fixtures"
             / "cases"
             / "poster-02"
             / "brief.json"

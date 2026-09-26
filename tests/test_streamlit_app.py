@@ -1,286 +1,323 @@
+import gc
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 from PIL import Image
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from corpus_atelier.state import ComparisonResult, RunResult
+from corpus_atelier.artifacts.hashing import digest_file
+from corpus_atelier.artifacts.records import write_json, write_text
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-class FakeUiApplication:
-    """Small session-state fake used to exercise Streamlit page transitions."""
-
-    def __init__(self, run_dir: Path, artifacts: dict[str, str]):
-        self.run_dir = run_dir
-        self.artifacts = artifacts
-        self.comparison_resume_calls = 0
-
-    def resume(self, run_id, decision):
-        if hasattr(decision, "approved"):
-            status = "awaiting_selection" if decision.approved else "rejected"
-            if decision.approved and self.artifacts.get("candidate_index"):
-                path = Path(self.artifacts["candidate_index"])
-                candidates = json.loads(path.read_text(encoding="utf-8"))
-                for candidate in candidates:
-                    if candidate.get("status") == "ready":
-                        candidate.update(
-                            status="generated",
-                            image_path=self.artifacts["image"],
-                            image_sha256="test-sha",
-                        )
-                path.write_text(json.dumps(candidates), encoding="utf-8")
-        else:
-            status = "completed"
-        return RunResult(
-            run_id=run_id, status=status, run_dir=self.run_dir,
-            message=status, artifacts=self.artifacts,
-        )
-
-    def resume_comparison(self, comparison, decision):
-        self.comparison_resume_calls += 1
-        status = "completed" if decision.approved else "rejected"
-
-        def update(result):
-            return RunResult(
-                run_id=result.run_id,
-                status=status,
-                run_dir=self.run_dir,
-                message=status,
-                artifacts=self.artifacts,
-            )
-
-        return ComparisonResult(
-            group_id=comparison.group_id,
-            group_dir=comparison.group_dir,
-            brief=comparison.brief,
-            baseline=update(comparison.baseline),
-            corpus=update(comparison.corpus),
-        )
-
-
-class FailingStartApplication:
-    def __init__(self, **kwargs):
-        pass
-
-    def start_request(self, job):
-        raise ValueError("Design proposal requested an unavailable source.")
+APP = ROOT / "src/corpus_atelier/streamlit_app.py"
 
 
 class StreamlitAppTests(unittest.TestCase):
-    def test_streamlit_source_does_not_expose_protocol_details(self):
-        source = ROOT / "src/corpus_atelier/streamlit_app.py"
-        text = source.read_text(encoding="utf-8")
-        for term in ("generation_digest", "revision_text", "forbidden_changes"):
-            self.assertNotIn(term, text)
-
-    def test_initial_page_uses_one_natural_language_input(self):
-        app = AppTest.from_file(
-            str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
-        ).run()
-        self.assertFalse(app.exception)
-        self.assertEqual(app.title[0].value, "Corpus Atelier")
-        self.assertEqual(app.subheader[0].value, "创建设计")
-        self.assertEqual(app.text_area(key="design_request").value, "")
-        self.assertEqual(
-            app.segmented_control(key="design_method").value,
-            "修辞导向",
-        )
-        candidate_limit = app.segmented_control(key="design_candidate_count")
-        self.assertEqual(candidate_limit.label, "方案数量上限")
-        self.assertEqual(candidate_limit.value, 3)
-        self.assertEqual(len(app.segmented_control), 2)
-        self.assertEqual(app.button(key="start_design").label, "生成设计方案")
-        self.assertEqual(len(app.selectbox), 0)
-        self.assertEqual(len(app.get("file_uploader")), 0)
-        self.assertEqual(len(app.text_input), 0)
-        self.assertEqual(len(app.multiselect), 0)
-
-    def test_corpus_controls_are_isolated_on_the_experiment_page(self):
-        app = AppTest.from_file(
-            str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
-        ).run()
-        app.switch_page("app_pages/corpus_experiment.py").run()
-
-        self.assertEqual(app.subheader[0].value, "语料对比实验")
-        self.assertEqual(app.text_area(key="experiment_request").value, "")
-        mode = app.segmented_control(key="experiment_mode")
-        self.assertEqual(
-            mode.options,
-            ["成对比较", "无显式语料", "有显式语料"],
-        )
-        self.assertEqual(mode.value, "成对比较")
-        source = (ROOT / "src/corpus_atelier/streamlit_app.py").read_text(
-            encoding="utf-8",
-        )
-        self.assertIn('st.badge("实验性"', source)
-
-        mode.set_value("有显式语料").run()
-        self.assertEqual(app.button(key="start_experiment").label, "开始实验")
-
-    def test_model_failure_is_not_reported_as_invalid_user_input(self):
-        with patch(
-            "corpus_atelier.streamlit_app.CorpusAtelierApplication",
-            FailingStartApplication,
-        ):
-            app = AppTest.from_file(
-                str(ROOT / "src/corpus_atelier/streamlit_app.py"),
-                default_timeout=10,
-            ).run()
-            app.text_area(key="design_request").set_value(
-                "请做一张超现实主义电脑壁纸。"
-            ).run()
-            app.button(key="start_design").click().run()
-
-        self.assertFalse(app.exception)
-        self.assertEqual(
-            app.error[0].value,
-            "无法生成设计方案：Design proposal requested an unavailable source.",
-        )
-
-    def test_generation_preview_flows_directly_to_completed_result(self):
-        with TemporaryDirectory() as directory:
-            run_dir = Path(directory)
-            proposal = run_dir / "proposal.json"
-            proposal.write_text(json.dumps({
-                "chosen_direction": "A restrained editorial composition.",
-                "design_rationale": "Clear hierarchy for a small screen.",
-            }), encoding="utf-8")
-            generation_prompt = (
-                "# Image rendering instructions\n\n"
-                "Render the complete approved image specification."
+    @staticmethod
+    def _completed_task(root: str) -> str:
+        run_id = "20260926T150000Z_abcdef12"
+        run_dir = Path(root) / "natural-language" / run_id
+        title = "欲望与哲学治疗文章封面"
+        candidates = []
+        for number in (1, 2, 3):
+            candidate_id = f"c{number:02d}"
+            image_path = (
+                run_dir / "candidates" / candidate_id
+                / "generation" / "attempt_01" / "image.png"
             )
-            prompt = run_dir / "generation-prompt.md"
-            prompt.write_text(generation_prompt, encoding="utf-8")
-            request_preview = run_dir / "generation-request-preview.json"
-            request_preview.write_text(json.dumps({
-                "prompt": generation_prompt,
-                "model": "gpt-image-2",
-                "quality": "medium",
-                "size": "1024x1536",
-                "output_format": "png",
-                "n": 1,
-                "operation": "generation",
-                "references": [],
-            }), encoding="utf-8")
-            image = run_dir / "image.png"
-            Image.new("RGB", (12, 18), "white").save(image)
-            candidate_index = run_dir / "candidates.json"
-            candidate_index.write_text(json.dumps([{
-                "candidate_id": "c01",
-                "status": "ready",
-                "direction_seed": {
-                    "label": "Quiet hierarchy",
-                    "direction_decisions": [{
-                        "axis": "composition",
-                        "decision": "Use one restrained editorial hierarchy.",
-                    }],
-                },
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new(
+                "RGB", (120, 80), (30 * number, 40 * number, 50 * number)
+            ).save(image_path, format="PNG")
+            candidates.append({
+                "candidate_id": candidate_id,
+                "status": "generated",
+                "direction_seed": {"label": f"设计方向 {number}"},
                 "proposal": {
-                    "chosen_direction": "A restrained editorial composition.",
-                    "design_rationale": "Clear hierarchy for a small screen.",
+                    "chosen_direction": f"第 {number} 个完整设计方向。",
+                    "design_description": f"第 {number} 个完整视觉描述。",
+                    "design_rationale": f"第 {number} 个设计理由。",
                 },
-                "generation_request": json.loads(request_preview.read_text()),
-                "generation_prompt": generation_prompt,
-            }]), encoding="utf-8")
-            artifacts = {
-                "proposal": str(proposal),
-                "generation_prompt": str(prompt),
-                "generation_request_preview": str(request_preview),
-                "image": str(image),
-                "candidate_index": str(candidate_index),
-            }
-            result = RunResult(
-                run_id="ui-test", status="awaiting_approval", run_dir=run_dir,
-                message="awaiting approval", artifacts=artifacts,
-            )
-            app = AppTest.from_file(
-                str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
-            )
-            app.session_state["design_app"] = FakeUiApplication(run_dir, artifacts)
-            app.session_state["design_result"] = result
-            app.run()
-            self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "图像模型输入预览")
-            self.assertIn("尚未发送", app.info[0].value)
-            self.assertEqual(app.code[0].value, generation_prompt)
-            self.assertEqual(
-                app.button(key="design_send_generation").label,
-                "发送并生成 1 张图片",
-            )
-            self.assertEqual(
-                app.button(key="design_cancel_generation").label,
-                "取消本次生成",
-            )
+                "generation_prompt": f"Render candidate {candidate_id} exactly.",
+                "generation_request": {
+                    "model": "gpt-image-2",
+                    "quality": "medium",
+                    "size": "1536x1024",
+                },
+                "image_path": str(image_path.resolve()),
+                "image_sha256": digest_file(image_path),
+            })
 
-            app.button(key="design_send_generation").click().run()
-            self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "选择设计")
-            app.button(key="select_c01").click().run()
-            self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "生成完成")
-            self.assertEqual([button.label for button in app.button], ["创建新设计"])
+        write_json(run_dir / "candidates" / "index.json", candidates)
+        write_json(run_dir / "selection" / "decision.json", {
+            "selected_candidate_id": "c02",
+            "selected_image_sha256": candidates[1]["image_sha256"],
+        })
+        write_text(run_dir / "input" / "request.txt", "设计一张文章封面。")
+        write_json(run_dir / "manifest.json", {
+            "format_version": 2,
+            "workflow_version": 18,
+            "case_id": "natural-language",
+            "run_id": run_id,
+            "title": title,
+            "created_at": "2026-09-26T15:00:00+00:00",
+            "updated_at": "2026-09-26T15:05:00+00:00",
+            "status": "completed",
+            "models": {
+                "text": {
+                    "adapter": "test.TextProvider",
+                    "model": "gpt-5.6-luna",
+                    "reasoning_effort": "medium",
+                },
+                "image": {
+                    "adapter": "test.ImageProvider",
+                    "model": "gpt-image-2",
+                    "quality": "medium",
+                },
+            },
+            "artifacts": {
+                "user_request": "input/request.txt",
+                "candidate_index": "candidates/index.json",
+                "selection": "selection/decision.json",
+                "image": "candidates/c02/generation/attempt_01/image.png",
+            },
+            "latest_image": str(Path(candidates[1]["image_path"])),
+        })
+        return run_id
 
-    def test_paired_experiment_uses_two_columns_and_one_shared_approval(self):
+    def test_initial_workspace_uses_chat_input_and_openai_model_controls(self):
         with TemporaryDirectory() as directory:
-            run_dir = Path(directory)
-            baseline = RunResult(
-                run_id="baseline-run",
-                status="awaiting_approval",
-                run_dir=run_dir,
-                message="awaiting approval",
-                artifacts={},
-            )
-            corpus = RunResult(
-                run_id="corpus-run",
-                status="awaiting_approval",
-                run_dir=run_dir,
-                message="awaiting approval",
-                artifacts={},
-            )
-            comparison = ComparisonResult(
-                group_id="comparison-test",
-                group_dir=run_dir,
-                brief={},
-                baseline=baseline,
-                corpus=corpus,
-            )
-            app = AppTest.from_file(
-                str(ROOT / "src/corpus_atelier/streamlit_app.py"), default_timeout=10,
-            )
-            app.run()
-            app.session_state["experiment_app"] = FakeUiApplication(run_dir, {})
-            app.session_state["comparison_result"] = comparison
-            app.session_state["experiment_result"] = None
-            app.switch_page("app_pages/corpus_experiment.py").run()
+            settings = Path(directory) / "settings.json"
+            env_file = Path(directory) / ".env"
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(settings),
+                "CORPUS_ATELIER_ENV_PATH": str(env_file),
+            }):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+
+        self.assertFalse(app.exception)
+        self.assertTrue(any(title.value == "语聊画廊" for title in app.title))
+        self.assertEqual(
+            app.selectbox(key="new_task_model").value,
+            "gpt-5.6-luna",
+        )
+        self.assertEqual(
+            app.selectbox(key="new_task_image_model").value,
+            "gpt-image-2",
+        )
+        self.assertEqual(
+            app.segmented_control(key="new_task_reasoning").value,
+            "medium",
+        )
+        self.assertEqual(
+            app.segmented_control(key="new_task_candidates").value,
+            3,
+        )
+        self.assertEqual(
+            app.chat_input(key="new_task_prompt").placeholder,
+            "描述你的设计需求",
+        )
+        self.assertFalse(app.get("pills"))
+        captions = [caption.value for caption in app.caption]
+        self.assertIn("描述你想完成的平面设计。", captions)
+        self.assertIn("v1.0.0", captions)
+        self.assertTrue(all("OpenAI" not in caption for caption in captions))
+        self.assertTrue(all("自动保存" not in caption for caption in captions))
+        self.assertEqual(app.button(key="open_settings").label, "设置")
+
+    def test_settings_switches_language_and_persists_the_preference(self):
+        with TemporaryDirectory() as directory:
+            settings = Path(directory) / "settings.json"
+            env_file = Path(directory) / ".env"
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(settings),
+                "CORPUS_ATELIER_ENV_PATH": str(env_file),
+            }):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.button(key="open_settings").click().run()
+                app.selectbox(key="settings_language").select("en").run()
 
             self.assertFalse(app.exception)
-            self.assertEqual(app.subheader[0].value, "有／无显式语料对比实验")
+            self.assertTrue(any(
+                title.value == "Corpus Atelier" for title in app.title
+            ))
+            self.assertFalse(any(
+                title.value == "语聊画廊" for title in app.title
+            ))
+            self.assertEqual(app.button(key="new_task").label, "New task")
+            self.assertEqual(app.button(key="open_settings").label, "Settings")
             self.assertEqual(
-                len(app.get("column")),
-                4,
+                app.chat_input(key="new_task_prompt").placeholder,
+                "Describe your design request",
             )
             self.assertEqual(
-                app.button(key="experiment_generate_comparison").label,
-                "确认并生成两张图片",
+                json.loads(settings.read_text(encoding="utf-8")),
+                {"language": "en"},
             )
-            self.assertEqual(
-                app.button(key="experiment_cancel_comparison").label,
-                "取消本次对比",
-            )
-            self.assertEqual(len(app.button), 2)
 
-            app.button(key="experiment_generate_comparison").click().run()
-            updated = app.session_state["comparison_result"]
-            self.assertEqual(updated.baseline.status, "completed")
-            self.assertEqual(updated.corpus.status, "completed")
-            self.assertEqual(
-                app.session_state["experiment_app"].comparison_resume_calls,
-                1,
+    def test_settings_saves_masked_api_key_without_frontend_echo(self):
+        with TemporaryDirectory() as directory:
+            settings = Path(directory) / "settings.json"
+            env_file = Path(directory) / ".env"
+            secret = "sk-test-secret-9876"
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(settings),
+                "CORPUS_ATELIER_ENV_PATH": str(env_file),
+            }):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.button(key="open_settings").click().run()
+                app.text_input(key="settings_openai_api_key").input(secret)
+                app.toggle(key="settings_remember_api_key").set_value(True)
+                next(
+                    button for button in app.button if button.label == "保存"
+                ).click().run()
+                app.button(key="open_settings").click().run()
+
+            self.assertFalse(app.exception)
+            self.assertIn(
+                'OPENAI_API_KEY="sk-test-secret-9876"',
+                env_file.read_text(encoding="utf-8"),
             )
-            self.assertEqual([button.label for button in app.button], ["开始新实验"])
+            captions = [caption.value for caption in app.caption]
+            self.assertTrue(any("••••9876" in caption for caption in captions))
+            self.assertTrue(all(".env" not in caption for caption in captions))
+            self.assertTrue(all("Git" not in caption for caption in captions))
+            self.assertTrue(all("来源" not in caption for caption in captions))
+            remember = app.toggle(key="settings_remember_api_key")
+            self.assertEqual(remember.label, "记住 API Key")
+            self.assertNotIn(".env", remember.help)
+            self.assertNotIn("Git", remember.help)
+            self.assertEqual(
+                app.button(key="clear_openai_api_key").label,
+                "移除已保存的 API Key",
+            )
+            self.assertEqual(
+                app.text_input(key="settings_openai_api_key").value,
+                "",
+            )
+            self.assertTrue(all(secret not in caption for caption in captions))
+
+    def test_product_source_is_detached_from_experiments(self):
+        source = APP.read_text(encoding="utf-8")
+        for term in (
+            "experiments/",
+            "CorpusExperimentJob",
+            "CorpusComparisonJob",
+            "render_experiment_page",
+            "语料对比实验",
+        ):
+            self.assertNotIn(term, source)
+        self.assertIn('st.chat_message("user")', source)
+        self.assertIn('st.chat_message("assistant")', source)
+        self.assertIn('ROOT / ".atelier" / "tasks"', source)
+
+    def test_model_selector_is_allow_listed(self):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "CORPUS_ATELIER_TASKS_ROOT": directory,
+            "CORPUS_ATELIER_PREFERENCES_PATH": str(
+                Path(directory) / "settings.json"
+            ),
+            "CORPUS_ATELIER_ENV_PATH": str(Path(directory) / ".env"),
+        }):
+            app = AppTest.from_file(str(APP), default_timeout=10).run()
+            selector = app.selectbox(key="new_task_model")
+            self.assertEqual(
+                selector.options,
+                ["GPT-5.6 Luna", "GPT-6 Sol", "GPT-6 Astra"],
+            )
+            selector.select("gpt-6-sol").run()
+            self.assertFalse(app.exception)
+            self.assertEqual(
+                app.selectbox(key="new_task_model").value,
+                "gpt-6-sol",
+            )
+            image_selector = app.selectbox(key="new_task_image_model")
+            self.assertEqual(
+                image_selector.options,
+                [
+                    "GPT Image 2",
+                    "GPT Image 2.5 Sunburst",
+                    "GPT Image 2.5 Flare",
+                ],
+            )
+            image_selector.select("gpt-image-2.5-flare").run()
+            self.assertFalse(app.exception)
+            self.assertEqual(
+                app.selectbox(key="new_task_image_model").value,
+                "gpt-image-2.5-flare",
+            )
+
+    def test_completed_task_shows_all_images_downloads_and_design_details(self):
+        with TemporaryDirectory() as directory:
+            run_id = self._completed_task(directory)
+            try:
+                with patch.dict(
+                    os.environ,
+                    {
+                        "CORPUS_ATELIER_TASKS_ROOT": directory,
+                        "CORPUS_ATELIER_PREFERENCES_PATH": str(
+                            Path(directory) / "settings.json"
+                        ),
+                        "CORPUS_ATELIER_ENV_PATH": str(
+                            Path(directory) / ".env"
+                        ),
+                    },
+                ):
+                    app = AppTest.from_file(str(APP), default_timeout=10)
+                    app.session_state["selected_task_id"] = run_id
+                    app.run()
+
+                self.assertFalse(app.exception)
+                self.assertEqual(len(app.get("image")), 3)
+                self.assertTrue(any(
+                    subheader.value == "本次生成结果" for subheader in app.subheader
+                ))
+                self.assertIn(
+                    "设计方案与提示词",
+                    [status.label for status in app.get("status")],
+                )
+                self.assertIn("最终选择", app.get("tab")[0].label)
+                self.assertEqual(len(app.code), 3)
+                self.assertTrue(all(
+                    "Render candidate" in code.value for code in app.code
+                ))
+                self.assertNotIn(
+                    "任务 artifacts",
+                    [status.label for status in app.get("status")],
+                )
+                self.assertNotIn(str(Path(directory).resolve()), str(app))
+
+                downloads = app.get("download_button")
+                self.assertEqual(len(downloads), 4)
+                self.assertEqual(
+                    [download.label for download in downloads].count("下载 PNG"),
+                    3,
+                )
+                self.assertTrue(downloads[0].key.endswith("_c02"))
+                self.assertTrue(all(
+                    download.proto.url.endswith(".png")
+                    and download.proto.ignore_rerun
+                    for download in downloads[:3]
+                ))
+                self.assertIn(
+                    "下载全部图片",
+                    [download.label for download in downloads],
+                )
+                self.assertTrue(downloads[-1].proto.url.endswith(".zip"))
+                self.assertTrue(downloads[-1].proto.ignore_rerun)
+            finally:
+                st.cache_resource.clear()
+                gc.collect()
+
+
+if __name__ == "__main__":
+    unittest.main()

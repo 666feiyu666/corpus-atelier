@@ -19,10 +19,17 @@ class ImageProvider(Protocol):
 
 
 class OpenAIImageProvider:
-    def __init__(self, model: str = "gpt-image-2", quality: str = "medium", client=None):
+    def __init__(
+        self,
+        model: str = "gpt-image-2",
+        quality: str = "medium",
+        client=None,
+        api_key: str | None = None,
+    ):
         self.model = model
         self.quality = quality
         self.client = client
+        self.api_key = api_key
 
     def describe_request(self, prompt: str, *, size: str,
                          reference_paths: list[Path] | None = None) -> dict:
@@ -56,7 +63,11 @@ class OpenAIImageProvider:
         try:
             if owned:
                 from openai import OpenAI
-                client = OpenAI(max_retries=0, timeout=600.0)
+                client = OpenAI(
+                    api_key=self.api_key,
+                    max_retries=0,
+                    timeout=600.0,
+                )
             api_request = {
                 "prompt": prompt, "model": self.model, "quality": self.quality,
                 "size": size, "output_format": "png", "n": 1,

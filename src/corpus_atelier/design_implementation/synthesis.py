@@ -8,7 +8,6 @@ from .prompt_compiler import compile_design_implementation_prompt
 def synthesize_design_implementation(
     profile, brief: dict, provider,
     reference_paths: list[Path] | None = None,
-    design_knowledge: dict | None = None,
     canvas: dict | None = None,
     direction_seed: dict | None = None,
     historical_knowledge: list[str] | None = None,
@@ -18,7 +17,6 @@ def synthesize_design_implementation(
     prompt = compile_design_implementation_prompt(
         brief,
         canvas=canvas,
-        design_knowledge=design_knowledge,
         direction_seed=direction_seed,
         historical_knowledge=historical_knowledge,
     )

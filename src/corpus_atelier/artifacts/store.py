@@ -1,4 +1,4 @@
-"""Create non-overwriting, self-contained experiment directories."""
+"""Create non-overwriting, self-contained product task directories."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ RUN_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z_[a-f0-9]{8}$")
 
 
 def validate_case_id(case_id: str) -> str:
-    """Validate a stable, path-safe experiment case identifier."""
+    """Validate a stable, path-safe task case identifier."""
     if not isinstance(case_id, str) or not CASE_ID_PATTERN.fullmatch(case_id):
         raise ValueError(
             "Case ID must use lowercase letters, digits, and single hyphens."
@@ -32,13 +32,14 @@ def validate_run_id(run_id: str) -> str:
 
 
 class ArtifactStore:
-    def __init__(self, root: Path | str = "experiments/runs"):
+    def __init__(self, root: Path | str = ".atelier/tasks"):
         self.root = Path(root).resolve()
 
     def create(self, *, case_id: str, profile,
                brief: dict | None = None,
                request: str | None = None,
-               experiment: dict | None = None) -> tuple[str, Path]:
+               title: str | None = None,
+               models: dict | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
         if (brief is None) == (request is None):
             raise ValueError(
@@ -67,70 +68,79 @@ class ArtifactStore:
             "name": profile.name, "objective": profile.objective,
             "description": profile.description,
         })
+        now = datetime.now(timezone.utc).isoformat()
         manifest = {
-            "format_version": 1, "workflow_version": 17,
+            "format_version": 2, "workflow_version": 18,
             "case_id": case_id, "run_id": run_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "title": title or case_id,
+            "created_at": now,
+            "updated_at": now,
             "objective_profile": profile.objective,
             "input_mode": input_mode,
             "status": "created", "artifacts": initial_artifacts,
         }
-        if experiment is not None:
-            manifest["experiment"] = experiment
+        if models is not None:
+            manifest["models"] = models
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
-
-    def create_comparison(self, *, case_id: str, profile, request: str) -> tuple[str, Path]:
-        """Create a durable record for one shared-input paired experiment."""
-        case_id = validate_case_id(case_id)
-        comparison_root = self.root / "_comparisons" / case_id
-        comparison_root.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        while True:
-            group_id = f"comparison_{stamp}_{uuid4().hex[:8]}"
-            group_dir = comparison_root / group_id
-            try:
-                group_dir.mkdir()
-                break
-            except FileExistsError:
-                continue
-        write_text(group_dir / "input/request.txt", request)
-        write_json(group_dir / "profile.json", {
-            "name": profile.name, "objective": profile.objective,
-            "description": profile.description,
-        })
-        write_json(group_dir / "manifest.json", {
-            "format_version": 1,
-            "workflow_version": 17,
-            "experiment": {
-                "kind": "corpus_generation_comparison",
-                "status": "experimental",
-            },
-            "case_id": case_id,
-            "group_id": group_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "status": "created",
-            "artifacts": {
-                "user_request": "input/request.txt",
-                "profile": "profile.json",
-            },
-        })
-        return group_id, group_dir
 
     def manifest(self, run_dir: Path) -> dict:
         return json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
 
     def update(self, run_dir: Path, status: str, **details) -> dict:
         manifest = self.manifest(run_dir)
-        manifest.update(status=status, **details)
+        manifest.update(
+            status=status,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            **details,
+        )
         write_json(run_dir / "manifest.json", manifest)
         return manifest
 
     def register(self, run_dir: Path, **artifacts: str) -> dict:
         manifest = self.manifest(run_dir)
         manifest.setdefault("artifacts", {}).update(artifacts)
+        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
         write_json(run_dir / "manifest.json", manifest)
         return manifest
+
+    def find_run(self, run_id: str) -> Path:
+        """Resolve one task by its globally unique generated run id."""
+        run_id = validate_run_id(run_id)
+        matches = [
+            path.parent
+            for path in self.root.glob(f"*/{run_id}/manifest.json")
+            if path.is_file()
+        ]
+        if len(matches) != 1:
+            raise FileNotFoundError(f"Task {run_id!r} was not found.")
+        run_dir = matches[0].resolve(strict=True)
+        if self.root not in run_dir.parents:
+            raise ValueError("Task path escapes the task store.")
+        return run_dir
+
+    def list_runs(self) -> list[tuple[Path, dict]]:
+        """Return saved tasks newest-first without loading graph checkpoints."""
+        tasks = []
+        if not self.root.exists():
+            return tasks
+        for path in self.root.glob("*/*/manifest.json"):
+            if not path.is_file():
+                continue
+            try:
+                manifest = json.loads(path.read_text(encoding="utf-8"))
+                validate_case_id(manifest["case_id"])
+                validate_run_id(manifest["run_id"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            tasks.append((path.parent.resolve(), manifest))
+        tasks.sort(
+            key=lambda item: item[1].get(
+                "updated_at", item[1].get("created_at", ""),
+            ),
+            reverse=True,
+        )
+        return tasks
 
     def json(self, run_dir: Path, relative: str, value: object) -> str:
         path = run_dir / relative

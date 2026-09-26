@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "corpus-atelier"
-version = "0.3.0"
+version = "0.9.1"
 description = "Reproducible, approval-gated graphic-design experiments"
 requires-python = ">=3.10"
 dependencies = [

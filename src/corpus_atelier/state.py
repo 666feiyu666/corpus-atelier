@@ -8,7 +8,7 @@ from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
     "created", "interpreting_request", "preparing_corpus", "designing",
-    "planning_directions", "designing_candidates", "compiling_candidates",
+    "designing_directions", "implementing_designs", "compiling_candidates",
     "awaiting_approval", "rejected", "generating_candidates",
     "awaiting_selection", "completed", "failed",
 ]
@@ -23,7 +23,7 @@ class DesignJob:
     case_id: str
     profile: str
     brief: dict[str, Any]
-    candidate_count: int = 1
+    candidate_count: int = 1  # Maximum number of meaningful directions.
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class NaturalLanguageDesignJob:
     case_id: str
     profile: str
     request: str
-    candidate_count: int = 1
+    candidate_count: int = 1  # Maximum number of meaningful directions.
 
 
 @dataclass(frozen=True)
@@ -115,6 +115,7 @@ class AtelierState(TypedDict, total=False):
     reference_selection: dict[str, Any]
     reference_package: dict[str, Any]
     reference_image_paths: list[str]
+    candidate_limit: int
     candidate_count: int
     direction_plan: dict[str, Any]
     candidates: list[dict[str, Any]]

@@ -83,8 +83,8 @@ class FakeTextProvider:
                 "exclusions": ["No logos", "No additional copy"],
             }
             return value, {"status": "completed", "provider": "fake"}
-        if schema_name == "direction-plan.schema.json":
-            match = re.search(r"Return exactly ([1-3]) direction", prompt)
+        if schema_name == "design-direction-plan.schema.json":
+            match = re.search(r"between one and ([1-3]) direction", prompt)
             count = int(match.group(1)) if match else 1
             directions = []
             palettes = [
@@ -95,20 +95,29 @@ class FakeTextProvider:
             for index in range(count):
                 directions.append({
                     "label": f"Direction {index + 1}",
-                    "concept": f"A distinct visual argument number {index + 1}.",
-                    "primary_variation_axes": [
-                        "composition" if index % 2 == 0 else "palette",
+                    "design_thesis": f"A distinct visual argument number {index + 1}.",
+                    "objective_strategy": (
+                        f"Apply the active objective through hierarchy strategy {index + 1}."
+                    ),
+                    "direction_decisions": [
+                        {
+                            "axis": "composition" if index % 2 == 0 else "palette",
+                            "decision": (
+                                f"Use strategy {index + 1} with a distinct hierarchy and "
+                                f"{palettes[index]}"
+                            ),
+                        },
                     ],
-                    "variation_plan": {
-                        "composition": f"Composition strategy {index + 1} with a distinct hierarchy.",
-                        "palette": palettes[index],
-                        "typography": f"Typographic rhythm {index + 1} matched to the concept.",
-                        "image_making": f"Image-making method {index + 1} with concrete material logic.",
-                    },
+                    "implementation_freedom": [
+                        "Resolve exact spacing and material texture while preserving the strategy."
+                    ],
                     "movement_references": [],
-                    "contrast_statement": f"This direction differs through visual strategy {index + 1}.",
+                    "portfolio_role": f"This direction differs through strategy {index + 1}.",
                 })
-            return {"directions": directions}, {"status": "completed", "provider": "fake"}
+            return {
+                "planning_mode": "open",
+                "directions": directions,
+            }, {"status": "completed", "provider": "fake"}
         is_graphic = schema_name == "graphic-design-proposal.schema.json"
         visible = ["CORPUS ATELIER"] if schema_name.startswith("poster") else [
             "从语料到视觉论证", "Corpus Atelier"
@@ -128,7 +137,6 @@ class FakeTextProvider:
         candidate_id = candidate_match.group(1) if candidate_match else "c01"
         value = {
             "candidate_id": candidate_id,
-            "status": "ready",
             "brief_interpretation": "A focused communication task.",
             "chosen_direction": (
                 "A figure-led product-use composition grounded in the selected corpus evidence."
@@ -143,8 +151,6 @@ class FakeTextProvider:
                 f"The {candidate_id} hierarchy connects evidence, transformation, and invitation."
             ),
             "review_criteria": ["Exact copy is visible", "The focal hierarchy is clear"],
-            "source_requirements": [],
-            "clarification_questions": [],
         }
         return value, {"status": "completed", "provider": "fake"}
 

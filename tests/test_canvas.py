@@ -1,6 +1,6 @@
 import unittest
 
-from corpus_atelier.design.canvas import reduce_ratio, resolve_canvas, resolve_image_size
+from corpus_atelier.design_support.canvas import reduce_ratio, resolve_canvas, resolve_image_size
 
 
 class CanvasTests(unittest.TestCase):

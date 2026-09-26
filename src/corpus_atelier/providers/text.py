@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Protocol
 
-from ..design.validation import load_schema, validate
+from ..design_support.validation import load_schema, validate
 
 
 def _schema_for_openai(schema_name: str) -> dict:

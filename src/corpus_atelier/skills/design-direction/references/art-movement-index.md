@@ -1,0 +1,7 @@
+- `neoclassicism`: idealized form, lucid contour, measured order, restrained drama
+- `romanticism`: sublime scale, atmospheric drama, movement, emotional intensity
+- `realism`: observed specificity, ordinary subjects, material and social presence
+- `impressionism`: transient light, optical color, open composition, visible touch
+- `post-impressionism`: deliberate structure, subjective color, flattening, symbolic organization
+- `expressionism`: emotional distortion, non-naturalistic color, pressured line and mark
+- `surrealism`: dream logic, precise impossibility, uncanny juxtaposition, estrangement

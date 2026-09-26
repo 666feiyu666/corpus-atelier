@@ -20,26 +20,13 @@ def validate(value: object, schema_name: str):
         raise ValueError(f"Invalid {schema_name} at {location or '<root>'}: {exc.message}") from exc
     return value
 
+
 def validate_proposal(
     value: dict, schema_name: str, *, candidate_id: str | None = None,
 ) -> dict:
     validate(value, schema_name)
-    internal_policy_paths = (
-        "references/objectives/",
-    )
-    for requirement in value["source_requirements"]:
-        if any(path in requirement.lower() for path in internal_policy_paths):
-            raise ValueError(
-                "Design proposal requested internal profile policy files that were "
-                "already supplied."
-            )
     if candidate_id is not None and value["candidate_id"] != candidate_id:
         raise ValueError("Design proposal changed the assigned candidate id.")
-    if value["status"] == "ready":
-        if value["source_requirements"] or value["clarification_questions"]:
-            raise ValueError("A ready proposal cannot have unresolved requirements.")
-        if not value["design_description"].strip():
-            raise ValueError("A ready proposal requires a visible design description.")
     return value
 
 

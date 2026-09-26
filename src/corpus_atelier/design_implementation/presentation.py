@@ -1,11 +1,9 @@
-"""Human-readable proposal summary for the approval gate."""
+"""Human-readable implementation summary for the approval gate."""
 
 
 def render(proposal: dict) -> str:
     lines = [
         "# Design proposal",
-        "",
-        f"Status: **{proposal['status']}**",
         "",
         "## Direction",
         "",

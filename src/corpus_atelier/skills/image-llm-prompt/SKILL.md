@@ -50,7 +50,6 @@ that does not follow from the approved design.
 Return only the requested structured object. The result must stand on its own for the renderer;
 do not rely on the design rationale or private reasoning.
 
-Before compiling, apply the failure patterns in
-[references/semantic-disambiguation.md](references/semantic-disambiguation.md). Apply the target
-model guidance in the relevant provider reference. When preparing the final renderer request,
-apply [references/generation-boundaries.md](references/generation-boundaries.md).
+Before compiling, apply the semantic-disambiguation patterns supplied with the task and the
+guidance for the target image model. Use them to make the `image_spec` more faithful and
+unambiguous, not to add content or redesign the work.

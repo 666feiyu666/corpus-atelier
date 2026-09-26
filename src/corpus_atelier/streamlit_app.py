@@ -99,7 +99,7 @@ def _design_inputs() -> tuple[str, str, int]:
         key="design_method",
     )
     candidate_count = st.segmented_control(
-        "方案数量",
+        "方案数量上限",
         [1, 2, 3],
         default=3,
         key="design_candidate_count",
@@ -308,7 +308,7 @@ def _render_generation_preview(
         request = read_json_artifact(result, "generation_request_preview")
         ready = [{
             "candidate_id": proposal.get("candidate_id", "c01"),
-            "direction_seed": {"label": "设计方案", "primary_variation_axes": []},
+            "direction_seed": {"label": "设计方案", "direction_decisions": []},
             "proposal": proposal,
             "generation_request": request,
             "generation_prompt": read_text_artifact(result, "generation_prompt"),
@@ -319,7 +319,11 @@ def _render_generation_preview(
         seed = candidate.get("direction_seed", {})
         with column.container(border=True, height="stretch"):
             st.markdown(f"### {seed.get('label', candidate['candidate_id'])}")
-            axes = seed.get("primary_variation_axes", [])
+            axes = [
+                decision.get("axis", "")
+                for decision in seed.get("direction_decisions", [])
+                if decision.get("axis")
+            ]
             if axes:
                 st.caption("主要变化维度：" + "、".join(axes))
             st.write(proposal.get("chosen_direction", "设计方案已准备完成。"))

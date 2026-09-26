@@ -10,7 +10,7 @@ def compile_image_spec_prompt(
 ) -> str:
     sections = [
         load_skill("image-llm-prompt"),
-        "# Visual-semantic failure reference\n\n" + load_skill_reference(
+        "# Visual-semantic disambiguation guidance\n\n" + load_skill_reference(
             "image-llm-prompt", "semantic-disambiguation.md",
         ),
     ]

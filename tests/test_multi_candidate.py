@@ -33,6 +33,34 @@ class SecondCandidateFailingImageProvider(FakeImageProvider):
         )
 
 
+class ConvergentTextProvider(FakeTextProvider):
+    def propose(self, prompt: str, *, schema_name: str, reference_paths=None):
+        if schema_name != "design-direction-plan.schema.json":
+            return super().propose(
+                prompt, schema_name=schema_name, reference_paths=reference_paths,
+            )
+        self.design_calls.append({
+            "prompt": prompt,
+            "reference_paths": list(reference_paths or []),
+            "schema_name": schema_name,
+        })
+        return {
+            "planning_mode": "convergent",
+            "directions": [{
+                "label": "Convergent direction",
+                "design_thesis": "Implement the already resolved design faithfully.",
+                "objective_strategy": "Preserve the brief's resolved communication strategy.",
+                "direction_decisions": [{
+                    "axis": "composition",
+                    "decision": "Retain the specified composition.",
+                }],
+                "implementation_freedom": ["Resolve exact spacing."],
+                "movement_references": [],
+                "portfolio_role": "The brief leaves no consequential alternative.",
+            }],
+        }, {"status": "completed", "provider": "fake"}
+
+
 class MultiCandidateTests(unittest.TestCase):
     def _start(self, directory, *, count=3):
         text = FakeTextProvider()
@@ -59,7 +87,8 @@ class MultiCandidateTests(unittest.TestCase):
             plan = json.loads(Path(
                 result.artifacts["direction_plan"]
             ).read_text(encoding="utf-8"))
-            self.assertEqual(plan["candidate_count"], 3)
+            self.assertEqual(plan["requested_candidate_limit"], 3)
+            self.assertEqual(plan["actual_candidate_count"], 3)
             self.assertEqual(
                 [direction["candidate_id"] for direction in plan["directions"]],
                 ["c01", "c02", "c03"],
@@ -87,7 +116,9 @@ class MultiCandidateTests(unittest.TestCase):
             )
             for candidate in candidates:
                 root = result.run_dir / "candidates" / candidate["candidate_id"]
-                self.assertTrue((root / "design/proposal.json").is_file())
+                self.assertTrue((
+                    root / "design-implementation/proposal.json"
+                ).is_file())
                 self.assertTrue((root / "generation/request-preview.json").is_file())
 
             generated = app.resume(
@@ -144,6 +175,30 @@ class MultiCandidateTests(unittest.TestCase):
             self.assertEqual(rejected.status, "rejected")
             self.assertEqual(image.calls, 0)
 
+    def test_candidate_limit_allows_one_convergent_direction(self):
+        with TemporaryDirectory() as directory:
+            text = ConvergentTextProvider()
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=text,
+                image_provider=FakeImageProvider(),
+            )
+            result = app.start_request(NaturalLanguageDesignJob(
+                case_id="convergent",
+                profile="rhetoric-graphic",
+                request=REQUEST,
+                candidate_count=3,
+            ))
+            plan = json.loads(Path(
+                result.artifacts["direction_plan"]
+            ).read_text(encoding="utf-8"))
+            self.assertEqual(plan["requested_candidate_limit"], 3)
+            self.assertEqual(plan["actual_candidate_count"], 1)
+            candidates = json.loads(Path(
+                result.artifacts["candidate_index"]
+            ).read_text(encoding="utf-8"))
+            self.assertEqual([item["candidate_id"] for item in candidates], ["c01"])
+
     def test_editing_one_candidate_invalidates_the_whole_batch(self):
         with TemporaryDirectory() as directory:
             app, _, image, result = self._start(directory)
@@ -158,7 +213,7 @@ class MultiCandidateTests(unittest.TestCase):
                 )
             self.assertEqual(image.calls, 0)
 
-    def test_candidate_count_is_a_deterministic_product_limit(self):
+    def test_candidate_limit_is_a_deterministic_product_limit(self):
         with TemporaryDirectory() as directory:
             app = CorpusAtelierApplication(
                 runs_root=directory,

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from .artifacts.hashing import digest_file
-from .design.validation import validate
+from .design_support.validation import validate
 
 
 @dataclass(frozen=True)

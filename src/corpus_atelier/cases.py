@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from .artifacts.store import validate_case_id
-from .design.validation import validate
+from .design_support.validation import validate
 from .registry import get_profile
 
 

@@ -51,7 +51,7 @@ class IntakeTests(unittest.TestCase):
                 [call["schema_name"] for call in text.design_calls],
                 [
                     "graphic-design-brief.schema.json",
-                    "direction-plan.schema.json",
+                    "design-direction-plan.schema.json",
                     "graphic-design-proposal.schema.json",
                     "image-spec.schema.json",
                 ],
@@ -71,7 +71,7 @@ class IntakeTests(unittest.TestCase):
                 Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
             )
             self.assertEqual(manifest["input_mode"], "natural_language")
-            self.assertEqual(manifest["workflow_version"], 16)
+            self.assertEqual(manifest["workflow_version"], 17)
             self.assertNotIn("generation_mode", manifest)
             self.assertIn("intake_prompt", manifest["artifacts"])
             self.assertIn("intake_response", manifest["artifacts"])

@@ -9,7 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .application import CorpusAtelierApplication
-from .design.validation import validate
+from .design_support.validation import validate
 from .registry import PROFILES, get_profile
 from .state import CandidateSelection, DesignJob, HumanDecision, NaturalLanguageDesignJob
 

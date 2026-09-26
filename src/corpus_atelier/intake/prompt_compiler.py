@@ -2,7 +2,7 @@
 
 import json
 
-from ..design.validation import load_schema
+from ..design_support.validation import load_schema
 from ..skill_loader import load_skill
 
 

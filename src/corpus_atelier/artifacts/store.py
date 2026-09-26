@@ -68,7 +68,7 @@ class ArtifactStore:
             "description": profile.description,
         })
         manifest = {
-            "format_version": 1, "workflow_version": 16,
+            "format_version": 1, "workflow_version": 17,
             "case_id": case_id, "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "objective_profile": profile.objective,
@@ -101,7 +101,7 @@ class ArtifactStore:
         })
         write_json(group_dir / "manifest.json", {
             "format_version": 1,
-            "workflow_version": 16,
+            "workflow_version": 17,
             "experiment": {
                 "kind": "corpus_generation_comparison",
                 "status": "experimental",

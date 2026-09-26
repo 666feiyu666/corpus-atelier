@@ -1,0 +1,16 @@
+{
+  "topic": "AURELIA women's luxury wristwatch advertisement",
+  "purpose": "Present AURELIA as a refined contemporary women's dress watch, with the product as the primary commercial focal point.",
+  "audience": "Women who seek to express a refined, elegant personal style.",
+  "setting": "A premium portrait print advertisement suitable for a fashion or culture magazine.",
+  "exact_copy": ["AURELIA"],
+  "constraints": [
+    "Use only the exact visible copy supplied in exact_copy.",
+    "The watch must be worn on the wrist."
+  ],
+  "preferences": [
+    "Integrate product, visual structure, and lettering into one coherent advertising composition.",
+    "Preserve a premium contemporary product reading.",
+    "Use a Mucha Art Style with the woman as the key figure."
+  ]
+}

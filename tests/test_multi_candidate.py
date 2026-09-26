@@ -67,6 +67,7 @@ class MultiCandidateTests(unittest.TestCase):
         image = FakeImageProvider()
         app = CorpusAtelierApplication(
             runs_root=directory,
+            checkpoint_path=":memory:",
             text_provider=text,
             image_provider=image,
         )
@@ -132,6 +133,17 @@ class MultiCandidateTests(unittest.TestCase):
                 CandidateSelection("c02", reviewer="test"),
             )
             self.assertEqual(completed.status, "completed")
+            completed_candidates = json.loads(Path(
+                completed.artifacts["candidate_index"]
+            ).read_text(encoding="utf-8"))
+            self.assertEqual(
+                [candidate["status"] for candidate in completed_candidates],
+                ["generated", "generated", "generated"],
+            )
+            self.assertTrue(all(
+                Path(candidate["image_path"]).is_file()
+                for candidate in completed_candidates
+            ))
             selection = json.loads(Path(
                 completed.artifacts["selection"]
             ).read_text(encoding="utf-8"))
@@ -144,6 +156,7 @@ class MultiCandidateTests(unittest.TestCase):
             image = SecondCandidateFailingImageProvider()
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=image,
             )
@@ -180,6 +193,7 @@ class MultiCandidateTests(unittest.TestCase):
             text = ConvergentTextProvider()
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=text,
                 image_provider=FakeImageProvider(),
             )
@@ -217,6 +231,7 @@ class MultiCandidateTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=FakeImageProvider(),
             )

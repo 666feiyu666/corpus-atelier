@@ -1,0 +1,39 @@
+[client]
+toolbarMode = "minimal"
+
+[theme]
+font = "sans-serif"
+codeFont = "monospace"
+baseFontSize = 15
+headingFontWeights = [650, 600, 600, 550, 550, 550]
+baseRadius = "large"
+buttonRadius = "large"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+
+[theme.light]
+primaryColor = "#111827"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F4"
+textColor = "#1C1917"
+borderColor = "#E7E5E4"
+codeBackgroundColor = "#F5F5F4"
+
+[theme.dark]
+primaryColor = "#E7E5E4"
+backgroundColor = "#171717"
+secondaryBackgroundColor = "#262626"
+textColor = "#F5F5F4"
+borderColor = "#404040"
+codeBackgroundColor = "#0A0A0A"
+
+[theme.light.sidebar]
+backgroundColor = "#F7F7F5"
+secondaryBackgroundColor = "#EFEFED"
+borderColor = "#E7E5E4"
+
+[theme.dark.sidebar]
+backgroundColor = "#111111"
+secondaryBackgroundColor = "#202020"
+borderColor = "#303030"

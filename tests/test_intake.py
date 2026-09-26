@@ -35,6 +35,7 @@ class IntakeTests(unittest.TestCase):
             image = FakeImageProvider()
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=text,
                 image_provider=image,
             )
@@ -71,7 +72,7 @@ class IntakeTests(unittest.TestCase):
                 Path(result.artifacts["manifest"]).read_text(encoding="utf-8")
             )
             self.assertEqual(manifest["input_mode"], "natural_language")
-            self.assertEqual(manifest["workflow_version"], 17)
+            self.assertEqual(manifest["workflow_version"], 18)
             self.assertNotIn("generation_mode", manifest)
             self.assertIn("intake_prompt", manifest["artifacts"])
             self.assertIn("intake_response", manifest["artifacts"])
@@ -80,6 +81,7 @@ class IntakeTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=FakeImageProvider(),
             )

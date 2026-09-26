@@ -9,7 +9,7 @@ from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = ROOT / "experiments/cases"
+CASES = ROOT / "tests/fixtures/cases"
 
 
 def brief(case):
@@ -24,6 +24,7 @@ class GraphTests(unittest.TestCase):
         text = FakeTextProvider()
         app = CorpusAtelierApplication(
             runs_root=Path(temporary.name),
+            checkpoint_path=":memory:",
             text_provider=text,
             image_provider=image,
         )
@@ -70,7 +71,7 @@ class GraphTests(unittest.TestCase):
             self.assertEqual(opened.width * expected[1], opened.height * expected[0])
         self.assertEqual(result.run_dir.parent.name, case)
         self.assertEqual(manifest["case_id"], case)
-        self.assertEqual(manifest["workflow_version"], 17)
+        self.assertEqual(manifest["workflow_version"], 18)
         self.assertNotIn("generation_mode", manifest)
         self.assertNotIn("review", manifest["artifacts"])
         self.assertNotIn("final_decision", manifest["artifacts"])
@@ -87,6 +88,7 @@ class GraphTests(unittest.TestCase):
             image = FakeImageProvider()
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=image,
             )
@@ -132,6 +134,7 @@ class GraphTests(unittest.TestCase):
             image = FakeImageProvider()
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=image,
             )
@@ -149,6 +152,7 @@ class GraphTests(unittest.TestCase):
             image = FakeImageProvider(fail=True)
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=image,
             )
@@ -170,6 +174,7 @@ class GraphTests(unittest.TestCase):
             image = FakeImageProvider()
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=image,
             )
@@ -182,7 +187,9 @@ class GraphTests(unittest.TestCase):
             prompt.write_text(
                 prompt.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8",
             )
-            with self.assertRaisesRegex(ValueError, "changed after preview"):
+            with self.assertRaisesRegex(
+                ValueError, "models changed|changed after preview",
+            ):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 0)
 
@@ -191,6 +198,7 @@ class GraphTests(unittest.TestCase):
             image = FakeImageProvider()
             app = CorpusAtelierApplication(
                 runs_root=directory,
+                checkpoint_path=":memory:",
                 text_provider=FakeTextProvider(),
                 image_provider=image,
             )
@@ -201,7 +209,9 @@ class GraphTests(unittest.TestCase):
             ))
             image.quality = "changed-after-preview"
 
-            with self.assertRaisesRegex(ValueError, "changed after preview"):
+            with self.assertRaisesRegex(
+                ValueError, "models changed|changed after preview",
+            ):
                 app.resume(started.run_id, HumanDecision(True, reviewer="test"))
             self.assertEqual(image.calls, 0)
 

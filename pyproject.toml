@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "corpus-atelier"
-version = "0.9.1"
-description = "Reproducible, approval-gated graphic-design experiments"
+version = "1.0.0"
+description = "An AI-powered tool for creating complete graphic designs from natural-language requests"
 requires-python = ">=3.10"
 dependencies = [
     "python-dotenv>=1,<2",
@@ -13,6 +13,7 @@ dependencies = [
     "openai>=2,<3",
     "jsonschema>=4,<5",
     "langgraph>=1,<2",
+    "langgraph-checkpoint-sqlite>=3,<4",
     "streamlit>=1.40,<2",
 ]
 

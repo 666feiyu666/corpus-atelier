@@ -7,16 +7,11 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
-    "created", "interpreting_request", "preparing_corpus", "designing",
+    "created", "interpreting_request", "designing",
     "designing_directions", "implementing_designs", "compiling_candidates",
     "awaiting_approval", "rejected", "generating_candidates",
     "awaiting_selection", "completed", "failed",
 ]
-
-CorpusCondition = Literal[
-    "baseline_no_explicit_corpus", "explicit_corpus",
-]
-
 
 @dataclass(frozen=True)
 class DesignJob:
@@ -32,29 +27,6 @@ class NaturalLanguageDesignJob:
     profile: str
     request: str
     candidate_count: int = 1  # Maximum number of meaningful directions.
-
-
-@dataclass(frozen=True)
-class CorpusExperimentJob:
-    """One explicitly experimental run using a natural-language request."""
-
-    case_id: str
-    profile: str
-    request: str
-    condition: CorpusCondition
-    snapshot: Path | None = None
-    reference: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class CorpusComparisonJob:
-    """A paired experiment whose two arms share one interpreted brief."""
-
-    case_id: str
-    profile: str
-    request: str
-    snapshot: Path
-    reference: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -94,15 +66,6 @@ class RunSummary:
     manifest: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class ComparisonResult:
-    group_id: str
-    group_dir: Path
-    brief: dict[str, Any]
-    baseline: RunResult
-    corpus: RunResult
-
-
 class AtelierState(TypedDict, total=False):
     case_id: str
     run_id: str
@@ -110,11 +73,6 @@ class AtelierState(TypedDict, total=False):
     profile: str
     user_request: str
     brief: dict[str, Any]
-    experiment: dict[str, Any]
-    snapshot: str
-    reference_selection: dict[str, Any]
-    reference_package: dict[str, Any]
-    reference_image_paths: list[str]
     candidate_limit: int
     candidate_count: int
     direction_plan: dict[str, Any]

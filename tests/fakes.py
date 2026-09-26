@@ -139,7 +139,7 @@ class FakeTextProvider:
             "candidate_id": candidate_id,
             "brief_interpretation": "A focused communication task.",
             "chosen_direction": (
-                "A figure-led product-use composition grounded in the selected corpus evidence."
+                "A figure-led product-use composition grounded in the selected direction."
                 if grounded else
                 f"{candidate_id}: layered archival forms become a clear visual argument."
             ),

@@ -22,7 +22,7 @@ class CliTests(unittest.TestCase):
         with patch("sys.stdout", stream):
             code = main([
                 "validate", "--profile", "rhetoric-poster", "--brief",
-                str(ROOT / "experiments/cases/poster-01/brief.json"),
+                str(ROOT / "tests/fixtures/cases/poster-01/brief.json"),
             ])
         self.assertEqual(code, 0)
         self.assertIn("Valid rhetoric-poster brief", stream.getvalue())

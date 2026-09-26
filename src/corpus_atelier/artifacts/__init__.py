@@ -1,4 +1,4 @@
-"""Versioned experiment artifact storage."""
+"""Versioned task artifact storage."""
 
 from .store import ArtifactStore
 

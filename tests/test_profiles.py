@@ -15,7 +15,7 @@ class ProfileTests(unittest.TestCase):
     def test_structured_output_constants_and_enums_have_explicit_types(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {"design-direction-plan.schema.json", "reference-selection.schema.json"}
+        } | {"design-direction-plan.schema.json"}
 
         def check_node(node, path):
             if isinstance(node, dict):
@@ -33,7 +33,7 @@ class ProfileTests(unittest.TestCase):
     def test_openai_schema_omits_unsupported_unique_items_keyword(self):
         schema_names = {
             profile.proposal_schema for profile in PROFILES.values()
-        } | {"design-direction-plan.schema.json", "reference-selection.schema.json"}
+        } | {"design-direction-plan.schema.json"}
 
         def check_node(node, path):
             if isinstance(node, dict):
@@ -108,7 +108,7 @@ class ProfileTests(unittest.TestCase):
             validate_proposal(proposal, "graphic-design-proposal.schema.json")
 
     def test_watch_has_one_mode_independent_brief(self):
-        root = Path(__file__).resolve().parents[1] / "experiments/cases/mucha-watch"
+        root = Path(__file__).resolve().parents[1] / "tests/fixtures/cases/mucha-watch"
         brief = json.loads((root / "brief.json").read_text(encoding="utf-8"))
         self.assertNotIn("reference_mode", brief)
         self.assertNotIn("corpus", brief["purpose"].lower())

@@ -1,4 +1,4 @@
-"""Command-line adapter for reproducible Corpus Atelier experiments."""
+"""Command-line adapter for durable Corpus Atelier design tasks."""
 
 from __future__ import annotations
 
@@ -23,14 +23,14 @@ def _parser() -> argparse.ArgumentParser:
     validate_cmd.add_argument("--profile", required=True, choices=PROFILES)
     validate_cmd.add_argument("--brief", required=True, type=Path)
 
-    run = commands.add_parser("run", help="Run one approval-gated design experiment.")
+    run = commands.add_parser("run", help="Run one approval-gated design task.")
     run.add_argument("--case-id", required=True)
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
     run.add_argument("--candidates", type=int, choices=(1, 2, 3), default=1)
 
     request = commands.add_parser(
-        "request", help="Run one experiment from an informal design request.",
+        "request", help="Run one task from an informal design request.",
     )
     request.add_argument("--case-id", default="natural-language")
     request.add_argument(
@@ -43,10 +43,10 @@ def _parser() -> argparse.ArgumentParser:
     source.add_argument("--request-file", type=Path)
     request.add_argument("--candidates", type=int, choices=(1, 2, 3), default=1)
 
-    inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
+    inspect = commands.add_parser("inspect", help="Inspect a saved task.")
     inspect.add_argument("run_id")
     inspect.add_argument("--case-id", required=True)
-    inspect.add_argument("--runs-root", type=Path, default=Path("experiments/runs"))
+    inspect.add_argument("--runs-root", type=Path, default=Path(".atelier/tasks"))
     return parser
 
 
@@ -79,7 +79,7 @@ def main(argv=None) -> int:
         return 0
 
     app = CorpusAtelierApplication(
-        runs_root=getattr(args, "runs_root", "experiments/runs"),
+        runs_root=getattr(args, "runs_root", ".atelier/tasks"),
     )
     if args.command == "inspect":
         summary = app.inspect(args.case_id, args.run_id)

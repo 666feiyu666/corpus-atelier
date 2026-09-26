@@ -1,4 +1,4 @@
-"""Discover and validate bundled experiment cases from filesystem manifests."""
+"""Discover and validate bundled task cases from filesystem manifests."""
 
 from __future__ import annotations
 

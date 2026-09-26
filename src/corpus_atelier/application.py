@@ -1,4 +1,4 @@
-"""UI-neutral application service for one approval-gated generation experiment."""
+"""UI-neutral application service for durable, approval-gated design tasks."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sqlite3
 
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command, interrupt
 
 from .artifacts.hashing import digest_file, digest_json
@@ -26,13 +27,9 @@ from .design_support.validation import validate, validate_image_spec, validate_p
 from .graphs import build_graph
 from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .intake import compile_intake_prompt
-from .materials import build_reference_package, load_snapshot
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
 from .state import (
-    ComparisonResult,
-    CorpusComparisonJob,
-    CorpusExperimentJob,
     DesignJob,
     NaturalLanguageDesignJob,
     RunResult,
@@ -82,15 +79,7 @@ class _Runtime:
                 intake_response="intake/response.json",
                 brief="brief.json",
             )
-            result = {"brief": brief, "status": "designing"}
-            if state.get("experiment") is not None:
-                experiment = {
-                    **state["experiment"],
-                    "shared_brief_sha256": digest_json(brief),
-                }
-                self.store.update(run_dir, "designing", experiment=experiment)
-                result["experiment"] = experiment
-            return result
+            return {"brief": brief, "status": "designing"}
         except Exception as exc:
             self.store.json(run_dir, "intake/response.json", {
                 "status": "failed",
@@ -99,28 +88,6 @@ class _Runtime:
             })
             self.store.register(run_dir, intake_response="intake/response.json")
             raise
-
-    def prepare_corpus(self, state):
-        """Resolve the immutable corpus only for the explicit experimental arm."""
-        run_dir = self._dir(state)
-        self.store.update(run_dir, "preparing_corpus")
-        package, path = build_reference_package(
-            Path(state["snapshot"]), state["reference_selection"],
-        )
-        self.store.json(
-            run_dir, "reference/selection.json", state["reference_selection"],
-        )
-        self.store.json(run_dir, "reference/package.json", package)
-        self.store.register(
-            run_dir,
-            reference_selection="reference/selection.json",
-            reference_package="reference/package.json",
-        )
-        return {
-            "reference_package": package,
-            "reference_image_paths": [str(path)],
-            "status": "designing",
-        }
 
     @staticmethod
     def _resolve_canvas(profile, brief):
@@ -147,10 +114,6 @@ class _Runtime:
             "output_ratio": list(state["output_ratio"]),
             "canvas": state["canvas"],
         }
-        if state.get("experiment") is not None:
-            binding["experiment"] = state["experiment"]
-        if state.get("reference_package") is not None:
-            binding["reference"] = state["reference_package"]
         return binding
 
     @staticmethod
@@ -177,7 +140,6 @@ class _Runtime:
                 self.text_provider,
                 canvas=canvas,
                 candidate_limit=candidate_limit,
-                design_knowledge=(state.get("reference_package") or {}).get("reference"),
             )
             raw_plan = validate_design_direction_plan(
                 raw_plan, candidate_limit, objective=profile.objective,
@@ -256,8 +218,6 @@ class _Runtime:
                     profile,
                     state["brief"],
                     self.text_provider,
-                    [Path(path) for path in state.get("reference_image_paths", [])],
-                    design_knowledge=(state.get("reference_package") or {}).get("reference"),
                     canvas=state["canvas"],
                     direction_seed=seed,
                     historical_knowledge=load_historical_cards(
@@ -275,8 +235,6 @@ class _Runtime:
                     "schema": profile.proposal_schema,
                     "candidate_id": candidate_id,
                 }
-                if state.get("reference_package") is not None:
-                    request["references"] = state["reference_package"]
                 self.store.json(root, "design-implementation/request.json", request)
                 self.store.text(root, "design-implementation/prompt.md", prompt)
                 self.store.json(root, "design-implementation/response.json", response)
@@ -467,17 +425,6 @@ class _Runtime:
                 if candidate["status"] == "failed"
             ],
         }
-        if state.get("experiment") is not None:
-            payload["experiment"] = state["experiment"]
-        if state.get("reference_package") is not None:
-            payload["reference_artifacts"] = {
-                "reference_selection": str(
-                    (run_dir / "reference/selection.json").resolve()
-                ),
-                "reference_package": str(
-                    (run_dir / "reference/package.json").resolve()
-                ),
-            }
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
@@ -521,23 +468,6 @@ class _Runtime:
 
     def generate_candidates(self, state):
         run_dir = self._dir(state)
-        if state.get("reference_package") is not None:
-            saved_selection = json.loads(
-                (run_dir / "reference/selection.json").read_text(encoding="utf-8")
-            )
-            saved_reference = json.loads(
-                (run_dir / "reference/package.json").read_text(encoding="utf-8")
-            )
-            if (
-                saved_selection != state["reference_selection"]
-                or saved_reference != state["reference_package"]
-            ):
-                raise ValueError("Approved generation artifacts changed after preview.")
-            current_reference, _ = build_reference_package(
-                Path(state["snapshot"]), state["reference_selection"],
-            )
-            if current_reference != state["reference_package"]:
-                raise ValueError("Approved corpus evidence changed after preview.")
         if state["approval"].get("batch_digest") != state["batch_digest"]:
             raise ValueError("Approval does not bind to the current candidate batch.")
 
@@ -608,24 +538,6 @@ class _Runtime:
             self.store.update(run_dir, "failed", error="All candidate generations failed.")
             raise RuntimeError("All candidate generations failed.")
 
-        if state.get("experiment") is not None:
-            selected = successful[0]
-            self.store.register(
-                run_dir,
-                generation_request=selected["generation_artifacts"]["request"],
-                generation_response=selected["generation_artifacts"]["response"],
-                render=selected["generation_artifacts"]["render"],
-                image=selected["generation_artifacts"]["image"],
-            )
-            self.store.update(
-                run_dir,
-                "completed",
-                latest_image=selected["image_path"],
-                image_sha256=selected["image_sha256"],
-                completed_at=datetime.now(timezone.utc).isoformat(),
-            )
-            return {"candidates": candidates, "image_path": selected["image_path"], "status": "completed"}
-
         self.store.update(run_dir, "awaiting_selection")
         return {"candidates": candidates, "status": "awaiting_selection"}
 
@@ -691,48 +603,88 @@ class _Runtime:
 
 
 class CorpusAtelierApplication:
-    def __init__(self, *, runs_root: Path | str = "experiments/runs",
-                 text_provider=None, image_provider=None):
+    def __init__(
+        self,
+        *,
+        runs_root: Path | str = ".atelier/tasks",
+        checkpoint_path: Path | str | None = None,
+        text_provider=None,
+        image_provider=None,
+    ):
         self.store = ArtifactStore(runs_root)
+        self.store.root.mkdir(parents=True, exist_ok=True)
         self.runtime = _Runtime(
             self.store,
             text_provider or OpenAITextProvider(),
             image_provider or OpenAIImageProvider(),
         )
-        self.checkpointer = InMemorySaver()
-        self.graph = build_graph(self.runtime, self.checkpointer)
-        self._active: dict[str, dict] = {}
-
-    def _update_comparison_group(self, run_dir: Path) -> None:
-        manifest = self.store.manifest(run_dir)
-        experiment = manifest.get("experiment", {})
-        group_id = experiment.get("group_id")
-        if not group_id:
-            return
-        group_dir = self.store.root / "_comparisons" / manifest["case_id"] / group_id
-        group_manifest = self.store.manifest(group_dir)
-        arms = group_manifest.get("arms", {})
-        statuses = {}
-        for condition, arm_run_id in arms.items():
-            arm_dir = self.store.root / manifest["case_id"] / arm_run_id
-            statuses[condition] = self.store.manifest(arm_dir)["status"]
-        terminal = {"completed", "rejected", "failed"}
-        if "failed" in statuses.values():
-            group_status = "failed"
-        elif statuses and all(status in terminal for status in statuses.values()):
-            group_status = "completed"
+        if checkpoint_path is None:
+            checkpoint_path = self.store.root / "_system" / "checkpoints.sqlite3"
+        if str(checkpoint_path) == ":memory:":
+            checkpoint_target = ":memory:"
         else:
-            group_status = "awaiting_approval"
-        self.store.update(group_dir, group_status, arm_statuses=statuses)
+            checkpoint_path = Path(checkpoint_path).resolve()
+            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint_target = str(checkpoint_path)
+        self._checkpoint_connection = sqlite3.connect(
+            checkpoint_target,
+            check_same_thread=False,
+        )
+        self.checkpointer = SqliteSaver(self._checkpoint_connection)
+        self.checkpointer.setup()
+        self.graph = build_graph(self.runtime, self.checkpointer)
+
+    @staticmethod
+    def _provider_record(provider, *, fields: tuple[str, ...]) -> dict:
+        record = {
+            "adapter": f"{type(provider).__module__}.{type(provider).__name__}",
+        }
+        for field in fields:
+            value = getattr(provider, field, None)
+            if value is not None:
+                record[field] = value
+        return record
+
+    def _models(self) -> dict:
+        return {
+            "text": self._provider_record(
+                self.runtime.text_provider,
+                fields=("model", "reasoning_effort"),
+            ),
+            "image": self._provider_record(
+                self.runtime.image_provider,
+                fields=("model", "quality"),
+            ),
+        }
+
+    def close(self) -> None:
+        connection = getattr(self, "_checkpoint_connection", None)
+        if connection is not None:
+            connection.close()
+            self._checkpoint_connection = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _invoke_start(self, run_id: str, run_dir: Path, state: dict) -> RunResult:
         config = {"configurable": {"thread_id": run_id}}
-        self._active[run_id] = {"config": config, "run_dir": run_dir}
         try:
             self.graph.invoke(state, config=config)
         except Exception as exc:
             self.store.update(
-                run_dir, "failed", error_type=type(exc).__name__, error=str(exc),
+                run_dir,
+                "failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
             )
             raise
         return self._result(run_id)
@@ -750,92 +702,9 @@ class CorpusAtelierApplication:
         return candidate_count
 
     @staticmethod
-    def _corpus_inputs(condition: str, snapshot, reference) -> tuple[Path | None, dict | None]:
-        if condition not in {
-            "baseline_no_explicit_corpus", "explicit_corpus",
-        }:
-            raise ValueError(f"Unsupported corpus experiment condition: {condition!r}.")
-        if condition == "baseline_no_explicit_corpus":
-            if snapshot is not None or reference is not None:
-                raise ValueError(
-                    "The no-explicit-corpus baseline cannot include corpus inputs."
-                )
-            return None, None
-        if snapshot is None or reference is None:
-            raise ValueError(
-                "The explicit-corpus condition requires a snapshot and reference selection."
-            )
-        validate(reference, "reference-selection.schema.json")
-        resolved = Path(snapshot).resolve(strict=True)
-        load_snapshot(resolved)
-        return resolved, reference
-
-    @staticmethod
-    def _experiment_record(
-        *, condition: str, snapshot: Path | None = None,
-        reference: dict | None = None, group_id: str | None = None,
-        shared_brief_sha256: str | None = None,
-    ) -> dict:
-        record = {
-            "kind": (
-                "corpus_generation_comparison"
-                if group_id is not None else
-                "corpus_generation_experiment"
-            ),
-            "status": "experimental",
-            "condition": condition,
-        }
-        if group_id is not None:
-            record["group_id"] = group_id
-        if shared_brief_sha256 is not None:
-            record["shared_brief_sha256"] = shared_brief_sha256
-        if snapshot is not None and reference is not None:
-            snapshot_manifest, _ = load_snapshot(snapshot)
-            record["corpus"] = {
-                "snapshot_id": snapshot_manifest["snapshot_id"],
-                "snapshot_path": str(snapshot),
-                "reference_id": reference["reference_id"],
-            }
-        return record
-
-    def _prepare_experiment_arm(
-        self, *, case_id: str, profile, brief: dict, experiment: dict,
-        snapshot: Path | None = None, reference: dict | None = None,
-        original_request: str | None = None,
-    ) -> tuple[str, Path, dict]:
-        run_id, run_dir = self.store.create(
-            case_id=case_id,
-            brief=brief,
-            profile=profile,
-            experiment=experiment,
-        )
-        if original_request is not None:
-            self.store.text(run_dir, "input/original-request.txt", original_request)
-            self.store.json(run_dir, "input/shared-intake.json", {
-                "group_id": experiment.get("group_id"),
-                "shared_brief_sha256": experiment["shared_brief_sha256"],
-            })
-            self.store.register(
-                run_dir,
-                original_request="input/original-request.txt",
-                shared_intake="input/shared-intake.json",
-            )
-        state = {
-            "case_id": case_id,
-            "run_id": run_id,
-            "run_dir": str(run_dir),
-            "profile": profile.name,
-            "brief": brief,
-            "experiment": experiment,
-            "candidate_limit": 1,
-            "status": "created",
-        }
-        if snapshot is not None and reference is not None:
-            state.update(
-                snapshot=str(snapshot),
-                reference_selection=reference,
-            )
-        return run_id, run_dir, state
+    def _task_title(request: str) -> str:
+        title = " ".join(request.split())
+        return title if len(title) <= 56 else f"{title[:55]}…"
 
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
@@ -845,6 +714,8 @@ class CorpusAtelierApplication:
             case_id=job.case_id,
             brief=job.brief,
             profile=profile,
+            title=job.case_id,
+            models=self._models(),
         )
         state = {
             "case_id": job.case_id,
@@ -865,6 +736,8 @@ class CorpusAtelierApplication:
             case_id=job.case_id,
             request=job.request,
             profile=profile,
+            title=self._task_title(job.request),
+            models=self._models(),
         )
         state = {
             "case_id": job.case_id,
@@ -877,330 +750,50 @@ class CorpusAtelierApplication:
         }
         return self._invoke_start(run_id, run_dir, state)
 
-    def start_experiment(self, job: CorpusExperimentJob) -> RunResult:
-        """Start one explicitly labelled corpus-comparison condition."""
-        self._validate_request(job.request)
-        profile = get_profile(job.profile)
-        snapshot, reference = self._corpus_inputs(
-            job.condition, job.snapshot, job.reference,
-        )
-        experiment = self._experiment_record(
-            condition=job.condition,
-            snapshot=snapshot,
-            reference=reference,
-        )
-        run_id, run_dir = self.store.create(
-            case_id=job.case_id,
-            request=job.request,
-            profile=profile,
-            experiment=experiment,
-        )
-        state = {
-            "case_id": job.case_id,
-            "run_id": run_id,
-            "run_dir": str(run_dir),
-            "profile": profile.name,
-            "user_request": job.request,
-            "experiment": experiment,
-            "candidate_limit": 1,
-            "status": "created",
-        }
-        if snapshot is not None and reference is not None:
-            state.update(
-                snapshot=str(snapshot),
-                reference_selection=reference,
+    def _assert_model_binding(self, run_dir: Path) -> None:
+        expected = self.store.manifest(run_dir).get("models")
+        if expected is not None and expected != self._models():
+            raise ValueError(
+                "Configured models changed after this task was created."
             )
-        return self._invoke_start(run_id, run_dir, state)
 
-    def start_comparison(self, job: CorpusComparisonJob) -> ComparisonResult:
-        """Interpret one request once, then start two approval-gated experiment arms."""
-        self._validate_request(job.request)
-        profile = get_profile(job.profile)
-        snapshot, reference = self._corpus_inputs(
-            "explicit_corpus", job.snapshot, job.reference,
-        )
-        group_id, group_dir = self.store.create_comparison(
-            case_id=job.case_id,
-            profile=profile,
-            request=job.request,
-        )
-        prompt = compile_intake_prompt(profile, job.request)
-        request_record = {
-            "model": getattr(
-                self.runtime.text_provider,
-                "model",
-                type(self.runtime.text_provider).__name__,
-            ),
-            "profile": profile.name,
-            "schema": profile.brief_schema,
-        }
-        self.store.update(group_dir, "interpreting_request")
-        self.store.json(group_dir, "intake/request.json", request_record)
-        self.store.text(group_dir, "intake/prompt.md", prompt)
-        self.store.register(
-            group_dir,
-            intake_request="intake/request.json",
-            intake_prompt="intake/prompt.md",
-        )
+    def resume(self, run_id: str, decision: object) -> RunResult:
+        run_dir = self.store.find_run(run_id)
+        manifest = self.store.manifest(run_dir)
+        if manifest["status"] not in {"awaiting_approval", "awaiting_selection"}:
+            raise ValueError("This task is not waiting for a user decision.")
+        self._assert_model_binding(run_dir)
+        if not hasattr(decision, "to_dict"):
+            raise TypeError("A resumable decision must provide to_dict().")
+        config = {"configurable": {"thread_id": run_id}}
         try:
-            brief, response = self.runtime.text_provider.propose(
-                prompt,
-                schema_name=profile.brief_schema,
-            )
-            brief = validate(brief, profile.brief_schema)
-            self.store.json(group_dir, "intake/response.json", response)
-            self.store.json(group_dir, "brief.json", brief)
-            self.store.register(
-                group_dir,
-                intake_response="intake/response.json",
-                brief="brief.json",
+            self.graph.invoke(
+                Command(resume=decision.to_dict()),
+                config=config,
             )
         except Exception as exc:
-            self.store.json(group_dir, "intake/response.json", {
-                "status": "failed",
-                "error_type": type(exc).__name__,
-                "message": str(exc),
-            })
-            self.store.register(group_dir, intake_response="intake/response.json")
             self.store.update(
-                group_dir, "failed", error_type=type(exc).__name__, error=str(exc),
-            )
-            raise
-
-        brief_sha256 = digest_json(brief)
-        baseline_experiment = self._experiment_record(
-            condition="baseline_no_explicit_corpus",
-            group_id=group_id,
-            shared_brief_sha256=brief_sha256,
-        )
-        corpus_experiment = self._experiment_record(
-            condition="explicit_corpus",
-            snapshot=snapshot,
-            reference=reference,
-            group_id=group_id,
-            shared_brief_sha256=brief_sha256,
-        )
-        baseline_start = self._prepare_experiment_arm(
-            case_id=job.case_id,
-            profile=profile,
-            brief=brief,
-            experiment=baseline_experiment,
-            original_request=job.request,
-        )
-        corpus_start = self._prepare_experiment_arm(
-            case_id=job.case_id,
-            profile=profile,
-            brief=brief,
-            experiment=corpus_experiment,
-            snapshot=snapshot,
-            reference=reference,
-            original_request=job.request,
-        )
-        starts = [baseline_start, corpus_start]
-        conditions = [
-            "baseline_no_explicit_corpus",
-            "explicit_corpus",
-        ]
-        arms = {
-            condition: start[0]
-            for condition, start in zip(conditions, starts, strict=True)
-        }
-        self.store.update(
-            group_dir,
-            "designing",
-            shared_brief_sha256=brief_sha256,
-            arms=arms,
-            arm_statuses={condition: "created" for condition in conditions},
-        )
-
-        configs = []
-        for run_id, run_dir, _ in starts:
-            config = {
-                "configurable": {"thread_id": run_id},
-                "max_concurrency": 2,
-            }
-            self._active[run_id] = {"config": config, "run_dir": run_dir}
-            configs.append(config)
-
-        try:
-            outcomes = self.graph.batch(
-                [state for _, _, state in starts],
-                config=configs,
-                return_exceptions=True,
-            )
-        except Exception as exc:
-            statuses = {
-                condition: self.store.manifest(run_dir)["status"]
-                for condition, (_, run_dir, _) in zip(
-                    conditions, starts, strict=True,
-                )
-            }
-            self.store.update(
-                group_dir,
+                run_dir,
                 "failed",
-                arm_statuses=statuses,
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
             raise
+        return self._result(run_id)
 
-        failures = []
-        for (_, run_dir, _), outcome in zip(starts, outcomes, strict=True):
-            if isinstance(outcome, Exception):
-                self.store.update(
-                    run_dir,
-                    "failed",
-                    error_type=type(outcome).__name__,
-                    error=str(outcome),
-                )
-                failures.append(outcome)
-
-        results = [self._result(run_id) for run_id, _, _ in starts]
-        baseline, corpus = results
-        arm_statuses = {
-            condition: result.status
-            for condition, result in zip(conditions, results, strict=True)
-        }
-        if failures:
-            failure = failures[0]
-            self.store.update(
-                group_dir,
-                "failed",
-                arm_statuses=arm_statuses,
-                error_type=type(failure).__name__,
-                error=str(failure),
+    def list_tasks(self) -> list[RunSummary]:
+        return [
+            RunSummary(
+                run_id=manifest["run_id"],
+                status=manifest["status"],
+                run_dir=run_dir,
+                manifest=manifest,
             )
-            raise failure
-        self.store.update(
-            group_dir,
-            "awaiting_approval",
-            shared_brief_sha256=brief_sha256,
-            arms=arms,
-            arm_statuses=arm_statuses,
-        )
-        return ComparisonResult(
-            group_id=group_id,
-            group_dir=group_dir,
-            brief=brief,
-            baseline=baseline,
-            corpus=corpus,
-        )
+            for run_dir, manifest in self.store.list_runs()
+        ]
 
-    def resume(self, run_id: str, decision: object) -> RunResult:
-        if run_id not in self._active:
-            raise ValueError("This process has no resumable checkpoint for the run.")
-        active = self._active[run_id]
-        run_dir = Path(active["run_dir"])
-        try:
-            if not hasattr(decision, "to_dict"):
-                raise TypeError("A resumable decision must provide to_dict().")
-            self.graph.invoke(
-                Command(resume=decision.to_dict()), config=active["config"],
-            )
-        except Exception as exc:
-            self.store.update(
-                run_dir, "failed", error_type=type(exc).__name__, error=str(exc),
-            )
-            self._update_comparison_group(run_dir)
-            raise
-        result = self._result(run_id)
-        self._update_comparison_group(run_dir)
-        if result.status in {"completed", "rejected", "failed"}:
-            self._active.pop(run_id, None)
-        return result
-
-    def resume_comparison(
-        self, comparison: ComparisonResult, decision: object,
-    ) -> ComparisonResult:
-        """Apply one human decision to both arms and resume them concurrently."""
-        if not hasattr(decision, "to_dict"):
-            raise TypeError("A resumable decision must provide to_dict().")
-        decision_payload = decision.to_dict()
-        if not isinstance(decision_payload, dict):
-            raise TypeError("A resumable decision must serialize to a dictionary.")
-
-        arm_records = []
-        for arm, condition in (
-            ("baseline", "baseline_no_explicit_corpus"),
-            ("corpus", "explicit_corpus"),
-        ):
-            result = getattr(comparison, arm)
-            if result.run_id not in self._active:
-                raise ValueError(
-                    f"This process has no resumable checkpoint for the {arm} arm."
-                )
-            active = self._active[result.run_id]
-            run_dir = Path(active["run_dir"])
-            manifest = self.store.manifest(run_dir)
-            experiment = manifest.get("experiment", {})
-            if (
-                experiment.get("group_id") != comparison.group_id
-                or experiment.get("condition") != condition
-            ):
-                raise ValueError(
-                    "Comparison approval does not match the active experiment arms."
-                )
-            if manifest["status"] != "awaiting_approval":
-                raise ValueError(
-                    f"The {arm} arm is not awaiting approval."
-                )
-            arm_records.append((arm, result.run_id, run_dir, active["config"]))
-
-        try:
-            outcomes = self.graph.batch(
-                [
-                    Command(resume=dict(decision_payload))
-                    for _ in arm_records
-                ],
-                config=[record[3] for record in arm_records],
-                return_exceptions=True,
-            )
-        except Exception as exc:
-            for _, _, run_dir, _ in arm_records:
-                status = self.store.manifest(run_dir)["status"]
-                if status not in {"completed", "rejected", "failed"}:
-                    self.store.update(
-                        run_dir,
-                        "failed",
-                        error_type=type(exc).__name__,
-                        error=str(exc),
-                    )
-            self._update_comparison_group(arm_records[0][2])
-            raise
-
-        for (_, _, run_dir, _), outcome in zip(
-            arm_records, outcomes, strict=True,
-        ):
-            if isinstance(outcome, Exception):
-                self.store.update(
-                    run_dir,
-                    "failed",
-                    error_type=type(outcome).__name__,
-                    error=str(outcome),
-                )
-
-        updated = {
-            arm: self._result(run_id)
-            for arm, run_id, _, _ in arm_records
-        }
-        self._update_comparison_group(arm_records[0][2])
-        for result in updated.values():
-            if result.status in {"completed", "rejected", "failed"}:
-                self._active.pop(result.run_id, None)
-        return ComparisonResult(
-            group_id=comparison.group_id,
-            group_dir=comparison.group_dir,
-            brief=comparison.brief,
-            baseline=updated["baseline"],
-            corpus=updated["corpus"],
-        )
-
-    def inspect(self, case_id: str, run_id: str) -> RunSummary:
-        case_id = validate_case_id(case_id)
-        run_id = validate_run_id(run_id)
-        run_dir = (self.store.root / case_id / run_id).resolve(strict=True)
-        if self.store.root not in run_dir.parents:
-            raise ValueError("Run id escapes the run store.")
+    def inspect_task(self, run_id: str) -> RunSummary:
+        run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
         return RunSummary(
             run_id=run_id,
@@ -1209,9 +802,25 @@ class CorpusAtelierApplication:
             manifest=manifest,
         )
 
+    def inspect(self, case_id: str, run_id: str) -> RunSummary:
+        case_id = validate_case_id(case_id)
+        run_id = validate_run_id(run_id)
+        run_dir = (self.store.root / case_id / run_id).resolve(strict=True)
+        if self.store.root not in run_dir.parents:
+            raise ValueError("Run id escapes the task store.")
+        manifest = self.store.manifest(run_dir)
+        return RunSummary(
+            run_id=run_id,
+            status=manifest["status"],
+            run_dir=run_dir,
+            manifest=manifest,
+        )
+
+    def open_task(self, run_id: str) -> RunResult:
+        return self._result(run_id)
+
     def _result(self, run_id: str) -> RunResult:
-        active = self._active[run_id]
-        run_dir = Path(active["run_dir"]).resolve(strict=True)
+        run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
         summary = RunSummary(
             run_id=run_id,
@@ -1226,18 +835,13 @@ class CorpusAtelierApplication:
             "presentation": summary.run_dir / "design/presentation.md",
             "generation_prompt": summary.run_dir / "generation/prompt.md",
             "image": Path(summary.manifest.get("latest_image", "")),
-            "review": summary.run_dir / registered.get("review", "review/review.json"),
+            "review": (
+                summary.run_dir
+                / registered.get("review", "review/review.json")
+            ),
         }
-        # Keep every registered artifact from archived workflow versions inspectable.
         for name, relative in registered.items():
             paths[name] = summary.run_dir / relative
-        corpus = summary.manifest.get("experiment", {}).get("corpus")
-        package_path = paths.get("reference_package")
-        if corpus and package_path and package_path.is_file():
-            package = json.loads(package_path.read_text(encoding="utf-8"))
-            paths["reference_image"] = (
-                Path(corpus["snapshot_path"]) / package["reference"]["file"]
-            )
 
         artifacts = {
             name: str(path.resolve())
@@ -1245,11 +849,15 @@ class CorpusAtelierApplication:
             if str(path) and path.is_file()
         }
         messages = {
-            "awaiting_approval": "Review the saved proposal and generation prompt.",
-            "awaiting_selection": "Review the generated candidates and select one or discard all.",
-            "rejected": "Image generation was rejected; the experiment remains recorded.",
-            "completed": "Image generation completed and artifacts were saved.",
-            "failed": "The experiment failed; inspect its manifest and saved attempts.",
+            "awaiting_approval": (
+                "Review the saved design proposals and exact image requests."
+            ),
+            "awaiting_selection": (
+                "Review the generated candidates and select one or discard all."
+            ),
+            "rejected": "Image generation was cancelled; the task remains saved.",
+            "completed": "The task completed and its artifacts were saved.",
+            "failed": "The task failed; inspect its saved attempts and error record.",
         }
         return RunResult(
             run_id=run_id,

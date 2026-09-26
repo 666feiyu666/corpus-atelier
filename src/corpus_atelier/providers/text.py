@@ -34,16 +34,27 @@ class TextProvider(Protocol):
 
 
 class OpenAITextProvider:
-    def __init__(self, model: str = "gpt-5.6-luna", reasoning_effort: str = "medium", client=None):
+    def __init__(
+        self,
+        model: str = "gpt-5.6-luna",
+        reasoning_effort: str = "medium",
+        client=None,
+        api_key: str | None = None,
+    ):
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.client = client
+        self.api_key = api_key
 
     def _client(self):
         if self.client is not None:
             return self.client, False
         from openai import OpenAI
-        return OpenAI(max_retries=0, timeout=600.0), True
+        return OpenAI(
+            api_key=self.api_key,
+            max_retries=0,
+            timeout=600.0,
+        ), True
 
     def _call(self, input_value, schema_name: str) -> tuple[dict, dict]:
         client, owned = self._client()

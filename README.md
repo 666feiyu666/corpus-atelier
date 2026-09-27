@@ -22,7 +22,3 @@ The current research is organized around three questions:
 3. Based on this analysis, how can the underlying design interpretation and visual specification be reconsidered?
 
 The longer-term goal is to develop Corpus Atelier into an agentic system capable of supporting more informed, traceable, and critically reflective graphic-design processes. The present project isolates and studies several core components of that system before introducing dynamic retrieval, autonomous iteration, or coordination among specialized agents.
-
-## How to Use
-
-TBD

@@ -38,3 +38,26 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.json(path, "bad.json", {"value": float("nan")})
             self.assertFalse((path / "bad.json").exists())
+
+    def test_status_callback_failure_does_not_undo_the_saved_status(self):
+        def fail_callback(run_id, status):
+            raise RuntimeError(f"{run_id}: {status}")
+
+        with TemporaryDirectory() as directory:
+            store = ArtifactStore(directory, status_callback=fail_callback)
+            _, run_dir = store.create(
+                case_id="poster-01",
+                brief={"topic": "x"},
+                profile=get_profile("rhetoric-poster"),
+            )
+            with self.assertLogs(
+                "corpus_atelier.artifacts.store",
+                level="ERROR",
+            ):
+                manifest = store.update(run_dir, "interpreting_request")
+
+            self.assertEqual(manifest["status"], "interpreting_request")
+            saved = json.loads(
+                (run_dir / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(saved["status"], "interpreting_request")

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 import re
+from typing import Callable
 from uuid import uuid4
 
 from .records import write_json, write_text
 
 
+LOGGER = logging.getLogger(__name__)
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 RUN_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z_[a-f0-9]{8}$")
 
@@ -32,14 +35,21 @@ def validate_run_id(run_id: str) -> str:
 
 
 class ArtifactStore:
-    def __init__(self, root: Path | str = ".atelier/tasks"):
+    def __init__(
+        self,
+        root: Path | str = ".atelier/tasks",
+        *,
+        status_callback: Callable[[str, str], None] | None = None,
+    ):
         self.root = Path(root).resolve()
+        self.status_callback = status_callback
 
     def create(self, *, case_id: str, profile,
                brief: dict | None = None,
                request: str | None = None,
                title: str | None = None,
-               models: dict | None = None) -> tuple[str, Path]:
+               models: dict | None = None,
+               candidate_limit: int | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
         if (brief is None) == (request is None):
             raise ValueError(
@@ -81,6 +91,8 @@ class ArtifactStore:
         }
         if models is not None:
             manifest["models"] = models
+        if candidate_limit is not None:
+            manifest["candidate_limit"] = candidate_limit
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 
@@ -95,6 +107,11 @@ class ArtifactStore:
             **details,
         )
         write_json(run_dir / "manifest.json", manifest)
+        if self.status_callback is not None:
+            try:
+                self.status_callback(manifest["run_id"], status)
+            except Exception:
+                LOGGER.exception("Task status callback failed.")
         return manifest
 
     def register(self, run_dir: Path, **artifacts: str) -> dict:

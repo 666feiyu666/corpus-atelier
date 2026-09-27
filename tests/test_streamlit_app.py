@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
+import time
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +12,7 @@ from PIL import Image
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import write_json, write_text
 
@@ -140,6 +143,143 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertTrue(all("OpenAI" not in caption for caption in captions))
         self.assertTrue(all("自动保存" not in caption for caption in captions))
         self.assertEqual(app.button(key="open_settings").label, "设置")
+        self.assertTrue(app.button(key="new_task").disabled)
+
+    def test_submission_selects_the_created_task_even_when_execution_fails(self):
+        def fail_after_creation(application, run_id):
+            run_dir = application.store.find_run(run_id)
+            application.store.update(
+                run_dir,
+                "failed",
+                error_type="RuntimeError",
+                error="deliberate test failure",
+            )
+            raise RuntimeError("deliberate test failure")
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.dict(os.environ, {
+                    "CORPUS_ATELIER_TASKS_ROOT": directory,
+                    "CORPUS_ATELIER_PREFERENCES_PATH": str(
+                        root / "settings.json"
+                    ),
+                    "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                    "OPENAI_API_KEY": "sk-test",
+                }),
+                patch.object(
+                    CorpusAtelierApplication,
+                    "run_request",
+                    fail_after_creation,
+                ),
+            ):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.chat_input(key="new_task_prompt").set_value(
+                    "设计一张读书会公告。"
+                ).run()
+
+            self.assertFalse(app.exception)
+            run_id = app.session_state["selected_task_id"]
+            self.assertIsNotNone(run_id)
+            self.assertFalse(app.get("chat_input"))
+            self.assertFalse(app.button(key="new_task").disabled)
+            self.assertIn(
+                "任务执行失败，请查看任务记录。",
+                [error.value for error in app.error],
+            )
+            manifest_path = next(root.glob("*/*/manifest.json"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["run_id"], run_id)
+            self.assertEqual(manifest["status"], "failed")
+
+    def test_switching_tasks_does_not_interrupt_background_execution(self):
+        started = Event()
+        release = Event()
+
+        def delayed_run(application, run_id):
+            run_dir = application.store.find_run(run_id)
+            application.store.update(run_dir, "interpreting_request")
+            started.set()
+            release.wait(timeout=5)
+            application.store.update(run_dir, "awaiting_approval")
+            return application.open_task(run_id)
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            completed_id = self._completed_task(directory)
+            try:
+                with (
+                    patch.dict(os.environ, {
+                        "CORPUS_ATELIER_TASKS_ROOT": directory,
+                        "CORPUS_ATELIER_PREFERENCES_PATH": str(
+                            root / "settings.json"
+                        ),
+                        "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                        "OPENAI_API_KEY": "sk-test",
+                    }),
+                    patch.object(
+                        CorpusAtelierApplication,
+                        "run_request",
+                        delayed_run,
+                    ),
+                ):
+                    app = AppTest.from_file(
+                        str(APP), default_timeout=10
+                    ).run()
+                    app.chat_input(key="new_task_prompt").set_value(
+                        "设计一张读书会公告。"
+                    ).run()
+                    self.assertTrue(started.wait(timeout=2))
+                    app.run()
+
+                    running_id = app.session_state["selected_task_id"]
+                    self.assertNotEqual(running_id, completed_id)
+                    running_button = app.button(key=f"task_{running_id}")
+                    self.assertEqual(
+                        running_button.proto.icon,
+                        ":material/progress_activity:",
+                    )
+                    self.assertFalse(app.get("progress"))
+                    self.assertIn(
+                        "running",
+                        [status.state for status in app.get("status")],
+                    )
+
+                    app.button(
+                        key=f"task_{completed_id}"
+                    ).click().run()
+                    self.assertEqual(
+                        app.session_state["selected_task_id"],
+                        completed_id,
+                    )
+                    self.assertTrue(
+                        app.button(key=f"task_{running_id}").proto.icon
+                        == ":material/progress_activity:"
+                    )
+
+                    release.set()
+                    manifest_path = (
+                        root / "natural-language" / running_id
+                        / "manifest.json"
+                    )
+                    deadline = time.monotonic() + 2
+                    status = None
+                    while time.monotonic() < deadline:
+                        status = json.loads(
+                            manifest_path.read_text(encoding="utf-8")
+                        )["status"]
+                        if status == "awaiting_approval":
+                            break
+                        time.sleep(0.01)
+                    self.assertEqual(status, "awaiting_approval")
+                    self.assertEqual(
+                        app.session_state["selected_task_id"],
+                        completed_id,
+                    )
+            finally:
+                release.set()
+                st.cache_resource.clear()
+                gc.collect()
 
     def test_settings_switches_language_and_persists_the_preference(self):
         with TemporaryDirectory() as directory:
@@ -263,6 +403,7 @@ class StreamlitAppTests(unittest.TestCase):
                     app.button(key="showcase_back").label,
                     "返回创作",
                 )
+                self.assertFalse(app.button(key="new_task").disabled)
 
                 app.session_state["showcase_page"] = 2
                 app.run()
@@ -392,6 +533,7 @@ class StreamlitAppTests(unittest.TestCase):
                     app.run()
 
                 self.assertFalse(app.exception)
+                self.assertFalse(app.button(key="new_task").disabled)
                 self.assertEqual(len(app.get("image")), 3)
                 self.assertTrue(any(
                     subheader.value == "本次生成结果" for subheader in app.subheader

@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 import os
 import re
+from dataclasses import dataclass
 from io import BytesIO
+from math import ceil
 from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import streamlit as st
 
+from corpus_atelier import __version__
 from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.store import ArtifactStore
@@ -47,6 +50,12 @@ from corpus_atelier.state import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SHOWCASE_ROOT = Path(
+    os.environ.get(
+        "CORPUS_ATELIER_SHOWCASE_ROOT",
+        Path(__file__).resolve().parent / "assets" / "showcase",
+    )
+).resolve()
 TASKS_ROOT = Path(
     os.environ.get("CORPUS_ATELIER_TASKS_ROOT", ROOT / ".atelier" / "tasks")
 ).resolve()
@@ -72,6 +81,15 @@ STATUS_ICONS = {
     "rejected": ":material/cancel:",
     "failed": ":material/error:",
 }
+SHOWCASE_PAGE_SIZE = 4
+
+
+@dataclass(frozen=True)
+class ShowcaseItem:
+    image_path: Path
+    title: str
+    featured: bool
+    featured_order: int | None
 
 
 def _language() -> str:
@@ -106,6 +124,49 @@ def _read_json(path: Path) -> Any:
 def read_json_artifact(result: RunResult, name: str) -> Any:
     path = result.artifacts.get(name)
     return _read_json(Path(path)) if path else {}
+
+
+def _showcase_items() -> list[ShowcaseItem]:
+    manifest_path = SHOWCASE_ROOT / "manifest.json"
+    if not manifest_path.is_file():
+        return []
+    try:
+        manifest = _read_json(manifest_path)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("format_version") != 1
+        or not isinstance(manifest.get("items"), list)
+    ):
+        return []
+
+    items: list[ShowcaseItem] = []
+    for entry in manifest["items"]:
+        if not isinstance(entry, dict):
+            continue
+        relative = entry.get("image")
+        titles = entry.get("title")
+        if not isinstance(relative, str) or not isinstance(titles, dict):
+            continue
+        image_path = (SHOWCASE_ROOT / relative).resolve()
+        if SHOWCASE_ROOT not in image_path.parents or not image_path.is_file():
+            continue
+        title = titles.get(_language()) or titles.get("en")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        featured_order = entry.get("featured_order")
+        if isinstance(featured_order, bool) or not isinstance(
+            featured_order, int
+        ):
+            featured_order = None
+        items.append(ShowcaseItem(
+            image_path=image_path,
+            title=title.strip(),
+            featured=entry.get("featured") is True,
+            featured_order=featured_order,
+        ))
+    return items
 
 
 def read_text_artifact(result: RunResult, name: str) -> str:
@@ -197,6 +258,8 @@ def _initialize_state() -> None:
     st.session_state.setdefault("session_openai_api_key", None)
     st.session_state.setdefault("settings_dialog_open", False)
     st.session_state.setdefault("selected_task_id", None)
+    st.session_state.setdefault("product_view", "home")
+    st.session_state.setdefault("showcase_page", 1)
     st.session_state.setdefault("new_task_model", _default_text_model())
     st.session_state.setdefault("new_task_image_model", _default_image_model())
     st.session_state.setdefault("new_task_reasoning", "medium")
@@ -218,6 +281,13 @@ def _saved_tasks() -> list[RunSummary]:
 
 def _select_task(run_id: str | None) -> None:
     st.session_state.selected_task_id = run_id
+    st.session_state.product_view = "home"
+
+
+def _set_product_view(view: str) -> None:
+    st.session_state.product_view = view
+    if view == "gallery":
+        st.session_state.showcase_page = 1
 
 
 def _test_openai_connection(api_key: str) -> bool:
@@ -437,7 +507,7 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
                 width="stretch",
                 key="open_settings",
             )
-            st.caption("v1.0.0")
+            st.caption(f"v{__version__}")
         if open_settings:
             st.session_state.settings_dialog_open = True
     if st.session_state.settings_dialog_open:
@@ -478,6 +548,98 @@ def _render_new_task_settings() -> tuple[str, str, str, str, int]:
         key="new_task_candidates",
     )
     return model, reasoning, image_model, method, candidates
+
+
+def _render_showcase() -> None:
+    st.subheader(_t("showcase_heading"))
+    items = _showcase_items()
+    if not items:
+        st.caption(_t("showcase_preparing"))
+        return
+    featured = [item for item in items if item.featured]
+    featured.sort(key=lambda item: (
+        item.featured_order is None,
+        item.featured_order if item.featured_order is not None else 0,
+    ))
+    if len(featured) < SHOWCASE_PAGE_SIZE:
+        featured_ids = {item.image_path for item in featured}
+        featured.extend(
+            item for item in items if item.image_path not in featured_ids
+        )
+    featured = featured[:SHOWCASE_PAGE_SIZE]
+
+    columns = st.columns(
+        len(featured),
+        gap="small",
+        vertical_alignment="top",
+    )
+    for column, item in zip(columns, featured, strict=True):
+        with column.container(
+            border=True,
+            height="stretch",
+            vertical_alignment="center",
+            gap="small",
+        ):
+            st.image(
+                item.image_path,
+                caption=item.title,
+                width="stretch",
+                output_format="PNG",
+            )
+
+    if len(items) > len(featured):
+        with st.container(horizontal_alignment="right"):
+            st.button(
+                _t("view_all_designs"),
+                icon=":material/grid_view:",
+                key="showcase_view_all",
+                on_click=_set_product_view,
+                args=("gallery",),
+            )
+
+
+def _render_showcase_gallery() -> None:
+    st.button(
+        _t("back_to_creation"),
+        icon=":material/arrow_back:",
+        key="showcase_back",
+        on_click=_set_product_view,
+        args=("home",),
+    )
+    st.title(_t("gallery_title"))
+    st.caption(_t("gallery_tagline"))
+
+    items = _showcase_items()
+    if not items:
+        st.caption(_t("showcase_preparing"))
+        return
+
+    total_pages = ceil(len(items) / SHOWCASE_PAGE_SIZE)
+    gallery_slot = st.empty()
+    with st.container(horizontal_alignment="center"):
+        page = st.pagination(total_pages, key="showcase_page")
+
+    start = (page - 1) * SHOWCASE_PAGE_SIZE
+    page_items = items[start:start + SHOWCASE_PAGE_SIZE]
+    with gallery_slot.container():
+        columns = st.columns(
+            len(page_items),
+            gap="small",
+            vertical_alignment="top",
+        )
+        for column, item in zip(columns, page_items, strict=True):
+            with column.container(
+                border=True,
+                height="stretch",
+                vertical_alignment="center",
+                gap="small",
+            ):
+                st.image(
+                    item.image_path,
+                    caption=item.title,
+                    width="stretch",
+                    output_format="PNG",
+                )
 
 
 def _start_task(
@@ -538,7 +700,7 @@ def _render_new_task() -> None:
             _render_new_task_settings()
         )
 
-    st.space("medium")
+    _render_showcase()
     st.subheader(_t("start_from_request"))
     submission = st.chat_input(
         _t("request_placeholder"),
@@ -1029,7 +1191,10 @@ def main() -> None:
 
     _render_sidebar(tasks)
     if selected is None:
-        _render_new_task()
+        if st.session_state.product_view == "gallery":
+            _render_showcase_gallery()
+        else:
+            _render_new_task()
         return
 
     summary = next(task for task in tasks if task.run_id == selected)

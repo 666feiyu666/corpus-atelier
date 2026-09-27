@@ -1,0 +1,254 @@
+{
+  "format_version": 1,
+  "source_task_set": "gallery/v1.0.1",
+  "items": [
+    {
+      "task_id": "tidal-library-poster",
+      "image": "tidal-library-poster.png",
+      "title": {
+        "zh-CN": "潮汐图书馆｜展览海报",
+        "en": "Tidal Library · Exhibition Poster"
+      },
+      "deliverable": "exhibition-poster",
+      "language": "zh-CN",
+      "aspect_ratio": "2:3",
+      "source_run": "20260927T014846Z_d539a1c3",
+      "source_image_sha256": "2fdb96906fca124412596a03332387caf59191c534e456e1641e7441b7fb520e",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "midnight-botany-flyer",
+      "image": "midnight-botany-flyer.png",
+      "title": {
+        "zh-CN": "午夜植物学｜活动宣传单",
+        "en": "Midnight Botany · Event Flyer"
+      },
+      "deliverable": "event-flyer",
+      "language": "en",
+      "aspect_ratio": "148:210",
+      "source_run": "20260927T015009Z_40185bd8",
+      "source_image_sha256": "23802fc254634a14589c7abb8bba67f66ed5ddaf8d520e70bbffe5174db27dfc",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "mountains-to-sea-book-cover",
+      "image": "mountains-to-sea-book-cover.png",
+      "title": {
+        "zh-CN": "《群山向海》｜文学书籍封面",
+        "en": "Mountains to the Sea · Literary Book Cover"
+      },
+      "deliverable": "book-cover",
+      "language": "zh-CN",
+      "aspect_ratio": "5:8",
+      "source_run": "20260927T015127Z_5992f802",
+      "source_image_sha256": "6e3509f801ec68e1aded503b19b72c0efcf4ad70efb75dc98a24896e0db88dfc",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "afterlight-magazine-cover",
+      "image": "afterlight-magazine-cover.png",
+      "title": {
+        "zh-CN": "AFTERLIGHT｜杂志封面",
+        "en": "Afterlight · Magazine Cover"
+      },
+      "deliverable": "magazine-cover",
+      "language": "en",
+      "aspect_ratio": "3:4",
+      "source_run": "20260927T015247Z_b2989a38",
+      "source_image_sha256": "17f0420438a2ba213fd11282d58383dcc2c0fdfdef9864c00bf308b4ca6a456e",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "design-wechat-cover",
+      "image": "design-wechat-cover.png",
+      "featured": true,
+      "featured_order": 3,
+      "title": {
+        "zh-CN": "技术x设计x人文｜公众号封面",
+        "en": "Technology × Design × Humanities · WeChat Cover"
+      },
+      "deliverable": "wechat-article-cover",
+      "language": "zh-CN",
+      "aspect_ratio": "47:20",
+      "source_run": "20260927T014705Z_511e63c1",
+      "source_image_sha256": "1c6692bfaff5ff3e2eb7bbf7bbf944837085c4d5e248ae1a75fc68838dc8c5ea",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "silent-orbit-wallpaper",
+      "image": "silent-orbit-wallpaper.png",
+      "title": {
+        "zh-CN": "SILENT ORBIT｜桌面壁纸",
+        "en": "Silent Orbit · Desktop Wallpaper"
+      },
+      "deliverable": "desktop-wallpaper",
+      "language": "en",
+      "aspect_ratio": "16:9",
+      "source_run": "20260927T015408Z_6dd5e116",
+      "source_image_sha256": "055d2da16798f0576265314c242f847fc4296e74f16ae5dc421c6c4f4d34c238",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "new-year-light-greeting-card",
+      "image": "new-year-light-greeting-card.png",
+      "title": {
+        "zh-CN": "新岁有光｜新年贺卡",
+        "en": "New Year, New Light · Greeting Card"
+      },
+      "deliverable": "greeting-card",
+      "language": "zh-CN",
+      "aspect_ratio": "5:7",
+      "source_run": "20260927T015508Z_03ec2789",
+      "source_image_sha256": "ad244da0173c1c5960d7adb65ff96e227f3372bbff2647c31d3dd3b0a0b5b4d3",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "glass-weather-album-cover",
+      "image": "glass-weather-album-cover.png",
+      "featured": true,
+      "featured_order": 4,
+      "title": {
+        "zh-CN": "GLASS WEATHER｜音乐专辑封面",
+        "en": "Glass Weather · Album Cover"
+      },
+      "deliverable": "album-cover",
+      "language": "en",
+      "aspect_ratio": "1:1",
+      "source_run": "20260927T015622Z_6e2b556f",
+      "source_image_sha256": "c8108f8e9b67c811b02974abd1d675236318532f07548ff8639fe5b13f9dec47",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "unfinished-map-podcast-cover",
+      "image": "unfinished-map-podcast-cover.png",
+      "title": {
+        "zh-CN": "未完成的地图｜播客封面",
+        "en": "The Unfinished Map · Podcast Cover"
+      },
+      "deliverable": "podcast-cover",
+      "language": "zh-CN",
+      "aspect_ratio": "1:1",
+      "source_run": "20260927T015803Z_cccee50f",
+      "source_image_sha256": "77939b5608e51889c98db07c5deaae514caf5feac56c920277f743ecc126e72f",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "material-futures-invitation",
+      "image": "material-futures-invitation.png",
+      "title": {
+        "zh-CN": "MATERIAL FUTURES｜展览邀请函",
+        "en": "Material Futures · Opening Invitation"
+      },
+      "deliverable": "opening-invitation",
+      "language": "en",
+      "aspect_ratio": "3:2",
+      "source_run": "20260927T015925Z_d973151b",
+      "source_image_sha256": "9ca7f4f812ac588531cc4f4c4669fb2945886a45cf6b63f737bf281862cff274",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "city-night-walk-social-card",
+      "image": "city-night-walk-social-card.png",
+      "title": {
+        "zh-CN": "城市夜游计划｜社交媒体卡片",
+        "en": "City Night Walk · Social Campaign Card"
+      },
+      "deliverable": "social-campaign-card",
+      "language": "zh-CN",
+      "aspect_ratio": "4:5",
+      "source_run": "20260927T020034Z_181f24c2",
+      "source_image_sha256": "33c03ce7eb2ee0b3553df364ef3ac35355023ee2e8ccde01a172f025fde2bc10",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "lumen-product-banner",
+      "image": "lumen-product-banner.png",
+      "title": {
+        "zh-CN": "LUMEN｜产品发布横幅",
+        "en": "Lumen · Product Launch Banner"
+      },
+      "deliverable": "product-launch-banner",
+      "language": "en",
+      "aspect_ratio": "21:9",
+      "source_run": "20260927T020202Z_527194fd",
+      "source_image_sha256": "87bfde697b744764cfffac98a238d2dcde4ab2ce953f236417372d218d0a05fc",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "mist-ridge-oolong-label",
+      "image": "mist-ridge-oolong-label.png",
+      "featured": true,
+      "featured_order": 2,
+      "title": {
+        "zh-CN": "雾岭乌龙｜包装标签",
+        "en": "Mist Ridge Oolong · Packaging Label"
+      },
+      "deliverable": "packaging-label",
+      "language": "zh-CN",
+      "aspect_ratio": "3:1",
+      "source_run": "20260927T020303Z_fc2fd056",
+      "source_image_sha256": "038dc18324086075dedc083a05b81fb134a219f7ea900c6828a8cccb592be918",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "north-sea-festival-program",
+      "image": "north-sea-festival-program.png",
+      "featured": true,
+      "featured_order": 1,
+      "title": {
+        "zh-CN": "NORTH SEA｜音乐节节目册封面",
+        "en": "North Sea Chamber Festival · Program Cover"
+      },
+      "deliverable": "program-cover",
+      "language": "en",
+      "aspect_ratio": "148:210",
+      "source_run": "20260927T020403Z_492c4478",
+      "source_image_sha256": "d733b4d2e3101c649fcfc47db64b8909498e40ef7bafe29ad442f9c7b12b88a4",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "beyond-the-platform-ticket",
+      "image": "beyond-the-platform-ticket.png",
+      "title": {
+        "zh-CN": "月台之外｜活动票券",
+        "en": "Beyond the Platform · Event Ticket"
+      },
+      "deliverable": "event-ticket",
+      "language": "zh-CN",
+      "aspect_ratio": "5:2",
+      "source_run": "20260927T020516Z_2bb672ca",
+      "source_image_sha256": "05cc9f90ed1075c18ccfa512f52b610728627956b6a20b6258fa67f758e87fe4",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    },
+    {
+      "task_id": "tidal-observatory-postcard",
+      "image": "tidal-observatory-postcard.png",
+      "title": {
+        "zh-CN": "TIDAL OBSERVATORY｜艺术明信片",
+        "en": "Tidal Observatory · Art Postcard"
+      },
+      "deliverable": "art-postcard",
+      "language": "en",
+      "aspect_ratio": "3:2",
+      "source_run": "20260927T020632Z_cf4f1b96",
+      "source_image_sha256": "190c6255ad313e99baae2b4274f682757a6664c5a8e5a8c63fe005340c09a2ad",
+      "model": "gpt-image-2",
+      "quality": "medium"
+    }
+  ]
+}

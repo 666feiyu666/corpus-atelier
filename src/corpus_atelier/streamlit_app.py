@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+from dataclasses import dataclass
 from io import BytesIO
+from math import ceil
 from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import streamlit as st
 
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier import __version__
+from corpus_atelier.application import (
+    RECOVERABLE_TASK_STATUSES,
+    CorpusAtelierApplication,
+)
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.store import ArtifactStore
 from corpus_atelier.i18n import (
@@ -44,9 +51,17 @@ from corpus_atelier.state import (
     RunResult,
     RunSummary,
 )
+from corpus_atelier.task_supervisor import TaskSupervisor
 
 
+LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
+SHOWCASE_ROOT = Path(
+    os.environ.get(
+        "CORPUS_ATELIER_SHOWCASE_ROOT",
+        Path(__file__).resolve().parent / "assets" / "showcase",
+    )
+).resolve()
 TASKS_ROOT = Path(
     os.environ.get("CORPUS_ATELIER_TASKS_ROOT", ROOT / ".atelier" / "tasks")
 ).resolve()
@@ -66,12 +81,27 @@ DESIGN_METHODS = {
     "art-graphic": "method_art",
 }
 STATUS_ICONS = {
+    "created": ":material/progress_activity:",
+    "interpreting_request": ":material/progress_activity:",
+    "designing_directions": ":material/progress_activity:",
+    "implementing_designs": ":material/progress_activity:",
+    "compiling_candidates": ":material/progress_activity:",
     "awaiting_approval": ":material/approval:",
+    "generating_candidates": ":material/progress_activity:",
     "awaiting_selection": ":material/select_check_box:",
     "completed": ":material/check_circle:",
     "rejected": ":material/cancel:",
     "failed": ":material/error:",
 }
+SHOWCASE_PAGE_SIZE = 4
+
+
+@dataclass(frozen=True)
+class ShowcaseItem:
+    image_path: Path
+    title: str
+    featured: bool
+    featured_order: int | None
 
 
 def _language() -> str:
@@ -106,6 +136,49 @@ def _read_json(path: Path) -> Any:
 def read_json_artifact(result: RunResult, name: str) -> Any:
     path = result.artifacts.get(name)
     return _read_json(Path(path)) if path else {}
+
+
+def _showcase_items() -> list[ShowcaseItem]:
+    manifest_path = SHOWCASE_ROOT / "manifest.json"
+    if not manifest_path.is_file():
+        return []
+    try:
+        manifest = _read_json(manifest_path)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("format_version") != 1
+        or not isinstance(manifest.get("items"), list)
+    ):
+        return []
+
+    items: list[ShowcaseItem] = []
+    for entry in manifest["items"]:
+        if not isinstance(entry, dict):
+            continue
+        relative = entry.get("image")
+        titles = entry.get("title")
+        if not isinstance(relative, str) or not isinstance(titles, dict):
+            continue
+        image_path = (SHOWCASE_ROOT / relative).resolve()
+        if SHOWCASE_ROOT not in image_path.parents or not image_path.is_file():
+            continue
+        title = titles.get(_language()) or titles.get("en")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        featured_order = entry.get("featured_order")
+        if isinstance(featured_order, bool) or not isinstance(
+            featured_order, int
+        ):
+            featured_order = None
+        items.append(ShowcaseItem(
+            image_path=image_path,
+            title=title.strip(),
+            featured=entry.get("featured") is True,
+            featured_order=featured_order,
+        ))
+    return items
 
 
 def read_text_artifact(result: RunResult, name: str) -> str:
@@ -177,15 +250,107 @@ def _model_settings(manifest: dict[str, Any]) -> tuple[str, str, str, str]:
     return model, effort, image_model, image_quality
 
 
-def _app_for_manifest(manifest: dict[str, Any]) -> CorpusAtelierApplication:
-    model, effort, image_model, image_quality = _model_settings(manifest)
+def _app_for_manifest(
+    manifest: dict[str, Any],
+) -> CorpusAtelierApplication:
     credential = _current_credential()
+    return _application_for_manifest(
+        manifest,
+        credential.value if credential else None,
+    )
+
+
+def _application_for_manifest(
+    manifest: dict[str, Any],
+    api_key: str | None,
+) -> CorpusAtelierApplication:
+    model, effort, image_model, image_quality = _model_settings(manifest)
     return _application(
         model,
         effort,
         image_model,
         image_quality,
-        credential.value if credential else None,
+        api_key,
+    )
+
+
+@st.cache_resource
+def _task_supervisor() -> TaskSupervisor:
+    return TaskSupervisor(max_workers=2)
+
+
+def _run_in_background(
+    run_id: str,
+    manifest: dict[str, Any],
+    api_key: str,
+    decision: object | None = None,
+) -> None:
+    app: CorpusAtelierApplication | None = None
+    try:
+        app = _application_for_manifest(manifest, api_key)
+        if decision is None:
+            app.continue_task(run_id)
+        else:
+            app.resume(run_id, decision)
+    except Exception as exc:
+        LOGGER.exception("Background task %s failed.", run_id)
+        store = _task_store()
+        try:
+            run_dir = store.find_run(run_id)
+            current = store.manifest(run_dir)
+            if current.get("status") != "failed":
+                store.update(
+                    run_dir,
+                    "failed",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+        except Exception:
+            LOGGER.exception(
+                "Could not persist the failure for task %s.", run_id
+            )
+    finally:
+        if app is not None:
+            app.close()
+
+
+def _submit_saved_task(
+    summary: RunSummary,
+    api_key: str,
+    *,
+    decision: object | None = None,
+) -> bool:
+    manifest = dict(summary.manifest)
+    return _task_supervisor().submit(
+        summary.run_id,
+        lambda: _run_in_background(
+            summary.run_id,
+            manifest,
+            api_key,
+            decision,
+        ),
+    )
+
+
+def _ensure_recoverable_tasks(tasks: list[RunSummary]) -> None:
+    credential = _current_credential()
+    if credential is None:
+        return
+    supervisor = _task_supervisor()
+    for task in tasks:
+        if (
+            task.status in RECOVERABLE_TASK_STATUSES
+            and not supervisor.is_running(task.run_id)
+        ):
+            _submit_saved_task(task, credential.value)
+
+
+def _task_is_live(task: RunSummary) -> bool:
+    if _task_supervisor().is_running(task.run_id):
+        return True
+    return (
+        task.status in RECOVERABLE_TASK_STATUSES
+        and _current_credential() is not None
     )
 
 
@@ -197,6 +362,8 @@ def _initialize_state() -> None:
     st.session_state.setdefault("session_openai_api_key", None)
     st.session_state.setdefault("settings_dialog_open", False)
     st.session_state.setdefault("selected_task_id", None)
+    st.session_state.setdefault("product_view", "home")
+    st.session_state.setdefault("showcase_page", 1)
     st.session_state.setdefault("new_task_model", _default_text_model())
     st.session_state.setdefault("new_task_image_model", _default_image_model())
     st.session_state.setdefault("new_task_reasoning", "medium")
@@ -218,6 +385,13 @@ def _saved_tasks() -> list[RunSummary]:
 
 def _select_task(run_id: str | None) -> None:
     st.session_state.selected_task_id = run_id
+    st.session_state.product_view = "home"
+
+
+def _set_product_view(view: str) -> None:
+    st.session_state.product_view = view
+    if view == "gallery":
+        st.session_state.showcase_page = 1
 
 
 def _test_openai_connection(api_key: str) -> bool:
@@ -365,6 +539,71 @@ def _show_settings_dialog() -> None:
     settings_dialog()
 
 
+def _task_icon(task: RunSummary) -> str:
+    if _task_supervisor().is_running(task.run_id):
+        return ":material/progress_activity:"
+    if (
+        task.status in RECOVERABLE_TASK_STATUSES
+        and _current_credential() is None
+    ):
+        return ":material/pause_circle:"
+    return STATUS_ICONS.get(task.status, ":material/pending:")
+
+
+def _render_task_buttons(tasks: list[RunSummary]) -> None:
+    if not tasks:
+        st.caption(_t("no_saved_tasks"))
+        return
+
+    active_ids = sorted(_task_supervisor().running_ids())
+    if active_ids:
+        selectors = ",\n".join(
+            f'.st-key-task_{run_id} [data-testid="stIconMaterial"]'
+            for run_id in active_ids
+        )
+        st.html(f"""
+            <style>
+            @keyframes corpus-atelier-task-spin {{
+                to {{ transform: rotate(360deg); }}
+            }}
+            {selectors} {{
+                animation: corpus-atelier-task-spin 0.9s linear infinite;
+                display: inline-block;
+            }}
+            </style>
+        """)
+
+    with st.container(height=520, gap="small"):
+        for task in tasks:
+            title = task.manifest.get("title", task.run_id)
+            paused = (
+                task.status in RECOVERABLE_TASK_STATUSES
+                and not _task_supervisor().is_running(task.run_id)
+                and _current_credential() is None
+            )
+            if st.button(
+                title,
+                icon=_task_icon(task),
+                width="stretch",
+                key=f"task_{task.run_id}",
+                help=(
+                    _t("recovery_waiting_for_key")
+                    if paused else _status_label(task.status)
+                ),
+            ):
+                _select_task(task.run_id)
+                st.rerun(scope="app")
+
+
+@st.fragment(run_every="1s")
+def _render_live_task_buttons() -> None:
+    tasks = _saved_tasks()
+    _ensure_recoverable_tasks(tasks)
+    _render_task_buttons(tasks)
+    if not any(_task_is_live(task) for task in tasks):
+        st.rerun(scope="app")
+
+
 def _render_sidebar(tasks: list[RunSummary]) -> None:
     with st.sidebar:
         st.html("""
@@ -404,31 +643,19 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
             icon=":material/add:",
             width="stretch",
             key="new_task",
+            disabled=(
+                st.session_state.selected_task_id is None
+                and st.session_state.product_view == "home"
+            ),
         ):
             _select_task(None)
             st.rerun()
 
         st.caption(_t("tasks"))
-        if not tasks:
-            st.caption(_t("no_saved_tasks"))
+        if any(_task_is_live(task) for task in tasks):
+            _render_live_task_buttons()
         else:
-            with st.container(height=520, gap="small"):
-                for task in tasks:
-                    manifest = task.manifest
-                    title = manifest.get("title", task.run_id)
-                    icon = STATUS_ICONS.get(
-                        task.status,
-                        ":material/pending:",
-                    )
-                    if st.button(
-                        title,
-                        icon=icon,
-                        width="stretch",
-                        key=f"task_{task.run_id}",
-                        help=_status_label(task.status),
-                    ):
-                        _select_task(task.run_id)
-                        st.rerun()
+            _render_task_buttons(tasks)
 
         with st.container(key="sidebar_footer"):
             open_settings = st.button(
@@ -437,7 +664,7 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
                 width="stretch",
                 key="open_settings",
             )
-            st.caption("v1.0.0")
+            st.caption(f"v{__version__}")
         if open_settings:
             st.session_state.settings_dialog_open = True
     if st.session_state.settings_dialog_open:
@@ -480,6 +707,98 @@ def _render_new_task_settings() -> tuple[str, str, str, str, int]:
     return model, reasoning, image_model, method, candidates
 
 
+def _render_showcase() -> None:
+    st.subheader(_t("showcase_heading"))
+    items = _showcase_items()
+    if not items:
+        st.caption(_t("showcase_preparing"))
+        return
+    featured = [item for item in items if item.featured]
+    featured.sort(key=lambda item: (
+        item.featured_order is None,
+        item.featured_order if item.featured_order is not None else 0,
+    ))
+    if len(featured) < SHOWCASE_PAGE_SIZE:
+        featured_ids = {item.image_path for item in featured}
+        featured.extend(
+            item for item in items if item.image_path not in featured_ids
+        )
+    featured = featured[:SHOWCASE_PAGE_SIZE]
+
+    columns = st.columns(
+        len(featured),
+        gap="small",
+        vertical_alignment="top",
+    )
+    for column, item in zip(columns, featured, strict=True):
+        with column.container(
+            border=True,
+            height="stretch",
+            vertical_alignment="center",
+            gap="small",
+        ):
+            st.image(
+                item.image_path,
+                caption=item.title,
+                width="stretch",
+                output_format="PNG",
+            )
+
+    if len(items) > len(featured):
+        with st.container(horizontal_alignment="right"):
+            st.button(
+                _t("view_all_designs"),
+                icon=":material/grid_view:",
+                key="showcase_view_all",
+                on_click=_set_product_view,
+                args=("gallery",),
+            )
+
+
+def _render_showcase_gallery() -> None:
+    st.button(
+        _t("back_to_creation"),
+        icon=":material/arrow_back:",
+        key="showcase_back",
+        on_click=_set_product_view,
+        args=("home",),
+    )
+    st.title(_t("gallery_title"))
+    st.caption(_t("gallery_tagline"))
+
+    items = _showcase_items()
+    if not items:
+        st.caption(_t("showcase_preparing"))
+        return
+
+    total_pages = ceil(len(items) / SHOWCASE_PAGE_SIZE)
+    gallery_slot = st.empty()
+    with st.container(horizontal_alignment="center"):
+        page = st.pagination(total_pages, key="showcase_page")
+
+    start = (page - 1) * SHOWCASE_PAGE_SIZE
+    page_items = items[start:start + SHOWCASE_PAGE_SIZE]
+    with gallery_slot.container():
+        columns = st.columns(
+            len(page_items),
+            gap="small",
+            vertical_alignment="top",
+        )
+        for column, item in zip(columns, page_items, strict=True):
+            with column.container(
+                border=True,
+                height="stretch",
+                vertical_alignment="center",
+                gap="small",
+            ):
+                st.image(
+                    item.image_path,
+                    caption=item.title,
+                    width="stretch",
+                    output_format="PNG",
+                )
+
+
 def _start_task(
     request: str,
     *,
@@ -502,32 +821,23 @@ def _start_task(
         image_model,
         api_key=credential.value,
     )
+    summary: RunSummary | None = None
     try:
-        with st.chat_message("user"):
-            st.markdown(request)
-        with st.chat_message("assistant"):
-            with st.status(
-                _t("planning"),
-                type="compact",
-                expanded=True,
-            ) as status:
-                result = app.start_request(NaturalLanguageDesignJob(
-                    case_id=PRODUCT_CASE_ID,
-                    profile=profile,
-                    request=request,
-                    candidate_count=candidate_count,
-                ))
-                status.update(
-                    label=_t("proposals_ready"),
-                    state="complete",
-                    expanded=False,
-                )
-        _select_task(result.run_id)
-        st.rerun()
-    except Exception as exc:
+        result = app.create_request(NaturalLanguageDesignJob(
+            case_id=PRODUCT_CASE_ID,
+            profile=profile,
+            request=request,
+            candidate_count=candidate_count,
+        ))
+        summary = app.inspect_task(result.run_id)
+    except Exception:
         st.error(_t("create_failed"), icon=":material/error:")
     finally:
         app.close()
+    if summary is not None:
+        _submit_saved_task(summary, credential.value)
+        _select_task(summary.run_id)
+        st.rerun()
 
 
 def _render_new_task() -> None:
@@ -538,7 +848,7 @@ def _render_new_task() -> None:
             _render_new_task_settings()
         )
 
-    st.space("medium")
+    _render_showcase()
     st.subheader(_t("start_from_request"))
     submission = st.chat_input(
         _t("request_placeholder"),
@@ -699,19 +1009,25 @@ def _render_generation_preview(result: RunResult) -> None:
                     st.code(prompt, language=None, wrap_lines=True)
 
 
-def _resume(summary: RunSummary, decision: object, message: str) -> None:
-    app = _app_for_manifest(summary.manifest)
-    try:
-        with st.spinner(message):
-            app.resume(summary.run_id, decision)
-        st.rerun()
-    except Exception as exc:
-        st.error(_t("operation_failed"), icon=":material/error:")
-    finally:
-        app.close()
+def _resume(summary: RunSummary, decision: object) -> None:
+    credential = _current_credential()
+    if credential is None:
+        st.error(_t("api_key_missing"), icon=":material/key_off:")
+        return
+    _submit_saved_task(
+        summary,
+        credential.value,
+        decision=decision,
+    )
+    st.rerun()
 
 
-def _render_approval(summary: RunSummary, result: RunResult) -> None:
+def _render_approval(
+    summary: RunSummary,
+    result: RunResult,
+    *,
+    active: bool,
+) -> None:
     st.info(
         _t("approval_notice"),
         icon=":material/approval:",
@@ -723,22 +1039,22 @@ def _render_approval(summary: RunSummary, result: RunResult) -> None:
             _t("cancel_generation"),
             icon=":material/close:",
             key=f"cancel_{result.run_id}",
+            disabled=active,
         ):
             _resume(
                 summary,
                 HumanDecision(False, reviewer="streamlit-user"),
-                _t("canceling"),
             )
         if st.button(
             _t("confirm_generate", count=ready_count),
             type="primary",
             icon=":material/image:",
             key=f"approve_{result.run_id}",
+            disabled=active,
         ):
             _resume(
                 summary,
                 HumanDecision(True, reviewer="streamlit-user"),
-                _t("generating_images"),
             )
 
 
@@ -747,6 +1063,7 @@ def _render_image_gallery(
     result: RunResult,
     *,
     selectable: bool,
+    active: bool = False,
 ) -> None:
     candidates = _all_candidates(result)
     selected_id = _selected_candidate_id(result)
@@ -813,11 +1130,11 @@ def _render_image_gallery(
                     icon=":material/check:",
                     key=f"select_{result.run_id}_{candidate_id}",
                     width="stretch",
+                    disabled=active,
                 ):
                     _resume(
                         summary,
                         CandidateSelection(candidate_id, reviewer="streamlit-user"),
-                        _t("saving_selection"),
                     )
 
         if len(successful) > 1:
@@ -853,16 +1170,12 @@ def _render_image_gallery(
         _t("discard_all"),
         icon=":material/delete_sweep:",
         key=f"discard_{result.run_id}",
+        disabled=active,
     ):
         _resume(
             summary,
             CandidateSelection(None, reviewer="streamlit-user"),
-            _t("saving_selection"),
         )
-
-
-def _render_selection(summary: RunSummary, result: RunResult) -> None:
-    _render_image_gallery(summary, result, selectable=True)
 
 
 def _render_design_details(result: RunResult) -> None:
@@ -936,6 +1249,10 @@ def _status_state(status: str) -> str:
 
 def _render_task(summary: RunSummary) -> None:
     manifest = summary.manifest
+    active = _task_supervisor().is_running(summary.run_id)
+    recovery_paused = (
+        summary.status in RECOVERABLE_TASK_STATUSES and not active
+    )
     try:
         app = _app_for_manifest(manifest)
         try:
@@ -949,12 +1266,20 @@ def _render_task(summary: RunSummary) -> None:
     with st.container(horizontal=True, vertical_alignment="center"):
         st.title(manifest.get("title", summary.run_id))
         st.badge(
-            _status_label(result.status),
-            icon=STATUS_ICONS.get(result.status, ":material/pending:"),
+            (
+                _t("recovery_paused")
+                if recovery_paused else _status_label(result.status)
+            ),
+            icon=(
+                ":material/pause_circle:"
+                if recovery_paused else _task_icon(summary)
+            ),
             color=(
                 "green" if result.status == "completed"
                 else "red" if result.status == "failed"
-                else "orange" if result.status.startswith("awaiting_")
+                else "orange" if (
+                    result.status.startswith("awaiting_") or recovery_paused
+                )
                 else "gray"
             ),
         )
@@ -981,20 +1306,33 @@ def _render_task(summary: RunSummary) -> None:
             st.markdown(Path(request_path).read_text(encoding="utf-8"))
 
     with st.chat_message("assistant"):
-        with st.status(
-            _status_label(result.status),
-            state=_status_state(result.status),
-            type="compact",
-            expanded=False,
-        ):
-            st.caption(_result_message(result))
+        if recovery_paused:
+            st.warning(
+                _t("recovery_waiting_for_key"),
+                icon=":material/pause_circle:",
+            )
+        else:
+            task_status = st.status(
+                _status_label(result.status),
+                state=(
+                    "running" if active else _status_state(result.status)
+                ),
+                type="compact",
+                expanded=False,
+            )
+            task_status.caption(_result_message(result))
 
         _render_brief(result)
 
         if result.status == "awaiting_approval":
-            _render_approval(summary, result)
+            _render_approval(summary, result, active=active)
         elif result.status == "awaiting_selection":
-            _render_selection(summary, result)
+            _render_image_gallery(
+                summary,
+                result,
+                selectable=True,
+                active=active,
+            )
         elif result.status == "completed":
             if _selected_candidate_id(result) is None:
                 st.info(_t("completed_without_selection"))
@@ -1006,6 +1344,22 @@ def _render_task(summary: RunSummary) -> None:
 
         if result.status != "awaiting_approval":
             _render_design_details(result)
+
+
+@st.fragment(run_every="1s")
+def _render_live_task(run_id: str) -> None:
+    tasks = _saved_tasks()
+    summary = next(
+        (task for task in tasks if task.run_id == run_id),
+        None,
+    )
+    if summary is None:
+        st.rerun(scope="app")
+        return
+    _ensure_recoverable_tasks([summary])
+    _render_task(summary)
+    if not _task_is_live(summary):
+        st.rerun(scope="app")
 
 
 def main() -> None:
@@ -1021,6 +1375,7 @@ def main() -> None:
     if settings_notice:
         st.toast(settings_notice, icon=":material/check_circle:")
     tasks = _saved_tasks()
+    _ensure_recoverable_tasks(tasks)
     known_ids = {task.run_id for task in tasks}
     selected = st.session_state.selected_task_id
     if selected is not None and selected not in known_ids:
@@ -1029,11 +1384,17 @@ def main() -> None:
 
     _render_sidebar(tasks)
     if selected is None:
-        _render_new_task()
+        if st.session_state.product_view == "gallery":
+            _render_showcase_gallery()
+        else:
+            _render_new_task()
         return
 
     summary = next(task for task in tasks if task.run_id == selected)
-    _render_task(summary)
+    if _task_is_live(summary):
+        _render_live_task(summary.run_id)
+    else:
+        _render_task(summary)
 
 
 main()

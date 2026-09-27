@@ -28,6 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--profile", required=True, choices=PROFILES)
     run.add_argument("--brief", required=True, type=Path)
     run.add_argument("--candidates", type=int, choices=(1, 2, 3), default=1)
+    run.add_argument("--runs-root", type=Path, default=Path("experiments/runs"))
 
     request = commands.add_parser(
         "request", help="Run one experiment from an informal design request.",
@@ -42,6 +43,9 @@ def _parser() -> argparse.ArgumentParser:
     source.add_argument("--text")
     source.add_argument("--request-file", type=Path)
     request.add_argument("--candidates", type=int, choices=(1, 2, 3), default=1)
+    request.add_argument(
+        "--runs-root", type=Path, default=Path("experiments/runs"),
+    )
 
     inspect = commands.add_parser("inspect", help="Inspect a saved experiment.")
     inspect.add_argument("run_id")

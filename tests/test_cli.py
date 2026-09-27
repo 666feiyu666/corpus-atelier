@@ -41,12 +41,13 @@ class CliTests(unittest.TestCase):
             patch(
                 "corpus_atelier.cli.CorpusAtelierApplication",
                 return_value=application,
-            ),
+            ) as application_factory,
             patch("sys.stdout", stream),
         ):
             code = main([
                 "request",
                 "--text", "请做一张适合办公室工位的电脑壁纸。",
+                "--runs-root", "gallery/v1.0.1/runs",
             ])
 
         self.assertEqual(code, 0)
@@ -55,3 +56,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(job.profile, "rhetoric-graphic")
         self.assertEqual(job.request, "请做一张适合办公室工位的电脑壁纸。")
         self.assertEqual(job.candidate_count, 1)
+        application_factory.assert_called_once_with(
+            runs_root=Path("gallery/v1.0.1/runs"),
+        )

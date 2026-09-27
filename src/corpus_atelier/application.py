@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
+from typing import Callable
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command, interrupt
@@ -35,6 +36,16 @@ from .state import (
     RunResult,
     RunSummary,
 )
+
+
+RECOVERABLE_TASK_STATUSES = frozenset({
+    "created",
+    "interpreting_request",
+    "designing_directions",
+    "implementing_designs",
+    "compiling_candidates",
+    "generating_candidates",
+})
 
 
 class _Runtime:
@@ -610,8 +621,12 @@ class CorpusAtelierApplication:
         checkpoint_path: Path | str | None = None,
         text_provider=None,
         image_provider=None,
+        status_callback: Callable[[str, str], None] | None = None,
     ):
-        self.store = ArtifactStore(runs_root)
+        self.store = ArtifactStore(
+            runs_root,
+            status_callback=status_callback,
+        )
         self.store.root.mkdir(parents=True, exist_ok=True)
         self.runtime = _Runtime(
             self.store,
@@ -716,6 +731,7 @@ class CorpusAtelierApplication:
             profile=profile,
             title=job.case_id,
             models=self._models(),
+            candidate_limit=candidate_count,
         )
         state = {
             "case_id": job.case_id,
@@ -728,7 +744,7 @@ class CorpusAtelierApplication:
         }
         return self._invoke_start(run_id, run_dir, state)
 
-    def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:
+    def create_request(self, job: NaturalLanguageDesignJob) -> RunResult:
         self._validate_request(job.request)
         candidate_count = self._validate_candidate_count(job.candidate_count)
         profile = get_profile(job.profile)
@@ -738,17 +754,86 @@ class CorpusAtelierApplication:
             profile=profile,
             title=self._task_title(job.request),
             models=self._models(),
+            candidate_limit=candidate_count,
         )
+        return self._result(run_id)
+
+    def run_request(self, run_id: str) -> RunResult:
+        run_dir = self.store.find_run(run_id)
+        manifest = self.store.manifest(run_dir)
+        if manifest["status"] != "created":
+            raise ValueError("This natural-language task has already started.")
+        try:
+            if manifest.get("input_mode") != "natural_language":
+                raise ValueError("Only natural-language tasks can use run_request().")
+            self._assert_model_binding(run_dir)
+            profile_record = json.loads(
+                (run_dir / "profile.json").read_text(encoding="utf-8")
+            )
+            profile = get_profile(profile_record["name"])
+            candidate_count = self._validate_candidate_count(
+                manifest.get("candidate_limit")
+            )
+            request_relative = manifest.get("artifacts", {}).get("user_request")
+            if not isinstance(request_relative, str):
+                raise ValueError("Natural-language task request is missing.")
+            request_path = (run_dir / request_relative).resolve(strict=True)
+            if run_dir not in request_path.parents:
+                raise ValueError(
+                    "Natural-language task request escapes its task directory."
+                )
+            request = self._validate_request(
+                request_path.read_text(encoding="utf-8")
+            )
+        except Exception as exc:
+            self.store.update(
+                run_dir,
+                "failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise
         state = {
-            "case_id": job.case_id,
+            "case_id": manifest["case_id"],
             "run_id": run_id,
             "run_dir": str(run_dir),
             "profile": profile.name,
-            "user_request": job.request,
+            "user_request": request,
             "candidate_limit": candidate_count,
             "status": "created",
         }
         return self._invoke_start(run_id, run_dir, state)
+
+    def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:
+        created = self.create_request(job)
+        return self.run_request(created.run_id)
+
+    def continue_task(self, run_id: str) -> RunResult:
+        """Continue a saved task from its latest durable graph checkpoint."""
+        run_dir = self.store.find_run(run_id)
+        manifest = self.store.manifest(run_dir)
+        if manifest["status"] == "created":
+            return self.run_request(run_id)
+        if manifest["status"] not in RECOVERABLE_TASK_STATUSES:
+            raise ValueError("This task is not in a recoverable running state.")
+        self._assert_model_binding(run_dir)
+        config = {"configurable": {"thread_id": run_id}}
+        try:
+            checkpoint = self.graph.get_state(config)
+            if not checkpoint.values or not checkpoint.next:
+                raise ValueError(
+                    "This task does not have a resumable workflow checkpoint."
+                )
+            self.graph.invoke(None, config=config)
+        except Exception as exc:
+            self.store.update(
+                run_dir,
+                "failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise
+        return self._result(run_id)
 
     def _assert_model_binding(self, run_dir: Path) -> None:
         expected = self.store.manifest(run_dir).get("models")

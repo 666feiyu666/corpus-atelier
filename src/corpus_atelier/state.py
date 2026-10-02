@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 RunStatus = Literal[
+    "discussing", "discussing_request",
     "created", "interpreting_request", "designing",
     "designing_directions", "implementing_designs", "compiling_candidates",
     "awaiting_approval", "rejected", "generating_candidates",

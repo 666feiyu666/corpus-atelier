@@ -21,6 +21,7 @@ from corpus_atelier.application import (
     CorpusAtelierApplication,
 )
 from corpus_atelier.artifacts.hashing import digest_file
+from corpus_atelier.conversation import load_conversation
 from corpus_atelier.artifacts.store import ArtifactStore
 from corpus_atelier.i18n import (
     DEFAULT_LANGUAGE,
@@ -346,6 +347,17 @@ def _ensure_recoverable_tasks(tasks: list[RunSummary]) -> None:
 
 
 def _task_is_live(task: RunSummary) -> bool:
+    if task.manifest.get("is_conversation"):
+        conversation = load_conversation(task.run_dir)
+        if conversation["rounds"]:
+            child_id = conversation["rounds"][-1]["run_id"]
+            child_root = _task_store().find_run(child_id)
+            child_manifest = _task_store().manifest(child_root)
+            if _task_supervisor().is_running(child_id) or (
+                child_manifest["status"] in RECOVERABLE_TASK_STATUSES
+                and _current_credential() is not None
+            ):
+                return True
     if _task_supervisor().is_running(task.run_id):
         return True
     return (
@@ -551,6 +563,7 @@ def _task_icon(task: RunSummary) -> str:
 
 
 def _render_task_buttons(tasks: list[RunSummary]) -> None:
+    tasks = [task for task in tasks if not task.manifest.get("conversation_parent_id")]
     if not tasks:
         st.caption(_t("no_saved_tasks"))
         return
@@ -807,6 +820,8 @@ def _start_task(
     image_model: str,
     profile: str,
     candidate_count: int,
+    discuss_first: bool = False,
+    attachments: list[tuple[str, bytes]] | None = None,
 ) -> None:
     if not request.strip():
         st.error(_t("request_required"))
@@ -823,12 +838,16 @@ def _start_task(
     )
     summary: RunSummary | None = None
     try:
-        result = app.create_request(NaturalLanguageDesignJob(
+        job = NaturalLanguageDesignJob(
             case_id=PRODUCT_CASE_ID,
             profile=profile,
             request=request,
             candidate_count=candidate_count,
-        ))
+        )
+        if discuss_first or attachments:
+            result = app.create_conversation(job, attachments=attachments)
+        else:
+            result = app.create_request(job)
         summary = app.inspect_task(result.run_id)
     except Exception:
         st.error(_t("create_failed"), icon=":material/error:")
@@ -850,19 +869,26 @@ def _render_new_task() -> None:
 
     _render_showcase()
     st.subheader(_t("start_from_request"))
+    discuss_first = st.toggle(_t("discuss_first"), key="discuss_first")
+    st.caption(_t("reference_upload_hint"))
     submission = st.chat_input(
         _t("request_placeholder"),
         key="new_task_prompt",
         submit_mode="disable",
+        accept_file="multiple",
+        file_type=["png", "jpg", "jpeg", "webp"],
+        max_upload_size=10,
     )
     if submission:
         _start_task(
-            submission,
+            _submission_text(submission) or _t("reference_only_request"),
             model=model,
             reasoning_effort=reasoning,
             image_model=image_model,
             profile=profile,
             candidate_count=candidate_count,
+            discuss_first=discuss_first,
+            attachments=_submission_attachments(submission),
         )
 
 
@@ -1247,11 +1273,168 @@ def _status_state(status: str) -> str:
     return "running"
 
 
-def _render_task(summary: RunSummary) -> None:
+def _submission_text(submission) -> str:
+    return submission if isinstance(submission, str) else submission.text
+
+
+def _submission_attachments(submission) -> list[tuple[str, bytes]]:
+    if isinstance(submission, str):
+        return []
+    return [(file.name, file.getvalue()) for file in submission.files]
+
+
+def _conversation_error(exc: Exception) -> None:
+    st.error(_t("conversation_action_failed"))
+    with st.expander(_t("conversation_error_details")):
+        st.text(str(exc))
+
+
+def _render_legacy_followup(summary: RunSummary, *, active: bool) -> None:
+    if active or summary.status in RECOVERABLE_TASK_STATUSES:
+        return
+    st.caption(_t("followup_hint"))
+    submission = st.chat_input(
+        _t("followup_placeholder"), key=f"followup_{summary.run_id}",
+        accept_file="multiple", file_type=["png", "jpg", "jpeg", "webp"],
+        max_upload_size=10, submit_mode="disable",
+        disabled=_current_credential() is None,
+    )
+    if not submission:
+        return
+    try:
+        with _app_for_manifest(summary.manifest) as app:
+            profile_path = summary.run_dir / "profile.json"
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))["name"]
+            result = app.create_conversation(NaturalLanguageDesignJob(
+                case_id=summary.manifest["case_id"], profile=profile,
+                request=_submission_text(submission) or _t("reference_only_request"),
+                candidate_count=summary.manifest.get("candidate_limit", 1),
+            ), attachments=_submission_attachments(submission), previous_run_id=summary.run_id)
+            parent = app.inspect_task(result.run_id)
+        _submit_saved_task(parent, _current_credential().value)
+        _select_task(parent.run_id)
+        st.rerun(scope="app")
+    except Exception as exc:
+        _conversation_error(exc)
+
+
+def _render_conversation_task(summary: RunSummary) -> None:
+    try:
+        with _app_for_manifest(summary.manifest) as app:
+            conversation = app.conversation(summary.run_id)
+            rounds = [app.inspect_task(record["run_id"]) for record in conversation["rounds"]]
+    except Exception as exc:
+        _conversation_error(exc)
+        return
+    st.title(summary.manifest.get("title", summary.run_id))
+    st.caption(_t("conversation_hint"))
+    for message in conversation["messages"]:
+        with st.chat_message(message["role"]):
+            if message["text"]:
+                st.markdown(message["text"])
+            for attachment in message.get("attachments", []):
+                path = (summary.run_dir / attachment["path"]).resolve()
+                if summary.run_dir in path.parents and path.is_file():
+                    st.image(path, caption=attachment["name"], width=300)
+            if message.get("feedback_run_id"):
+                number = next((i for i, record in enumerate(conversation["rounds"], 1)
+                               if record["run_id"] == message["feedback_run_id"]), None)
+                st.caption(_t("feedback_round", number=number, candidate=message.get("candidate_id") or _t("all_candidates")))
+    busy = _task_is_live(summary) or any(_task_supervisor().is_running(r.run_id) for r in rounds)
+    if conversation.get("pending"):
+        if summary.status == "failed":
+            st.error(_t("conversation_failed"))
+            if st.button(_t("retry_conversation"), key=f"retry_chat_{summary.run_id}",
+                         disabled=busy or _current_credential() is None):
+                try:
+                    with _app_for_manifest(summary.manifest) as app:
+                        app.retry_conversation(summary.run_id)
+                        saved = app.inspect_task(summary.run_id)
+                    _submit_saved_task(saved, _current_credential().value)
+                    st.rerun(scope="app")
+                except Exception as exc:
+                    _conversation_error(exc)
+        else:
+            st.info(_t("status.discussing_request") if busy else _t("recovery_waiting_for_key"))
+    if conversation["effective_request"]:
+        with st.expander(_t("current_design_requirements")):
+            st.markdown(conversation["effective_request"])
+            for note in conversation["reference_notes"]:
+                st.markdown(f"- {note}")
+    for question in conversation["open_questions"]:
+        st.info(question)
+
+    selected_round = None
+    candidate_id = None
+    if rounds:
+        selected_id = st.selectbox(
+            _t("design_versions"), options=[r.run_id for r in rounds],
+            index=len(rounds) - 1, key=f"round_{summary.run_id}_{len(rounds)}",
+            format_func=lambda value: _t("design_round", number=next(i for i, r in enumerate(rounds, 1) if r.run_id == value)),
+        )
+        selected_round = next(r for r in rounds if r.run_id == selected_id)
+        record = next(r for r in conversation["rounds"] if r["run_id"] == selected_id)
+        stale = selected_id != rounds[-1].run_id or record["revision"] != conversation["revision"]
+        if stale:
+            st.caption(_t("historical_round_hint"))
+        _render_task(selected_round, embedded=True, actions_allowed=not stale and not busy and not conversation.get("pending"))
+        index_relative = selected_round.manifest.get("artifacts", {}).get("candidate_index")
+        if index_relative:
+            candidates = json.loads((selected_round.run_dir / index_relative).read_text(encoding="utf-8"))
+            ids = [candidate["candidate_id"] for candidate in candidates]
+            if ids:
+                candidate_id = st.selectbox(
+                    _t("feedback_candidate"), options=[None, *ids],
+                    format_func=lambda value: value or _t("all_candidates"),
+                    key=f"feedback_candidate_{selected_id}",
+                )
+
+    latest_revision = conversation["rounds"][-1]["revision"] if rounds else -1
+    if st.button(
+        _t("prepare_design_round"), type="primary", key=f"prepare_round_{summary.run_id}",
+        disabled=busy or bool(conversation.get("pending")) or not conversation["effective_request"]
+        or bool(conversation["open_questions"]) or latest_revision == conversation["revision"]
+        or _current_credential() is None,
+    ):
+        try:
+            with _app_for_manifest(summary.manifest) as app:
+                result = app.create_conversation_round(summary.run_id)
+                child = app.inspect_task(result.run_id)
+            _submit_saved_task(child, _current_credential().value)
+            st.rerun(scope="app")
+        except Exception as exc:
+            _conversation_error(exc)
+    submission = st.chat_input(
+        _t("followup_placeholder"), key=f"conversation_input_{summary.run_id}",
+        accept_file="multiple", file_type=["png", "jpg", "jpeg", "webp"],
+        max_upload_size=10, submit_mode="disable",
+        disabled=busy or bool(conversation.get("pending")) or _current_credential() is None,
+    )
+    if submission:
+        try:
+            with _app_for_manifest(summary.manifest) as app:
+                app.queue_conversation_message(
+                    summary.run_id, _submission_text(submission),
+                    attachments=_submission_attachments(submission),
+                    feedback_run_id=selected_round.run_id if selected_round else None,
+                    candidate_id=candidate_id,
+                )
+                saved = app.inspect_task(summary.run_id)
+            _submit_saved_task(saved, _current_credential().value)
+            st.rerun(scope="app")
+        except Exception as exc:
+            _conversation_error(exc)
+
+
+def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed: bool = True) -> None:
+    if summary.manifest.get("is_conversation"):
+        _render_conversation_task(summary)
+        return
     manifest = summary.manifest
-    active = _task_supervisor().is_running(summary.run_id)
+    running = _task_supervisor().is_running(summary.run_id)
+    active = running or not actions_allowed
     recovery_paused = (
-        summary.status in RECOVERABLE_TASK_STATUSES and not active
+        summary.status in RECOVERABLE_TASK_STATUSES and not running
     )
     try:
         app = _app_for_manifest(manifest)
@@ -1264,7 +1447,8 @@ def _render_task(summary: RunSummary) -> None:
         return
 
     with st.container(horizontal=True, vertical_alignment="center"):
-        st.title(manifest.get("title", summary.run_id))
+        if not embedded:
+            st.title(manifest.get("title", summary.run_id))
         st.badge(
             (
                 _t("recovery_paused")
@@ -1301,7 +1485,7 @@ def _render_task(summary: RunSummary) -> None:
     )
 
     request_path = result.artifacts.get("user_request")
-    if request_path:
+    if request_path and not embedded:
         with st.chat_message("user"):
             st.markdown(Path(request_path).read_text(encoding="utf-8"))
 
@@ -1315,7 +1499,7 @@ def _render_task(summary: RunSummary) -> None:
             task_status = st.status(
                 _status_label(result.status),
                 state=(
-                    "running" if active else _status_state(result.status)
+                    "running" if running else _status_state(result.status)
                 ),
                 type="compact",
                 expanded=False,
@@ -1345,6 +1529,9 @@ def _render_task(summary: RunSummary) -> None:
         if result.status != "awaiting_approval":
             _render_design_details(result)
 
+    if not embedded:
+        _render_legacy_followup(summary, active=active)
+
 
 @st.fragment(run_every="1s")
 def _render_live_task(run_id: str) -> None:
@@ -1356,7 +1543,7 @@ def _render_live_task(run_id: str) -> None:
     if summary is None:
         st.rerun(scope="app")
         return
-    _ensure_recoverable_tasks([summary])
+    _ensure_recoverable_tasks(tasks)
     _render_task(summary)
     if not _task_is_live(summary):
         st.rerun(scope="app")

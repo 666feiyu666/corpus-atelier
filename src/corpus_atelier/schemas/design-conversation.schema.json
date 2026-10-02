@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reply": {"type": "string", "minLength": 1},
+    "effective_request": {"type": "string", "minLength": 1},
+    "reference_notes": {"type": "array", "items": {"type": "string"}},
+    "open_questions": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["reply", "effective_request", "reference_notes", "open_questions"]
+}

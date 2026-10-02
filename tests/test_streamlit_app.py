@@ -15,6 +15,8 @@ from streamlit.testing.v1 import AppTest
 from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import write_json, write_text
+from corpus_atelier.providers import OpenAITextProvider
+from tests.fakes import FakeTextProvider
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +24,87 @@ APP = ROOT / "src/corpus_atelier/streamlit_app.py"
 
 
 class StreamlitAppTests(unittest.TestCase):
+    @staticmethod
+    def _offline_propose(provider, prompt, *, schema_name, reference_paths=None):
+        if schema_name == "design-conversation.schema.json":
+            context = json.loads(prompt[prompt.index('{"effective_request"'):])
+            return {
+                "reply": "已理解你的需求，可以准备下一轮设计。",
+                "effective_request": context["effective_request"] + context["conversation"][-1]["text"],
+                "reference_notes": [], "open_questions": [],
+            }, {"status": "completed"}
+        return FakeTextProvider().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
+
+    @staticmethod
+    def _wait_for_status(app, root, run_id, status):
+        path = root / "natural-language" / run_id / "manifest.json"
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if path.exists() and json.loads(path.read_text(encoding="utf-8"))["status"] == status:
+                app.run()
+                return
+            time.sleep(0.05)
+        raise AssertionError(f"Task {run_id} did not reach {status}")
+
+    def test_discussion_rounds_and_saved_history_in_the_interface(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                "OPENAI_API_KEY": "sk-test",
+            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.toggle(key="discuss_first").set_value(True).run()
+                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
+                parent_id = app.session_state["selected_task_id"]
+                self._wait_for_status(app, root, parent_id, "discussing")
+                self.assertFalse(app.exception)
+                conversation_path = root / "natural-language" / parent_id / "conversation.json"
+                self.assertEqual(json.loads(conversation_path.read_text(encoding="utf-8"))["rounds"], [])
+                self.assertFalse(app.button(key=f"prepare_round_{parent_id}").disabled)
+                app.button(key=f"prepare_round_{parent_id}").click().run()
+                conversation = json.loads(conversation_path.read_text(encoding="utf-8"))
+                child_id = conversation["rounds"][-1]["run_id"]
+                self._wait_for_status(app, root, child_id, "awaiting_approval")
+                self.assertFalse(app.exception)
+                self.assertFalse(app.button(key=f"approve_{child_id}").disabled)
+                self.assertNotIn(f"task_{child_id}", [button.key for button in app.button])
+                app.chat_input(key=f"conversation_input_{parent_id}").set_value("标题更突出一点。").run()
+                self._wait_for_status(app, root, parent_id, "discussing")
+                self.assertTrue(app.button(key=f"approve_{child_id}").disabled)
+                self.assertFalse(app.button(key=f"prepare_round_{parent_id}").disabled)
+                reopened = AppTest.from_file(str(APP), default_timeout=10).run()
+                reopened.button(key=f"task_{parent_id}").click().run()
+                self.assertFalse(reopened.exception)
+                self.assertIn("标题更突出一点。", [item.value for item in reopened.markdown])
+                self.assertIsNotNone(reopened.chat_input(key=f"conversation_input_{parent_id}"))
+
+    def test_existing_design_can_be_promoted_to_a_conversation_in_the_interface(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                "OPENAI_API_KEY": "sk-test",
+            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
+                original_id = app.session_state["selected_task_id"]
+                self._wait_for_status(app, root, original_id, "awaiting_approval")
+                app.chat_input(key=f"followup_{original_id}").set_value("改成绿色。").run()
+                parent_id = app.session_state["selected_task_id"]
+                self.assertNotEqual(parent_id, original_id)
+                self._wait_for_status(app, root, parent_id, "discussing")
+                self.assertFalse(app.exception)
+                with CorpusAtelierApplication(runs_root=root) as application:
+                    conversation = application.conversation(parent_id)
+                self.assertEqual(conversation["rounds"][0]["run_id"], original_id)
+                self.assertIn("改成绿色。", conversation["effective_request"])
+                self.assertTrue(app.button(key=f"approve_{original_id}").disabled)
+
     @staticmethod
     def _completed_task(root: str) -> str:
         run_id = "20260926T150000Z_abcdef12"
@@ -131,7 +214,7 @@ class StreamlitAppTests(unittest.TestCase):
         captions = [caption.value for caption in app.caption]
         self.assertIn("描述你想完成的平面设计。", captions)
         self.assertNotIn("设计示例正在准备中。", captions)
-        self.assertIn("v1.0.1", captions)
+        self.assertIn("v1.1.0", captions)
         self.assertEqual(len(app.get("image")), 4)
         subheaders = [subheader.value for subheader in app.subheader]
         self.assertIn("看看它能做什么", subheaders)
@@ -177,11 +260,19 @@ class StreamlitAppTests(unittest.TestCase):
                 app.chat_input(key="new_task_prompt").set_value(
                     "设计一张读书会公告。"
                 ).run()
+                run_id = app.session_state["selected_task_id"]
+                self._wait_for_status(app, root, run_id, "failed")
+                deadline = time.monotonic() + 5
+                while f"followup_{run_id}" not in [item.key for item in app.chat_input]:
+                    if time.monotonic() >= deadline:
+                        self.fail("The failed task did not expose its follow-up input")
+                    time.sleep(0.05)
+                    app.run()
 
             self.assertFalse(app.exception)
             run_id = app.session_state["selected_task_id"]
             self.assertIsNotNone(run_id)
-            self.assertFalse(app.get("chat_input"))
+            self.assertIsNotNone(app.chat_input(key=f"followup_{run_id}"))
             self.assertFalse(app.button(key="new_task").disabled)
             self.assertIn(
                 "任务执行失败，请查看任务记录。",

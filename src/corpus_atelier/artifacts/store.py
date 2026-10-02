@@ -10,7 +10,7 @@ import re
 from typing import Callable
 from uuid import uuid4
 
-from .records import write_json, write_text
+from .records import read_json, write_json, write_text
 
 
 LOGGER = logging.getLogger(__name__)
@@ -49,8 +49,15 @@ class ArtifactStore:
                request: str | None = None,
                title: str | None = None,
                models: dict | None = None,
-               candidate_limit: int | None = None) -> tuple[str, Path]:
+               candidate_limit: int | None = None,
+               is_conversation: bool = False,
+               conversation_parent_id: str | None = None,
+               conversation_revision: int | None = None,
+               conversation_state: dict | None = None,
+               conversation_snapshot: dict | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
+        if is_conversation and not isinstance(conversation_state, dict):
+            raise ValueError("A conversation requires an initial conversation state.")
         if (brief is None) == (request is None):
             raise ValueError(
                 "A run requires exactly one structured brief or natural-language request."
@@ -93,11 +100,21 @@ class ArtifactStore:
             manifest["models"] = models
         if candidate_limit is not None:
             manifest["candidate_limit"] = candidate_limit
+        if is_conversation:
+            manifest.update(is_conversation=True, status="discussing")
+            write_json(run_dir / "conversation.json", conversation_state)
+            manifest["artifacts"]["conversation"] = "conversation.json"
+        if conversation_parent_id is not None:
+            manifest.update(conversation_parent_id=conversation_parent_id,
+                            conversation_revision=conversation_revision)
+        if conversation_snapshot is not None:
+            write_json(run_dir / "conversation/snapshot.json", conversation_snapshot)
+            manifest["artifacts"]["conversation_snapshot"] = "conversation/snapshot.json"
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 
     def manifest(self, run_dir: Path) -> dict:
-        return json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        return read_json(run_dir / "manifest.json")
 
     def update(self, run_dir: Path, status: str, **details) -> dict:
         manifest = self.manifest(run_dir)
@@ -145,11 +162,15 @@ class ArtifactStore:
             if not path.is_file():
                 continue
             try:
-                manifest = json.loads(path.read_text(encoding="utf-8"))
+                manifest = read_json(path)
                 validate_case_id(manifest["case_id"])
                 validate_run_id(manifest["run_id"])
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 continue
+            if manifest.get("is_conversation") and manifest["status"] != "failed":
+                conversation_path = path.parent / "conversation.json"
+                if conversation_path.is_file() and read_json(conversation_path).get("pending"):
+                    manifest["status"] = "discussing_request"
             tasks.append((path.parent.resolve(), manifest))
         tasks.sort(
             key=lambda item: item[1].get(

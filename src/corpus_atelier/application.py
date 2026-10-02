@@ -15,6 +15,7 @@ from langgraph.types import Command, interrupt
 from .artifacts.hashing import digest_file, digest_json
 from .artifacts.records import write_json
 from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
+from .conversation import ConversationMixin, serialized_conversation
 from .design_direction import (
     load_historical_cards,
     synthesize_design_directions,
@@ -39,6 +40,7 @@ from .state import (
 
 
 RECOVERABLE_TASK_STATUSES = frozenset({
+    "discussing_request",
     "created",
     "interpreting_request",
     "designing_directions",
@@ -613,7 +615,7 @@ class _Runtime:
         }
 
 
-class CorpusAtelierApplication:
+class CorpusAtelierApplication(ConversationMixin):
     def __init__(
         self,
         *,
@@ -744,7 +746,12 @@ class CorpusAtelierApplication:
         }
         return self._invoke_start(run_id, run_dir, state)
 
-    def create_request(self, job: NaturalLanguageDesignJob) -> RunResult:
+    def create_request(self, job: NaturalLanguageDesignJob, *,
+                       is_conversation: bool = False,
+                       conversation_parent_id: str | None = None,
+                       conversation_revision: int | None = None,
+                       conversation_state: dict | None = None,
+                       conversation_snapshot: dict | None = None) -> RunResult:
         self._validate_request(job.request)
         candidate_count = self._validate_candidate_count(job.candidate_count)
         profile = get_profile(job.profile)
@@ -755,6 +762,11 @@ class CorpusAtelierApplication:
             title=self._task_title(job.request),
             models=self._models(),
             candidate_limit=candidate_count,
+            is_conversation=is_conversation,
+            conversation_parent_id=conversation_parent_id,
+            conversation_revision=conversation_revision,
+            conversation_state=conversation_state,
+            conversation_snapshot=conversation_snapshot,
         )
         return self._result(run_id)
 
@@ -812,6 +824,8 @@ class CorpusAtelierApplication:
         """Continue a saved task from its latest durable graph checkpoint."""
         run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
+        if manifest.get("is_conversation"):
+            return self.run_conversation(run_id)
         if manifest["status"] == "created":
             return self.run_request(run_id)
         if manifest["status"] not in RECOVERABLE_TASK_STATUSES:
@@ -842,11 +856,19 @@ class CorpusAtelierApplication:
                 "Configured models changed after this task was created."
             )
 
+    @serialized_conversation
     def resume(self, run_id: str, decision: object) -> RunResult:
         run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
         if manifest["status"] not in {"awaiting_approval", "awaiting_selection"}:
             raise ValueError("This task is not waiting for a user decision.")
+        parent_id = manifest.get("conversation_parent_id")
+        if parent_id and manifest["status"] == "awaiting_approval":
+            conversation = self.conversation(parent_id)
+            latest = conversation["rounds"][-1]
+            if (conversation.get("pending") or latest["run_id"] != run_id
+                    or latest["revision"] != conversation["revision"]):
+                raise ValueError("This design round is superseded by newer conversation requirements.")
         self._assert_model_binding(run_dir)
         if not hasattr(decision, "to_dict"):
             raise TypeError("A resumable decision must provide to_dict().")

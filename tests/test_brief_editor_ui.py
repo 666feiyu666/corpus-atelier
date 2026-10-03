@@ -15,6 +15,19 @@ from tests import test_streamlit_app as fixtures
 
 
 class BriefEditorUITests(unittest.TestCase):
+    def test_saved_reply_with_failed_status_has_a_working_retry_control(self):
+        with self.workspace(seed=False) as (root, app, run_id, path):
+            messages = json.loads(path.read_text(encoding="utf-8"))["messages"]
+            manifest_path = path.parent / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.update(status="failed", error="Reply saved before status update failed")
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            app.run()
+            app.button(key=f"retry_chat_{run_id}").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(json.loads(manifest_path.read_text(encoding="utf-8"))["status"], "discussing")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["messages"], messages)
+
     @contextmanager
     def workspace(self, *, seed=True):
         with TemporaryDirectory() as directory:

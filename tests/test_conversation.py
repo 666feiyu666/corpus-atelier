@@ -91,7 +91,7 @@ class ConversationTests(unittest.TestCase):
             for key in ("user_requirements", "suggested_user_requirements",
                         "superseded_user_requirements", "requirement_history", "design_brief",
                         "brief_revision", "requirement_interpretations"):
-                del legacy[key]
+                legacy.pop(key, None)
             legacy["format_version"] = 1
             path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
             before = path.read_bytes()
@@ -101,7 +101,7 @@ class ConversationTests(unittest.TestCase):
             self.continue_chat(app, root.run_id)
             current = app.conversation(root.run_id)
             app.save_conversation_brief(root.run_id, {**current["design_brief"], "user_requirements": ["Include a cat."]}, expected_revision=current["revision"])
-            self.assertEqual(app.conversation(root.run_id)["format_version"], 7)
+            self.assertEqual(app.conversation(root.run_id)["format_version"], 8)
 
     def test_concurrent_messages_do_not_overwrite_each_other(self):
         with TemporaryDirectory() as directory, self.app(directory) as app:

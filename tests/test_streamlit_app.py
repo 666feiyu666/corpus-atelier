@@ -12,6 +12,7 @@ from PIL import Image
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from corpus_atelier import __version__
 from corpus_atelier.application import CorpusAtelierApplication
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import write_json, write_text
@@ -265,7 +266,7 @@ class StreamlitAppTests(unittest.TestCase):
         captions = [caption.value for caption in app.caption]
         self.assertIn("描述你想完成的平面设计。", captions)
         self.assertNotIn("设计示例正在准备中。", captions)
-        self.assertIn("v1.2.7", captions)
+        self.assertIn(f"v{__version__}", captions)
         self.assertEqual(len(app.get("image")), 4)
         subheaders = [subheader.value for subheader in app.subheader]
         self.assertIn("看看它能做什么", subheaders)

@@ -40,6 +40,8 @@ class ConversationTextProvider(FakeTextProvider):
             raise RuntimeError("Temporary conversation failure")
         context = json.loads(prompt[prompt.index('{"effective_request"'):])
         value = {
+            "content_language": context["content_language"] or "en",
+            "language_change_quote": None,
             "reply": "已更新设计需求。",
             "effective_request": context["effective_request"] + "\n" + context["conversation"][-1]["text"],
             "reference_notes": ["Reference 1: adopt the blue palette; reject its composition."],
@@ -346,7 +348,7 @@ class ConversationTests(unittest.TestCase):
             app.queue_conversation_message(root.run_id, "Use blue.")
             app.continue_task(root.run_id)
             self.confirm_requirements(app, root.run_id, ["Include a cat."])
-            self.assertEqual(app.conversation(root.run_id)["format_version"], 3)
+            self.assertEqual(app.conversation(root.run_id)["format_version"], 4)
 
     def test_concurrent_messages_do_not_overwrite_each_other(self):
         with TemporaryDirectory() as directory, self.app(directory) as app:

@@ -4,23 +4,7 @@
   "properties": {
     "content_language": {"type": "string", "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"},
     "language_change_quote": {"type": ["string", "null"], "minLength": 1},
-    "reply": {"type": "string", "minLength": 1},
-    "open_questions": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "suggestions": {
-      "type": "array", "maxItems": 12,
-      "items": {
-        "type": "object", "additionalProperties": false,
-        "properties": {
-          "field": {"type": "string", "enum": ["deliverable", "topic", "article_title", "article_summary", "purpose", "audience", "use_context", "setting", "art_direction", "exact_copy", "constraints", "preferences", "user_requirements"]},
-          "text": {"type": "string", "minLength": 1, "maxLength": 1200},
-          "aspect": {"type": "string", "minLength": 1},
-          "direction": {"type": "string", "enum": ["describe", "exclude", "discussion"]},
-          "source_quote": {"type": "string"},
-          "source_images": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}
-        },
-        "required": ["field", "text", "aspect", "direction", "source_quote", "source_images"]
-      }
-    }
+    "reply": {"type": "string", "minLength": 1}
   },
-  "required": ["content_language", "language_change_quote", "reply", "open_questions", "suggestions"]
+  "required": ["content_language", "language_change_quote", "reply"]
 }

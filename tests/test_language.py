@@ -10,7 +10,7 @@ from corpus_atelier.artifacts.records import read_json, write_json
 from corpus_atelier.language import validate_content_language
 from corpus_atelier.state import HumanDecision, NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider
-from tests.test_conversation import ConversationTextProvider
+from tests.test_conversation import ConversationTextProvider, seed_brief
 
 
 COPY = ["欢度国庆", "1949-2026", "Happy National Day"]
@@ -38,16 +38,6 @@ class LanguageTextProvider(ConversationTextProvider):
         chinese = language.startswith("zh")
         if schema_name == "design-assistant.schema.json":
             value.update(content_language=self.change_language or language, language_change_quote=self.change_quote)
-        elif schema_name == "design-conversation.schema.json":
-            value.update(
-                content_language=self.change_language or language,
-                language_change_quote=self.change_quote,
-                reply="已整理国庆花篮海报需求。" if chinese else "The National Day basket poster brief is ready.",
-                effective_request="设计一张国庆花篮海报，右下角留白。" if chinese else "Design a National Day basket poster with a clear lower-right area.",
-                reference_notes=["Reference 1：采用藤编材质，保留拱形提手。" if chinese else "Reference 1: adopt the woven material and arched handle."],
-            )
-            for item in value["requirement_interpretations"]:
-                item["interpretation"] = "使用深棕色藤编花篮，保留拱形提手。" if chinese else "Use dark-brown weaving and retain the arched handle."
         elif schema_name.endswith("-brief.schema.json"):
             value.update(
                 content_language=language, exact_copy=list(COPY),
@@ -95,13 +85,13 @@ class LanguageTests(unittest.TestCase):
                 with self.app(directory, text) as app:
                     parent = app.create_conversation(self.job(request))
                     app.continue_task(parent.run_id)
-                    app.update_user_requirements(parent.run_id, [REQUIREMENT], expected_revision=app.conversation(parent.run_id)["revision"])
-                    app.continue_task(parent.run_id)
+                    seed_brief(app, parent.run_id)
+                    initial = app.conversation(parent.run_id)
+                    app.save_conversation_brief(parent.run_id, {**initial["design_brief"], "user_requirements": [REQUIREMENT]}, expected_revision=initial["revision"])
                     saved = app.conversation(parent.run_id)
                     self.assertEqual(saved["content_language"], language)
                     self.assertEqual(saved["design_brief"]["content_language"], language)
                     self.assertEqual(saved["design_brief"]["exact_copy"], COPY)
-                    self.assertEqual(saved["requirement_interpretations"][0]["source"], REQUIREMENT)
                     child = app.create_conversation_round(parent.run_id)
                     result = app.run_request(child.run_id)
                     self.assertEqual(result.status, "awaiting_approval")
@@ -141,157 +131,24 @@ class LanguageTests(unittest.TestCase):
                 self.assertEqual(reopened.conversation(parent.run_id)["content_language"], "en")
                 self.assertEqual(prompt_language(text.chat_calls[-1]["prompt"])["content_language"], "en")
 
-    def test_language_change_requires_a_quoted_explicit_discussion_request(self):
+    def test_reply_language_changes_do_not_change_the_brief_language(self):
         with TemporaryDirectory() as directory:
             text = LanguageTextProvider()
             with self.app(directory, text) as app:
-                parent = app.create_conversation(self.job())
-                app.continue_task(parent.run_id)
-                app.queue_conversation_message(parent.run_id, "请改用英语说明设计需求。")
+                task = app.create_conversation(self.job(content_language="zh-CN"))
+                app.continue_task(task.run_id)
+                seed_brief(app, task.run_id)
+                original = app.conversation(task.run_id)["design_brief"]
                 text.change_language = "en"
-                with self.assertRaisesRegex(ValueError, "without an explicit"):
-                    app.continue_task(parent.run_id)
-                self.assertEqual(app.conversation(parent.run_id)["content_language"], "zh-CN")
-                text.change_quote = "改用英语说明设计需求"
-                app.retry_conversation(parent.run_id)
-                app.continue_task(parent.run_id)
-                proposal = app.conversation(parent.run_id)
-                self.assertEqual(proposal["content_language"], "zh-CN")
-                app.save_conversation_brief(parent.run_id, proposal["brief_proposals"][-1]["brief"], expected_revision=proposal["revision"])
-                self.assertEqual(app.conversation(parent.run_id)["content_language"], "en")
-                self.assertEqual(app.conversation(parent.run_id)["design_brief"]["exact_copy"], COPY)
+                text.change_quote = "Please reply in English."
+                app.queue_conversation_message(task.run_id, text.change_quote)
+                app.continue_task(task.run_id)
+                saved = app.conversation(task.run_id)
+                self.assertEqual(saved["discussion_language"], "en")
+                self.assertEqual(saved["content_language"], "zh-CN")
+                self.assertEqual(saved["design_brief"], original)
 
-    def test_legacy_english_brief_refresh_uses_original_request_and_preserves_rounds(self):
-        with TemporaryDirectory() as directory:
-            text = LanguageTextProvider()
-            with self.app(directory, text) as app:
-                parent = app.create_conversation(self.job())
-                app.continue_task(parent.run_id)
-                child = app.create_conversation_round(parent.run_id)
-                app.run_request(child.run_id)
-                previous_snapshot = (child.run_dir / "conversation/snapshot.json").read_bytes()
-                previous_brief = (child.run_dir / "brief.json").read_bytes()
-                path = parent.run_dir / "conversation.json"
-                legacy = read_json(path)
-                for key in ("content_language", "language_source_request"):
-                    legacy.pop(key)
-                legacy["design_brief"].pop("content_language")
-                legacy["design_brief"]["purpose"] = "Convey a festive National Day greeting."
-                legacy["format_version"] = 3
-                write_json(path, legacy)
-                loaded = app.conversation(parent.run_id)
-                self.assertEqual(read_json(path), legacy)
-                self.assertIsNone(loaded["content_language"])
-                with self.assertRaisesRegex(ValueError, "establish this task"):
-                    app.create_conversation_round(parent.run_id)
-                app.refresh_conversation_brief(parent.run_id, expected_revision=legacy["revision"])
-                app.continue_task(parent.run_id)
-                proposal = app.conversation(parent.run_id)
-                self.assertIsNone(proposal["content_language"])
-                app.save_conversation_brief(parent.run_id, proposal["brief_proposals"][-1]["brief"], expected_revision=proposal["revision"])
-                updated = app.conversation(parent.run_id)
-                self.assertEqual(updated["content_language"], "zh-CN")
-                self.assertEqual(updated["design_brief"]["purpose"], "以写实广式插花传递国庆祝福。")
-                self.assertEqual(updated["rounds"], legacy["rounds"])
-                self.assertEqual((child.run_dir / "conversation/snapshot.json").read_bytes(), previous_snapshot)
-                self.assertEqual((child.run_dir / "brief.json").read_bytes(), previous_brief)
-                self.assertIn(self.job().request, text.chat_calls[-1]["prompt"])
-
-    def test_refresh_can_change_language_and_failed_brief_reuses_the_completed_answer(self):
-        with TemporaryDirectory() as directory:
-            text = LanguageTextProvider()
-            with self.app(directory, text) as app:
-                parent = app.create_conversation(self.job())
-                app.continue_task(parent.run_id)
-                old = app.conversation(parent.run_id)
-                text.fail_brief = True
-                app.refresh_conversation_brief(parent.run_id, expected_revision=old["revision"], content_language="en")
-                with self.assertRaisesRegex(RuntimeError, "brief synthesis"):
-                    app.continue_task(parent.run_id)
-                self.assertEqual(app.conversation(parent.run_id)["design_brief"], old["design_brief"])
-                count = len(text.chat_calls)
-                text.fail_brief = False
-                app.retry_conversation(parent.run_id)
-                app.continue_task(parent.run_id)
-                self.assertEqual(len(text.chat_calls), count)
-                proposal = app.conversation(parent.run_id)
-                self.assertEqual(proposal["content_language"], "zh-CN")
-                app.save_conversation_brief(parent.run_id, proposal["brief_proposals"][-1]["brief"], expected_revision=proposal["revision"])
-                self.assertEqual(app.conversation(parent.run_id)["content_language"], "en")
-                self.assertEqual(app.inspect_task(parent.run_id).manifest["content_language"], "en")
-
-    def test_invalid_language_tags_and_stale_refreshes_are_rejected(self):
-        for value in ("", "English", "zh_CN", "auto", 123):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                validate_content_language(value)
-        self.assertEqual(validate_content_language("ja"), "ja")
+    def test_invalid_initial_language_tag_is_rejected(self):
         with TemporaryDirectory() as directory, self.app(directory, LanguageTextProvider()) as app:
-            parent = app.create_conversation(self.job())
-            app.continue_task(parent.run_id)
-            with self.assertRaisesRegex(ValueError, "Reload"):
-                app.refresh_conversation_brief(parent.run_id, expected_revision=0)
-
-    def test_requirement_sources_do_not_authorize_a_language_change(self):
-        with TemporaryDirectory() as directory:
-            text = LanguageTextProvider()
-            with self.app(directory, text) as app:
-                parent = app.create_conversation(self.job())
-                app.continue_task(parent.run_id)
-                app.update_user_requirements(parent.run_id, [REQUIREMENT], expected_revision=app.conversation(parent.run_id)["revision"])
-                text.change_language = "en"
-                text.change_quote = REQUIREMENT
-                with self.assertRaisesRegex(ValueError, "without an explicit"):
-                    app.continue_task(parent.run_id)
-                self.assertEqual(app.conversation(parent.run_id)["content_language"], "zh-CN")
-                self.assertEqual(app.conversation(parent.run_id)["user_requirements"], [REQUIREMENT])
-
-    def test_old_cached_english_answer_is_rebuilt_instead_of_reused_after_restart(self):
-        with TemporaryDirectory() as directory:
-            text = LanguageTextProvider()
-            text.fail_brief = True
-            with self.app(directory, text) as app:
-                parent = app.create_conversation(self.job())
-                with self.assertRaises(RuntimeError):
-                    app.continue_task(parent.run_id)
-                pending = app.conversation(parent.run_id)["pending"]
-                path = parent.run_dir / "conversation-turns" / pending["message_id"] / "answer.json"
-                legacy = read_json(path)
-                legacy.pop("content_language")
-                legacy.pop("language_change_quote")
-                legacy["effective_request"] = "Design a National Day flower basket poster."
-                write_json(path, legacy)
-                previous_calls = len(text.chat_calls)
-            text.fail_brief = False
-            with self.app(directory, text) as reopened:
-                reopened.retry_conversation(parent.run_id)
-                reopened.continue_task(parent.run_id)
-                self.assertEqual(len(text.chat_calls), previous_calls + 1)
-                self.assertEqual(reopened.conversation(parent.run_id)["content_language"], "zh-CN")
-                self.assertEqual(reopened.conversation(parent.run_id)["design_brief"]["content_language"], "zh-CN")
-
-    def test_refresh_rejects_translated_source_copy_and_retains_previous_brief(self):
-        class AlteredCopyProvider(LanguageTextProvider):
-            alter_copy = False
-
-            def propose(self, prompt, *, schema_name, reference_paths=None):
-                value, response = super().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
-                if self.alter_copy and schema_name.endswith("-brief.schema.json"):
-                    value["exact_copy"] = ["Translated National Day title"]
-                return value, response
-
-        with TemporaryDirectory() as directory:
-            text = AlteredCopyProvider()
-            with self.app(directory, text) as app:
-                parent = app.create_conversation(self.job())
-                app.continue_task(parent.run_id)
-                previous = app.conversation(parent.run_id)
-                app.refresh_conversation_brief(parent.run_id, expected_revision=previous["revision"], content_language="en")
-                text.alter_copy = True
-                with self.assertRaisesRegex(ValueError, "exact_copy source data"):
-                    app.continue_task(parent.run_id)
-                self.assertEqual(app.conversation(parent.run_id)["design_brief"], previous["design_brief"])
-                self.assertEqual(app.conversation(parent.run_id)["content_language"], "zh-CN")
-
-
-if __name__ == "__main__":
-    unittest.main()
+            with self.assertRaises(ValueError):
+                app.create_conversation(self.job(content_language="English"))

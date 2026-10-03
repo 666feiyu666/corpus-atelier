@@ -4,6 +4,10 @@ from copy import deepcopy
 
 import streamlit as st
 
+from .design_support.validation import load_schema
+from .i18n import LANGUAGE_LABELS
+from .registry import get_profile
+
 
 TEXT_FIELDS = ("deliverable", "topic", "article_title", "article_summary", "purpose",
                "audience", "use_context", "setting", "art_direction")
@@ -22,16 +26,22 @@ def load_draft(run_id: str, conversation: dict, brief: dict | None = None,
                source_revision: int | None = None) -> None:
     brief = deepcopy(brief if brief is not None else conversation["design_brief"])
     if brief is None:
-        return
-    # A reviewed language proposal keeps its language; source copy is never translated here.
-    brief.setdefault("content_language", conversation["content_language"])
+        schema = load_schema(get_profile(conversation["profile"]).brief_schema)
+        brief = {field: [] if schema["properties"][field]["type"] == "array" else ""
+                 for field in schema["required"] if field != "canvas"}
+        if "canvas" in schema["required"]:
+            brief["canvas"] = {"aspect_ratio": {"width": 16, "height": 9}}
+    language = (brief.get("content_language") or conversation["content_language"]
+                or conversation.get("discussion_language"))
+    if language:
+        brief["content_language"] = language
     brief.setdefault("user_requirements", [])
     draft = {"brief": brief, "questions": list(conversation["open_questions"]),
              "saved_brief": deepcopy(conversation["design_brief"]),
              "base_revision": conversation["revision"],
              "source_revision": source_revision if source_revision is not None else conversation["brief_revision"]}
-    draft["source_suggestion_ids"] = []
     st.session_state[draft_key(run_id)] = draft
+    st.session_state[field_key(run_id, "content_language")] = language
     for field in TEXT_FIELDS:
         if field in brief:
             st.session_state[field_key(run_id, field)] = brief[field]
@@ -47,6 +57,11 @@ def load_draft(run_id: str, conversation: dict, brief: dict | None = None,
 def draft_values(run_id: str) -> tuple[dict, list[str]]:
     draft = st.session_state[draft_key(run_id)]
     brief = deepcopy(draft["brief"])
+    language = st.session_state.get(field_key(run_id, "content_language"))
+    if language:
+        brief["content_language"] = language
+    else:
+        brief.pop("content_language", None)
     for field in TEXT_FIELDS:
         if field in brief:
             brief[field] = st.session_state.get(field_key(run_id, field), brief[field])
@@ -70,38 +85,13 @@ def draft_dirty(run_id: str) -> bool:
     return brief != draft["saved_brief"] or questions != draft["questions"]
 
 
-def add_suggestion(run_id: str, conversation: dict, suggestion: dict, *,
-                   mode: str = "append", replacement_index: int | None = None) -> None:
-    """Add source-linked text to the current draft without saving or dropping other edits."""
-    if draft_key(run_id) not in st.session_state:
-        load_draft(run_id, conversation)
-    draft = st.session_state[draft_key(run_id)]
-    if draft["base_revision"] != conversation["revision"]:
-        raise ValueError("Review the current brief before adding a suggestion to a stale draft.")
-    brief, _ = draft_values(run_id)
-    field, sentence = suggestion["field"], suggestion["text"]
-    if field not in brief:
-        raise ValueError("The suggestion targets a field absent from this draft.")
-    if field in LIST_FIELDS:
-        entries = list(brief[field])
-        if mode == "append":
-            if sentence not in entries:
-                entries.append(sentence)
-        elif mode == "replace" and isinstance(replacement_index, int) and 0 <= replacement_index < len(entries):
-            entries[replacement_index] = sentence
-        else:
-            raise ValueError("Choose the existing entry to replace.")
-        st.session_state[field_key(run_id, field)] = "\n".join(entries)
-    elif field in TEXT_FIELDS and mode == "replace":
-        st.session_state[field_key(run_id, field)] = sentence
-    else:
-        raise ValueError("Choose replacement for a text field.")
-    if suggestion["id"] not in draft["source_suggestion_ids"]:
-        draft["source_suggestion_ids"].append(suggestion["id"])
-
-
 def render_fields(run_id: str, *, disabled: bool, translate) -> None:
     brief = st.session_state[draft_key(run_id)]["brief"]
+    language = st.session_state.get(field_key(run_id, "content_language"))
+    languages = list(dict.fromkeys([None, "zh-CN", "en"] + ([language] if language else [])))
+    st.selectbox(translate("task_content_language"), languages, index=languages.index(language),
+                 format_func=lambda value: translate("choose_content_language") if value is None else LANGUAGE_LABELS.get(value, value),
+                 key=field_key(run_id, "content_language"), disabled=disabled, persist_state="session")
     columns = st.columns(2)
     # Defaults also travel to the browser: a new chat turn may remount this subtree.
     for index, field in enumerate(field for field in TEXT_FIELDS if field in brief):

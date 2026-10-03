@@ -22,10 +22,19 @@ class ConversationTextProvider(FakeTextProvider):
         self.fail = False
         self.questions = []
         self.suggested_requirements = None
+        self.fail_brief = False
+        self.interpretations = {}
+        self.bad_sources = False
+        self.override_brief = None
 
     def propose(self, prompt, *, schema_name, reference_paths=None):
         if schema_name != "design-conversation.schema.json":
-            return super().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
+            if schema_name.endswith("-brief.schema.json") and self.fail_brief:
+                raise RuntimeError("Temporary brief synthesis failure")
+            value, response = super().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
+            if schema_name.endswith("-brief.schema.json") and self.override_brief is not None:
+                value = json.loads(json.dumps(self.override_brief))
+            return value, response
         self.chat_calls.append({"prompt": prompt, "references": list(reference_paths or [])})
         if self.fail:
             raise RuntimeError("Temporary conversation failure")
@@ -35,9 +44,15 @@ class ConversationTextProvider(FakeTextProvider):
             "effective_request": context["effective_request"] + "\n" + context["conversation"][-1]["text"],
             "reference_notes": ["Reference 1: adopt the blue palette; reject its composition."],
             "open_questions": self.questions,
-            "suggested_user_requirements": (self.suggested_requirements
+            "suggested_user_requirements": (context["user_requirements"] if context["pending_kind"] == "requirements_update"
+                                             else self.suggested_requirements
                                              if self.suggested_requirements is not None
                                              else context["suggested_user_requirements"]),
+            "requirement_interpretations": [
+                {"source": "Changed source" if self.bad_sources else source,
+                 "interpretation": self.interpretations.get(source, source)}
+                for source in context["user_requirements"]
+            ],
         }
         return value, {"status": "completed", "provider": "fake-conversation"}
 
@@ -56,6 +71,136 @@ class ConversationTests(unittest.TestCase):
     def job(self, request="Design a poster with exact title 读书会."):
         return NaturalLanguageDesignJob("conversation-test", "rhetoric-graphic", request, 1)
 
+    def confirm_requirements(self, app, run_id, requirements):
+        revision = app.conversation(run_id)["revision"]
+        result = app.update_user_requirements(run_id, requirements, expected_revision=revision)
+        if result.status == "discussing_request":
+            app.continue_task(run_id)
+
+    def test_live_brief_exists_before_design_for_every_profile(self):
+        for profile in ("rhetoric-graphic", "art-graphic", "rhetoric-poster", "art-article-cover"):
+            with self.subTest(profile=profile), TemporaryDirectory() as directory, self.app(directory) as app:
+                root = app.create_conversation(NaturalLanguageDesignJob("live-brief", profile, "Design a reading club graphic."))
+                app.continue_task(root.run_id)
+                saved = app.conversation(root.run_id)
+                self.assertEqual(saved["rounds"], [])
+                self.assertEqual(saved["brief_revision"], saved["revision"])
+                brief = json.loads(Path(app.open_task(root.run_id).artifacts["brief"]).read_text(encoding="utf-8"))
+                self.assertEqual(brief, saved["design_brief"])
+                self.assertIn("constraints", brief)
+
+    def test_specific_basket_style_retains_source_and_freezes_the_reviewed_brief(self):
+        source = "花篮必须是浅色藤编的椭圆篮，带一个拱形提手。"
+        interpretation = "篮体为椭圆形，使用浅色藤编材质，上方设置单个拱形提手。"
+        with TemporaryDirectory() as directory:
+            text = ConversationTextProvider()
+            image = FakeImageProvider()
+            with self.app(directory, text, image) as app:
+                root = app.create_conversation(self.job("Design a flower basket event poster."))
+                app.continue_task(root.run_id)
+                initial = app.conversation(root.run_id)["design_brief"]
+                text.override_brief = {
+                    **initial, "purpose": "Promote the flower basket workshop.",
+                    "exact_copy": ["花篮工坊 · 秋日限定"],
+                    "constraints": [interpretation],
+                    "canvas": {"aspect_ratio": {"width": 4, "height": 5}},
+                }
+                text.interpretations[source] = interpretation
+                self.confirm_requirements(app, root.run_id, [source])
+                reviewed = app.conversation(root.run_id)
+                self.assertEqual(reviewed["user_requirements"], [source])
+                self.assertEqual(reviewed["requirement_interpretations"], [{"source": source, "interpretation": interpretation}])
+                self.assertIn(interpretation, reviewed["design_brief"]["constraints"])
+                calls_before_round = len(text.design_calls)
+                text.override_brief = {**initial, "exact_copy": ["Unexpected new title"]}
+                child = app.create_conversation_round(root.run_id)
+                self.assertEqual(json.loads((child.run_dir / "brief.json").read_text(encoding="utf-8")), reviewed["design_brief"])
+                app.continue_task(child.run_id)
+                self.assertEqual([call["schema_name"] for call in text.design_calls[calls_before_round:]],
+                                 ["design-direction-plan.schema.json", "graphic-design-proposal.schema.json", "image-spec.schema.json"])
+                prompt = (child.run_dir / "candidates/c01/generation/prompt.md").read_text(encoding="utf-8")
+                self.assertIn(source, prompt)
+                self.assertIn("花篮工坊 · 秋日限定", prompt)
+                self.assertNotIn("Unexpected new title", prompt)
+                self.assertEqual(image.calls, 0)
+                app.resume(child.run_id, HumanDecision(True))
+                self.assertEqual(image.calls, 1)
+                frozen_bytes = (child.run_dir / "brief.json").read_bytes()
+                app.queue_conversation_message(root.run_id, "Use a different background.")
+                app.continue_task(root.run_id)
+                self.assertEqual((child.run_dir / "brief.json").read_bytes(), frozen_bytes)
+
+    def test_failed_brief_update_retries_without_repeating_reply_or_losing_previous_brief(self):
+        with TemporaryDirectory() as directory:
+            text = ConversationTextProvider()
+            with self.app(directory, text) as app:
+                root = app.create_conversation(self.job())
+                app.continue_task(root.run_id)
+                previous = app.conversation(root.run_id)["design_brief"]
+                app.queue_conversation_message(root.run_id, "Use a warmer palette.")
+                text.fail_brief = True
+                with self.assertRaisesRegex(RuntimeError, "brief synthesis"):
+                    app.continue_task(root.run_id)
+                self.assertEqual(app.conversation(root.run_id)["design_brief"], previous)
+                self.assertEqual(app.open_task(root.run_id).status, "failed")
+                calls_after_failure = len(text.chat_calls)
+            text.fail_brief = False
+            with self.app(directory, text) as app:
+                app.retry_conversation(root.run_id)
+                app.continue_task(root.run_id)
+                saved = app.conversation(root.run_id)
+                self.assertEqual(len(text.chat_calls), calls_after_failure)
+                self.assertEqual(len(saved["messages"]), 4)
+                self.assertEqual(saved["brief_revision"], saved["revision"])
+                self.assertIsNone(saved["pending"])
+
+    def test_requirement_interpretation_cannot_rewrite_the_original_source(self):
+        with TemporaryDirectory() as directory:
+            text = ConversationTextProvider()
+            with self.app(directory, text) as app:
+                root = app.create_conversation(self.job())
+                app.continue_task(root.run_id)
+                previous = app.conversation(root.run_id)["design_brief"]
+                app.update_user_requirements(root.run_id, ["花篮必须是藤编的。"], expected_revision=1)
+                text.bad_sources = True
+                with self.assertRaisesRegex(ValueError, "original user requirements"):
+                    app.continue_task(root.run_id)
+                self.assertEqual(app.conversation(root.run_id)["user_requirements"], ["花篮必须是藤编的。"])
+                self.assertEqual(app.conversation(root.run_id)["design_brief"], previous)
+                with self.assertRaisesRegex(ValueError, "Wait"):
+                    app.create_conversation_round(root.run_id)
+                text.bad_sources = False
+                app.retry_conversation(root.run_id)
+                app.continue_task(root.run_id)
+                self.assertEqual(app.conversation(root.run_id)["requirement_interpretations"][0]["source"], "花篮必须是藤编的。")
+
+    def test_ambiguous_specific_requirements_remain_visible_and_block_preparation(self):
+        with TemporaryDirectory() as directory:
+            text = ConversationTextProvider()
+            with self.app(directory, text) as app:
+                root = app.create_conversation(self.job())
+                app.continue_task(root.run_id)
+                text.questions = ["花篮的 xxx 样式具体指什么？"]
+                self.confirm_requirements(app, root.run_id, ["花篮必须是 xxx 样式。"])
+                saved = app.conversation(root.run_id)
+                self.assertEqual(saved["user_requirements"], ["花篮必须是 xxx 样式。"])
+                self.assertEqual(saved["open_questions"], text.questions)
+                with self.assertRaisesRegex(ValueError, "outstanding design questions"):
+                    app.create_conversation_round(root.run_id)
+
+    def test_frozen_brief_rejects_a_mismatched_requirement_snapshot(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            root = app.create_conversation(self.job())
+            app.continue_task(root.run_id)
+            child = app.create_conversation_round(root.run_id)
+            path = child.run_dir / "conversation/snapshot.json"
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+            snapshot["user_requirements"] = ["An unreviewed change."]
+            path.write_text(json.dumps(snapshot), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "confirmed user requirements"):
+                app.continue_task(child.run_id)
+            self.assertEqual(app.open_task(child.run_id).status, "failed")
+
     def test_confirmed_requirements_survive_discussion_and_reach_every_generation_stage(self):
         requirements = ["画面中必须有一只猫。", "Keep the subject in the lower right corner."]
         with TemporaryDirectory() as directory:
@@ -64,16 +209,21 @@ class ConversationTests(unittest.TestCase):
             with self.app(directory, text, image) as app:
                 root = app.create_conversation(self.job())
                 app.continue_task(root.run_id)
-                app.update_user_requirements(root.run_id, requirements, expected_revision=1)
+                self.confirm_requirements(app, root.run_id, requirements)
+                reviewed = app.conversation(root.run_id)["design_brief"]
+                brief_call_count = sum(call["schema_name"].endswith("-brief.schema.json") for call in text.design_calls)
                 first = app.create_conversation_round(root.run_id)
                 app.continue_task(first.run_id)
                 brief = json.loads((first.run_dir / "brief.json").read_text(encoding="utf-8"))
-                # The fake intake omits this field; the frozen contract must still survive.
+                self.assertEqual(brief, reviewed)
+                self.assertEqual(sum(call["schema_name"].endswith("-brief.schema.json") for call in text.design_calls), brief_call_count)
+                self.assertFalse((first.run_dir / "intake").exists())
+                # The fake brief synthesis omits this field; the frozen contract must still survive.
                 self.assertEqual(brief["user_requirements"], requirements)
                 plan = json.loads((first.run_dir / "design-direction/plan.json").read_text(encoding="utf-8"))
                 self.assertEqual(plan["shared_invariants"]["user_requirements"], requirements)
                 for relative in (
-                    "intake/prompt.md", "design-direction/prompt.md",
+                    "design-direction/prompt.md",
                     "candidates/c01/design-implementation/prompt.md",
                     "candidates/c01/image-spec/prompt.md", "candidates/c01/generation/prompt.md",
                 ):
@@ -103,7 +253,7 @@ class ConversationTests(unittest.TestCase):
             with self.app(directory, text) as app:
                 root = app.create_conversation(self.job())
                 app.continue_task(root.run_id)
-                app.update_user_requirements(root.run_id, ["Include exactly one cat."], expected_revision=1)
+                self.confirm_requirements(app, root.run_id, ["Include exactly one cat."])
                 first = app.create_conversation_round(root.run_id)
                 app.continue_task(first.run_id)
                 snapshot_path = first.run_dir / "conversation/snapshot.json"
@@ -120,8 +270,7 @@ class ConversationTests(unittest.TestCase):
                 self.assertEqual(saved["suggested_user_requirements"], ["Include exactly one dog."])
                 with self.assertRaisesRegex(ValueError, "Confirm or reject"):
                     app.create_conversation_round(root.run_id)
-                app.update_user_requirements(root.run_id, saved["suggested_user_requirements"],
-                                             expected_revision=saved["revision"])
+                self.confirm_requirements(app, root.run_id, saved["suggested_user_requirements"])
                 with self.assertRaisesRegex(ValueError, "superseded"):
                     app.resume(first.run_id, HumanDecision(True))
                 second = app.create_conversation_round(root.run_id)
@@ -129,7 +278,8 @@ class ConversationTests(unittest.TestCase):
                 prompt = (second.run_dir / "candidates/c01/generation/prompt.md").read_text(encoding="utf-8")
                 self.assertIn("Include exactly one dog.", prompt)
                 self.assertNotIn("Include exactly one cat.", prompt)
-                intake = (second.run_dir / "intake/prompt.md").read_text(encoding="utf-8")
+                message_id = app.conversation(root.run_id)["messages"][-2]["id"]
+                intake = (root.run_dir / "conversation-turns" / message_id / "brief/prompt.md").read_text(encoding="utf-8")
                 self.assertIn('"superseded_user_requirements"', intake)
                 self.assertIn("Include exactly one cat.", intake)
                 self.assertEqual(snapshot_path.read_bytes(), original_snapshot)
@@ -142,9 +292,9 @@ class ConversationTests(unittest.TestCase):
                 root = app.create_conversation(self.job())
                 app.continue_task(root.run_id)
                 self.assertEqual(app.conversation(root.run_id)["user_requirements"], [])
-                app.update_user_requirements(root.run_id, [], expected_revision=1)
-                app.update_user_requirements(root.run_id, ["Include one cat."], expected_revision=2)
-                app.update_user_requirements(root.run_id, [], expected_revision=3)
+                self.confirm_requirements(app, root.run_id, [])
+                self.confirm_requirements(app, root.run_id, ["Include one cat."])
+                self.confirm_requirements(app, root.run_id, [])
             with self.app(directory, text) as app:
                 saved = app.conversation(root.run_id)
                 self.assertEqual(saved["user_requirements"], [])
@@ -164,19 +314,19 @@ class ConversationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Wait"):
                 app.update_user_requirements(root.run_id, ["Include a cat."], expected_revision=0)
             app.continue_task(root.run_id)
-            app.update_user_requirements(root.run_id, ["Include a cat."], expected_revision=1)
+            self.confirm_requirements(app, root.run_id, ["Include a cat."])
             before = app.conversation(root.run_id)
             for invalid in ([""], ["   "], ["x", "x"], [None], "one requirement"):
                 with self.assertRaises(ValueError):
-                    app.update_user_requirements(root.run_id, invalid, expected_revision=2)
+                    app.update_user_requirements(root.run_id, invalid, expected_revision=before["revision"])
             with self.assertRaisesRegex(ValueError, "Reload"):
                 app.update_user_requirements(root.run_id, [], expected_revision=1)
             self.assertEqual(app.conversation(root.run_id), before)
-            app.update_user_requirements(root.run_id, ["Include a cat."], expected_revision=2)
+            app.update_user_requirements(root.run_id, ["Include a cat."], expected_revision=before["revision"])
             self.assertEqual(app.conversation(root.run_id), before)
             app.create_conversation_round(root.run_id)
             with self.assertRaisesRegex(ValueError, "Wait"):
-                app.update_user_requirements(root.run_id, [], expected_revision=2)
+                app.update_user_requirements(root.run_id, [], expected_revision=before["revision"])
 
     def test_legacy_conversations_load_defaults_without_rewriting_archived_data(self):
         with TemporaryDirectory() as directory, self.app(directory) as app:
@@ -185,7 +335,8 @@ class ConversationTests(unittest.TestCase):
             path = root.run_dir / "conversation.json"
             legacy = json.loads(path.read_text(encoding="utf-8"))
             for key in ("user_requirements", "suggested_user_requirements",
-                        "superseded_user_requirements", "requirement_history"):
+                        "superseded_user_requirements", "requirement_history", "design_brief",
+                        "brief_revision", "requirement_interpretations"):
                 del legacy[key]
             legacy["format_version"] = 1
             path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
@@ -194,8 +345,8 @@ class ConversationTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
             app.queue_conversation_message(root.run_id, "Use blue.")
             app.continue_task(root.run_id)
-            app.update_user_requirements(root.run_id, ["Include a cat."], expected_revision=2)
-            self.assertEqual(app.conversation(root.run_id)["format_version"], 2)
+            self.confirm_requirements(app, root.run_id, ["Include a cat."])
+            self.assertEqual(app.conversation(root.run_id)["format_version"], 3)
 
     def test_concurrent_messages_do_not_overwrite_each_other(self):
         with TemporaryDirectory() as directory, self.app(directory) as app:
@@ -288,7 +439,8 @@ class ConversationTests(unittest.TestCase):
                 self.assertIn("Make the title larger", feedback["prompt"])
                 second = app.create_conversation_round(root.run_id)
                 app.continue_task(second.run_id)
-                self.assertIn("Make the title larger", text.design_calls[-4]["prompt"])
+                self.assertEqual(json.loads((second.run_dir / "brief.json").read_text(encoding="utf-8")),
+                                 app.conversation(root.run_id)["design_brief"])
                 app.resume(second.run_id, HumanDecision(True))
                 self.assertEqual(image.reference_paths, [])
                 self.assertEqual(image.calls, 2)
@@ -298,7 +450,9 @@ class ConversationTests(unittest.TestCase):
                 self.assertEqual(Path(app.open_task(first.run_id).artifacts["generation_prompt"]).read_text(encoding="utf-8"), original_prompt)
                 snapshot = json.loads(Path(app.open_task(second.run_id).artifacts["conversation_snapshot"]).read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["revision"], 2)
-                intake_prompt = (second.run_dir / "intake/prompt.md").read_text(encoding="utf-8")
+                message_id = saved["messages"][-2]["id"]
+                intake_prompt = (root.run_dir / "conversation-turns" / message_id / "brief/prompt.md").read_text(encoding="utf-8")
+                self.assertIn("Make the title larger", intake_prompt)
                 self.assertIn("Reference 1: adopt the blue palette", intake_prompt)
 
     def test_failed_reply_retries_saved_message_without_duplicate_turns(self):

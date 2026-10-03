@@ -110,6 +110,9 @@ class ArtifactStore:
         if conversation_snapshot is not None:
             write_json(run_dir / "conversation/snapshot.json", conversation_snapshot)
             manifest["artifacts"]["conversation_snapshot"] = "conversation/snapshot.json"
+            if conversation_snapshot.get("design_brief") is not None:
+                write_json(run_dir / "brief.json", conversation_snapshot["design_brief"])
+                manifest["artifacts"]["brief"] = "brief.json"
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 

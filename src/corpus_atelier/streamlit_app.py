@@ -892,31 +892,35 @@ def _render_new_task() -> None:
         )
 
 
+def _render_brief_contents(brief: dict, *, include_requirements: bool = True) -> None:
+    fields = ("deliverable", "topic", "article_title", "article_summary", "purpose",
+              "audience", "use_context", "setting", "art_direction")
+    for key in fields:
+        if key in brief:
+            st.markdown(f"**{_t(key)}:** {brief[key] or _t('brief_unspecified')}")
+    ratio = brief.get("canvas", {}).get("aspect_ratio")
+    if ratio:
+        st.markdown(f"**{_t('brief_canvas')}:** {ratio['width']}:{ratio['height']}")
+    groups = ["exact_copy", "constraints", "preferences"]
+    if include_requirements:
+        groups.append("user_requirements")
+    for key in groups:
+        if key not in brief:
+            continue
+        label = "confirmed_user_requirements" if key == "user_requirements" else key
+        st.markdown(f"**{_t(label)}:**")
+        if brief[key]:
+            for item in brief[key]:
+                st.markdown(f"- {item}")
+        else:
+            st.caption(_t("brief_no_copy" if key == "exact_copy" else "brief_unspecified"))
+
+
 def _render_brief(result: RunResult) -> None:
     brief = read_json_artifact(result, "brief")
-    if not brief:
-        return
-    with st.expander(_t("understood_request"), icon=":material/description:"):
-        fields = (
-            ("deliverable", "deliverable"),
-            ("topic", "topic"),
-            ("purpose", "purpose"),
-            ("audience", "audience"),
-            ("use_context", "use_context"),
-            ("setting", "setting"),
-        )
-        for label_key, key in fields:
-            if brief.get(key):
-                st.markdown(f"**{_t(label_key)}:** {brief[key]}")
-        exact_copy = brief.get("exact_copy", [])
-        if exact_copy:
-            st.markdown(f"**{_t('exact_copy')}:**")
-            for item in exact_copy:
-                st.markdown(f"- {item}")
-        if brief.get("user_requirements"):
-            st.markdown(f"**{_t('confirmed_user_requirements')}:**")
-            for item in brief["user_requirements"]:
-                st.markdown(f"- {item}")
+    if brief:
+        with st.expander(_t("understood_request"), icon=":material/description:"):
+            _render_brief_contents(brief)
 
 
 def _ready_candidates(result: RunResult) -> list[dict[str, Any]]:
@@ -1329,19 +1333,44 @@ def _render_user_requirements(summary: RunSummary, conversation: dict, *, disabl
     revision = conversation["revision"]
     with st.container(border=True):
         st.subheader(_t("design_contract"))
+        st.caption(_t("brief_review_hint"))
+        if conversation["design_brief"] is not None:
+            _render_brief_contents(conversation["design_brief"], include_requirements=False)
+            if conversation["brief_revision"] != revision or conversation.get("pending"):
+                st.caption(_t("brief_update_failed" if summary.status == "failed" else "brief_updating"))
+        else:
+            st.info(_t("brief_not_ready"))
+            if st.button(_t("refresh_brief"), key=f"refresh_brief_{summary.run_id}", disabled=disabled):
+                try:
+                    with _app_for_manifest(summary.manifest) as app:
+                        app.queue_conversation_message(summary.run_id, _t("refresh_brief_request"))
+                        saved = app.inspect_task(summary.run_id)
+                    _submit_saved_task(saved, _current_credential().value)
+                    st.rerun(scope="app")
+                except Exception as exc:
+                    _conversation_error(exc)
+        for question in conversation["open_questions"]:
+            st.info(question)
         st.markdown(f"**{_t('confirmed_user_requirements')}**")
         if confirmed:
             for requirement in confirmed:
                 st.markdown(f"- {requirement}")
         else:
             st.caption(_t("no_user_requirements"))
+        if (conversation["brief_revision"] == revision
+                and conversation["requirement_interpretations"]):
+            st.markdown(f"**{_t('requirement_interpretations')}**")
+            for item in conversation["requirement_interpretations"]:
+                st.markdown(f"**{_t('requirement_source')}:** {item['source']}")
+                st.markdown(f"**{_t('requirement_interpretation')}:** {item['interpretation']}")
         if changed:
             st.info(_t("suggested_requirements_hint"))
         with st.form(f"requirements_form_{summary.run_id}_{revision}", border=False, enter_to_submit=False):
             edited = st.text_area(
                 _t("user_requirements_editor"), value="\n".join(suggested),
                 key=f"requirements_{summary.run_id}_{revision}",
-                help=_t("user_requirements_help"), disabled=disabled,
+                help=_t("user_requirements_help"), placeholder=_t("user_requirements_placeholder"),
+                disabled=disabled,
             )
             with st.container(horizontal=True):
                 confirmed_edit = st.form_submit_button(
@@ -1357,6 +1386,9 @@ def _render_user_requirements(summary: RunSummary, conversation: dict, *, disabl
             try:
                 with _app_for_manifest(summary.manifest) as app:
                     app.update_user_requirements(summary.run_id, requirements, expected_revision=revision)
+                    saved = app.inspect_task(summary.run_id)
+                if saved.status == "discussing_request":
+                    _submit_saved_task(saved, _current_credential().value)
                 st.rerun(scope="app")
             except Exception as exc:
                 _conversation_error(exc)
@@ -1372,6 +1404,12 @@ def _render_conversation_task(summary: RunSummary) -> None:
         return
     st.title(summary.manifest.get("title", summary.run_id))
     st.caption(_t("conversation_hint"))
+    busy = _task_is_live(summary) or any(_task_supervisor().is_running(r.run_id) for r in rounds)
+    _render_user_requirements(
+        summary, conversation,
+        disabled=busy or bool(conversation.get("pending")) or not conversation["effective_request"]
+        or _current_credential() is None or any(r.status in BUSY_ROUND_STATUSES for r in rounds),
+    )
     for message in conversation["messages"]:
         with st.chat_message(message["role"]):
             if message["text"]:
@@ -1384,7 +1422,6 @@ def _render_conversation_task(summary: RunSummary) -> None:
                 number = next((i for i, record in enumerate(conversation["rounds"], 1)
                                if record["run_id"] == message["feedback_run_id"]), None)
                 st.caption(_t("feedback_round", number=number, candidate=message.get("candidate_id") or _t("all_candidates")))
-    busy = _task_is_live(summary) or any(_task_supervisor().is_running(r.run_id) for r in rounds)
     if conversation.get("pending"):
         if summary.status == "failed":
             st.error(_t("conversation_failed"))
@@ -1400,19 +1437,10 @@ def _render_conversation_task(summary: RunSummary) -> None:
                     _conversation_error(exc)
         else:
             st.info(_t("status.discussing_request") if busy else _t("recovery_waiting_for_key"))
-    if conversation["effective_request"]:
+    if conversation["reference_notes"]:
         with st.expander(_t("current_design_requirements")):
-            st.markdown(conversation["effective_request"])
             for note in conversation["reference_notes"]:
                 st.markdown(f"- {note}")
-    for question in conversation["open_questions"]:
-        st.info(question)
-    _render_user_requirements(
-        summary, conversation,
-        disabled=busy or bool(conversation.get("pending")) or not conversation["effective_request"]
-        or any(r.status in BUSY_ROUND_STATUSES for r in rounds),
-    )
-
     selected_round = None
     candidate_id = None
     if rounds:
@@ -1444,6 +1472,7 @@ def _render_conversation_task(summary: RunSummary) -> None:
         disabled=busy or bool(conversation.get("pending")) or not conversation["effective_request"]
         or bool(conversation["open_questions"]) or latest_revision == conversation["revision"]
         or conversation["suggested_user_requirements"] != conversation["user_requirements"]
+        or conversation["design_brief"] is None or conversation["brief_revision"] != conversation["revision"]
         or _current_credential() is None,
     ):
         try:

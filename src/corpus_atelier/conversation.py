@@ -16,6 +16,8 @@ from PIL import Image
 from .artifacts.hashing import digest_file
 from .artifacts.records import read_json, write_json
 from .design_support.validation import validate
+from .intake import compile_intake_prompt
+from .registry import get_profile
 from .state import NaturalLanguageDesignJob
 
 
@@ -56,6 +58,9 @@ def load_conversation(root: Path) -> dict:
     value.setdefault("suggested_user_requirements", list(value["user_requirements"]))
     value.setdefault("superseded_user_requirements", [])
     value.setdefault("requirement_history", [])
+    value.setdefault("design_brief", None)
+    value.setdefault("brief_revision", None)
+    value.setdefault("requirement_interpretations", [])
     known_ids = {record["run_id"] for record in value["rounds"]}
     for path in root.parent.glob("*/manifest.json"):
         try:
@@ -87,6 +92,17 @@ def validate_attachments(attachments: list[tuple[str, bytes]]) -> list[tuple[str
             image.load()
             normalized.append((Path(name).name, data))
     return normalized
+
+
+def validate_conversation_answer(answer: dict, value: dict, pending: dict) -> dict:
+    """Require interpretation records to retain the authoritative requirement sources."""
+    validate(answer, "design-conversation.schema.json")
+    if [item["source"] for item in answer["requirement_interpretations"]] != value["user_requirements"]:
+        raise ValueError("Requirement interpretations changed the original user requirements.")
+    if (pending.get("kind") == "requirements_update"
+            and answer["suggested_user_requirements"] != value["user_requirements"]):
+        raise ValueError("The designer changed the submitted requirement list.")
+    return answer
 
 
 class ConversationMixin:
@@ -124,11 +140,12 @@ class ConversationMixin:
                 raise ValueError("Wait for the design task to finish processing.")
             self._assert_model_binding(previous.run_dir)
         value = {
-            "format_version": 2, "profile": job.profile,
+            "format_version": 3, "profile": job.profile,
             "messages": [], "effective_request": "", "reference_notes": [],
             "open_questions": [], "revision": 0, "rounds": [], "pending": None,
             "user_requirements": [], "suggested_user_requirements": [],
             "superseded_user_requirements": [], "requirement_history": [],
+            "design_brief": None, "brief_revision": None, "requirement_interpretations": [],
         }
         if previous is not None:
             request_path = previous.manifest.get("artifacts", {}).get("user_request")
@@ -156,7 +173,7 @@ class ConversationMixin:
     @serialized_conversation
     def update_user_requirements(self, run_id: str, requirements: list[str], *,
                                  expected_revision: int):
-        """Confirm a complete requirement list without allowing stale editors to overwrite it."""
+        """Save original requirements and queue a brief update, rejecting stale editors."""
         if (not isinstance(requirements, list)
                 or any(not isinstance(item, str) or not item.strip() for item in requirements)
                 or len(set(requirements)) != len(requirements)):
@@ -164,7 +181,8 @@ class ConversationMixin:
         root, value = self._conversation_idle(run_id)
         if expected_revision != value["revision"]:
             raise ValueError("The design requirements changed. Reload them before confirming.")
-        if requirements == value["user_requirements"] == value["suggested_user_requirements"]:
+        if (requirements == value["user_requirements"] == value["suggested_user_requirements"]
+                and value["design_brief"] is not None and value["brief_revision"] == value["revision"]):
             return self._result(run_id)
         superseded = list(dict.fromkeys(
             value["superseded_user_requirements"]
@@ -174,14 +192,20 @@ class ConversationMixin:
         value["user_requirements"] = list(requirements)
         value["suggested_user_requirements"] = list(requirements)
         value["revision"] += 1
-        value["format_version"] = 2
+        value["format_version"] = 3
         value["requirement_history"].append({
             "revision": value["revision"], "requirements": list(requirements),
             "superseded_user_requirements": value["superseded_user_requirements"],
             "confirmed_at": now(),
         })
+        message_id = uuid4().hex
+        value["messages"].append({
+            "id": message_id, "role": "user", "text": "\n".join(requirements),
+            "kind": "requirements_update", "attachments": [], "created_at": now(),
+        })
+        value["pending"] = {"message_id": message_id, "kind": "requirements_update", "context": {}, "images": []}
         self._save_conversation(root, value)
-        self.store.update(root, "discussing", error=None)
+        self.store.update(root, "discussing_request", error=None)
         return self._result(run_id)
 
     def _round_context(self, run_id: str, candidate_id: str | None = None) -> tuple[dict, list[Path]]:
@@ -259,6 +283,9 @@ class ConversationMixin:
         value = self.conversation(run_id)
         pending = value.get("pending")
         if not pending:
+            if value["design_brief"] is not None:
+                self.store.json(root, "brief.json", value["design_brief"])
+                self.store.register(root, brief="brief.json")
             self.store.update(root, "discussing")
             return self._result(run_id)
         self.store.update(root, "discussing_request", error=None)
@@ -307,6 +334,16 @@ class ConversationMixin:
                 "of effective_request; it describes the remaining design context. Superseded requirements "
                 "are no longer mandatory, not prohibited visual elements. Do not restore them from old "
                 "messages unless the latest user message explicitly asks to reintroduce them.\n\n"
+                "For each confirmed user requirement, return exactly one requirement_interpretations "
+                "entry in the same order: source copies the original entry verbatim; interpretation "
+                "explains its actionable design meaning in the user's language. Interpretations are "
+                "paraphrases for review, not original quotations. Clarify only what is entailed; never "
+                "invent dimensions, materials, colors, motifs, or exact parameters. Ask a necessary "
+                "question in open_questions when ambiguity or a conflict cannot be resolved faithfully. "
+                "If pending_kind is requirements_update, the user has submitted the complete confirmed "
+                "requirement list, including deletions. Keep suggested_user_requirements identical to "
+                "user_requirements and reconcile the remaining context with that list. Do not treat "
+                "removed entries in earlier messages as current instructions.\n\n"
                 + json.dumps({
                     "effective_request": value["effective_request"],
                     "user_requirements": value["user_requirements"],
@@ -314,21 +351,50 @@ class ConversationMixin:
                     "superseded_user_requirements": value["superseded_user_requirements"],
                     "reference_notes": value["reference_notes"],
                     "open_questions": value["open_questions"],
+                    "design_brief": value["design_brief"],
+                    "pending_kind": pending.get("kind", "discussion"),
                     "conversation": value["messages"], "previous_round": pending["context"],
                     "image_labels": labels,
                 }, ensure_ascii=False)
             )
             attempt = root / "conversation-turns" / pending["message_id"]
             self.store.text(attempt, "prompt.md", prompt)
-            answer, response = self.runtime.text_provider.propose(
-                prompt, schema_name="design-conversation.schema.json", reference_paths=references,
+            # Reuse a completed discussion response if only brief synthesis failed.
+            answer = None
+            saved_answer = attempt / "answer.json"
+            if saved_answer.is_file():
+                try:
+                    answer = validate_conversation_answer(read_json(saved_answer), value, pending)
+                except ValueError:
+                    pass
+            if answer is None:
+                answer, response = self.runtime.text_provider.propose(
+                    prompt, schema_name="design-conversation.schema.json", reference_paths=references,
+                )
+                validate_conversation_answer(answer, value, pending)
+                self.store.json(attempt, "response.json", response)
+                self.store.json(attempt, "answer.json", answer)
+            profile = get_profile(value["profile"])
+            request = answer["effective_request"]
+            if answer["reference_notes"]:
+                request += "\n\nReference findings (follow adoption decisions):\n" + "\n".join(answer["reference_notes"])
+            brief_prompt = compile_intake_prompt(
+                profile, request, user_requirements=value["user_requirements"],
+                superseded_user_requirements=value["superseded_user_requirements"],
+                current_brief=value["design_brief"],
+                requirement_interpretations=answer["requirement_interpretations"],
+                open_questions=answer["open_questions"],
             )
-            validate(answer, "design-conversation.schema.json")
-            self.store.json(attempt, "response.json", response)
-            self.store.json(attempt, "answer.json", answer)
+            self.store.text(attempt, "brief/prompt.md", brief_prompt)
+            brief, brief_response = self.runtime.text_provider.propose(brief_prompt, schema_name=profile.brief_schema)
+            brief = validate({**brief, "user_requirements": list(value["user_requirements"])}, profile.brief_schema)
+            self.store.json(attempt, "brief/response.json", brief_response)
+            self.store.json(attempt, "brief/brief.json", brief)
             value["revision"] += 1
+            value.update(design_brief=brief, brief_revision=value["revision"], format_version=3)
             value.update({key: answer[key] for key in (
                 "effective_request", "reference_notes", "open_questions", "suggested_user_requirements",
+                "requirement_interpretations",
             )})
             value["messages"].append({
                 "role": "assistant", "text": answer["reply"], "attachments": [],
@@ -336,6 +402,8 @@ class ConversationMixin:
             })
             value["pending"] = None
             self._save_conversation(root, value)
+            self.store.json(root, "brief.json", brief)
+            self.store.register(root, brief="brief.json")
             self.store.update(root, "discussing", error=None)
         except Exception as exc:
             self.store.update(root, "failed", error_type=type(exc).__name__, error=str(exc))
@@ -360,6 +428,11 @@ class ConversationMixin:
             raise ValueError("Answer the outstanding design questions before preparing a round.")
         if value["suggested_user_requirements"] != value["user_requirements"]:
             raise ValueError("Confirm or reject the suggested user requirements before preparing a round.")
+        if value["design_brief"] is None or value["brief_revision"] != value["revision"]:
+            raise ValueError("Update and review the current design brief before preparing a round.")
+        validate(value["design_brief"], get_profile(value["profile"]).brief_schema)
+        if value["design_brief"].get("user_requirements", []) != value["user_requirements"]:
+            raise ValueError("The current design brief does not match the confirmed user requirements.")
         if value["rounds"] and value["rounds"][-1]["revision"] == value["revision"]:
             raise ValueError("Add feedback before preparing another round.")
         manifest = self.store.manifest(root)

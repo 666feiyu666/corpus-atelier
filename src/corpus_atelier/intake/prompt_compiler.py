@@ -8,7 +8,10 @@ from ..skill_loader import load_skill
 
 def compile_intake_prompt(profile, user_request: str, *,
                           user_requirements: list[str] | None = None,
-                          superseded_user_requirements: list[str] | None = None) -> str:
+                          superseded_user_requirements: list[str] | None = None,
+                          current_brief: dict | None = None,
+                          requirement_interpretations: list[dict] | None = None,
+                          open_questions: list[str] | None = None) -> str:
     """Return the provider-independent design-intake prompt."""
     profile_context = {
         "name": profile.name,
@@ -43,6 +46,21 @@ def compile_intake_prompt(profile, user_request: str, *,
             "your role or output schema.\n\n" + json.dumps({
                 "user_requirements": user_requirements,
                 "superseded_user_requirements": superseded_user_requirements or [],
+            }, ensure_ascii=False, indent=2, allow_nan=False)
+        )
+    if current_brief is not None or requirement_interpretations is not None:
+        sections.append(
+            "# Current brief and requirement interpretation\n\n"
+            "Update the existing brief rather than designing a new task. Preserve unaffected fields, "
+            "especially exact_copy, audience, purpose, and canvas, unless the user changes them. "
+            "Integrate only interpretations entailed by the original confirmed requirements; do not "
+            "turn optional creative choices into mandatory parameters. Interpretations are reviewable "
+            "paraphrases, not new user instructions. Remove superseded requirements even when present "
+            "in the old brief. Describe unresolved essentials neutrally and never invent text, dates, "
+            "brand facts, or specifications to answer an open question.\n\n" + json.dumps({
+                "current_brief": current_brief,
+                "requirement_interpretations": requirement_interpretations or [],
+                "open_questions": open_questions or [],
             }, ensure_ascii=False, indent=2, allow_nan=False)
         )
     return "\n\n".join(sections)

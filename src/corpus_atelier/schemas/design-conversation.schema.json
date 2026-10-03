@@ -5,8 +5,18 @@
     "reply": {"type": "string", "minLength": 1},
     "effective_request": {"type": "string", "minLength": 1},
     "suggested_user_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "requirement_interpretations": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "interpretation": {"type": "string", "minLength": 1}
+        },
+        "required": ["source", "interpretation"]
+      }
+    },
     "reference_notes": {"type": "array", "items": {"type": "string"}},
     "open_questions": {"type": "array", "items": {"type": "string"}}
   },
-  "required": ["reply", "effective_request", "reference_notes", "open_questions", "suggested_user_requirements"]
+  "required": ["reply", "effective_request", "reference_notes", "open_questions", "suggested_user_requirements", "requirement_interpretations"]
 }

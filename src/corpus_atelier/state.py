@@ -73,6 +73,8 @@ class AtelierState(TypedDict, total=False):
     run_dir: str
     profile: str
     user_request: str
+    user_requirements: list[str]
+    superseded_user_requirements: list[str]
     brief: dict[str, Any]
     candidate_limit: int
     candidate_count: int

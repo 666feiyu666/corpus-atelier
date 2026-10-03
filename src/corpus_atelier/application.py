@@ -64,7 +64,11 @@ class _Runtime:
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
         self.store.update(run_dir, "interpreting_request")
-        prompt = compile_intake_prompt(profile, state["user_request"])
+        prompt = compile_intake_prompt(
+            profile, state["user_request"],
+            user_requirements=state.get("user_requirements"),
+            superseded_user_requirements=state.get("superseded_user_requirements"),
+        )
         request = {
             "model": getattr(
                 self.text_provider, "model", type(self.text_provider).__name__,
@@ -84,6 +88,8 @@ class _Runtime:
                 prompt,
                 schema_name=profile.brief_schema,
             )
+            if "user_requirements" in state:
+                brief = {**brief, "user_requirements": list(state["user_requirements"])}
             brief = validate(brief, profile.brief_schema)
             self.store.json(run_dir, "intake/response.json", response)
             self.store.json(run_dir, "brief.json", brief)
@@ -171,6 +177,7 @@ class _Runtime:
                 "shared_invariants": {
                     "exact_copy": state["brief"].get("exact_copy", []),
                     "constraints": state["brief"].get("constraints", []),
+                    "user_requirements": state["brief"].get("user_requirements", []),
                     "canvas": canvas,
                 },
                 "directions": directions,
@@ -333,7 +340,9 @@ class _Runtime:
                 self.store.text(root, "image-spec/prompt.md", prompt)
                 self.store.json(root, "image-spec/response.json", response)
                 self.store.json(root, "image-spec/image-spec.json", image_spec)
-                generation_prompt = compile_generation_prompt(image_spec)
+                generation_prompt = compile_generation_prompt(
+                    image_spec, user_requirements=state["brief"].get("user_requirements", []),
+                )
                 self.store.text(root, "generation/prompt.md", generation_prompt)
                 generation_request = self.image_provider.describe_request(
                     generation_prompt, size=state["generation_size"],
@@ -797,6 +806,18 @@ class CorpusAtelierApplication(ConversationMixin):
             request = self._validate_request(
                 request_path.read_text(encoding="utf-8")
             )
+            contract = {}
+            snapshot_relative = manifest.get("artifacts", {}).get("conversation_snapshot")
+            if snapshot_relative:
+                snapshot_path = (run_dir / snapshot_relative).resolve(strict=True)
+                if run_dir not in snapshot_path.parents:
+                    raise ValueError("The conversation snapshot escapes its task directory.")
+                snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                if "user_requirements" in snapshot:
+                    contract = {
+                        "user_requirements": snapshot["user_requirements"],
+                        "superseded_user_requirements": snapshot.get("superseded_user_requirements", []),
+                    }
         except Exception as exc:
             self.store.update(
                 run_dir,
@@ -811,6 +832,7 @@ class CorpusAtelierApplication(ConversationMixin):
             "run_dir": str(run_dir),
             "profile": profile.name,
             "user_request": request,
+            **contract,
             "candidate_limit": candidate_count,
             "status": "created",
         }

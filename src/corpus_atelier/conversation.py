@@ -52,6 +52,10 @@ def now() -> str:
 def load_conversation(root: Path) -> dict:
     """Load the dialogue and recover any interrupted round-index update."""
     value = read_json(root / "conversation.json")
+    value.setdefault("user_requirements", [])
+    value.setdefault("suggested_user_requirements", list(value["user_requirements"]))
+    value.setdefault("superseded_user_requirements", [])
+    value.setdefault("requirement_history", [])
     known_ids = {record["run_id"] for record in value["rounds"]}
     for path in root.parent.glob("*/manifest.json"):
         try:
@@ -120,9 +124,11 @@ class ConversationMixin:
                 raise ValueError("Wait for the design task to finish processing.")
             self._assert_model_binding(previous.run_dir)
         value = {
-            "format_version": 1, "profile": job.profile,
+            "format_version": 2, "profile": job.profile,
             "messages": [], "effective_request": "", "reference_notes": [],
             "open_questions": [], "revision": 0, "rounds": [], "pending": None,
+            "user_requirements": [], "suggested_user_requirements": [],
+            "superseded_user_requirements": [], "requirement_history": [],
         }
         if previous is not None:
             request_path = previous.manifest.get("artifacts", {}).get("user_request")
@@ -131,6 +137,10 @@ class ConversationMixin:
                 "role": "user", "text": original, "attachments": [], "created_at": now(),
             })
             value["effective_request"] = original
+            brief_path = previous.manifest.get("artifacts", {}).get("brief")
+            if brief_path:
+                value["user_requirements"] = read_json(previous.run_dir / brief_path).get("user_requirements", [])
+                value["suggested_user_requirements"] = list(value["user_requirements"])
             value["rounds"].append({
                 "run_id": previous.run_id, "revision": 0, "created_at": previous.manifest["created_at"],
             })
@@ -142,6 +152,37 @@ class ConversationMixin:
             self.store.update(previous.run_dir, previous.status, conversation_parent_id=result.run_id)
         self._queue_message(result.run_id, job.request, normalized)
         return self._result(result.run_id)
+
+    @serialized_conversation
+    def update_user_requirements(self, run_id: str, requirements: list[str], *,
+                                 expected_revision: int):
+        """Confirm a complete requirement list without allowing stale editors to overwrite it."""
+        if (not isinstance(requirements, list)
+                or any(not isinstance(item, str) or not item.strip() for item in requirements)
+                or len(set(requirements)) != len(requirements)):
+            raise ValueError("User requirements must be distinct, nonempty strings.")
+        root, value = self._conversation_idle(run_id)
+        if expected_revision != value["revision"]:
+            raise ValueError("The design requirements changed. Reload them before confirming.")
+        if requirements == value["user_requirements"] == value["suggested_user_requirements"]:
+            return self._result(run_id)
+        superseded = list(dict.fromkeys(
+            value["superseded_user_requirements"]
+            + value["user_requirements"] + value["suggested_user_requirements"]
+        ))
+        value["superseded_user_requirements"] = [item for item in superseded if item not in requirements]
+        value["user_requirements"] = list(requirements)
+        value["suggested_user_requirements"] = list(requirements)
+        value["revision"] += 1
+        value["format_version"] = 2
+        value["requirement_history"].append({
+            "revision": value["revision"], "requirements": list(requirements),
+            "superseded_user_requirements": value["superseded_user_requirements"],
+            "confirmed_at": now(),
+        })
+        self._save_conversation(root, value)
+        self.store.update(root, "discussing", error=None)
+        return self._result(run_id)
 
     def _round_context(self, run_id: str, candidate_id: str | None = None) -> tuple[dict, list[Path]]:
         summary = self.inspect_task(run_id)
@@ -254,8 +295,23 @@ class ConversationMixin:
                 "never claim to have generated an image. Keep open_questions in the user's language.\n\n"
                 "Only list questions that must be answered before preparing a design. Do not block on "
                 "optional preferences; clearly state reasonable assumptions instead.\n\n"
+                "The user_requirements list is the confirmed design contract. You cannot modify it. "
+                "Return suggested_user_requirements as the complete proposed replacement list, copying "
+                "unchanged requirements verbatim in their original language. Propose additions only for "
+                "explicit mandatory user requests, never inferred preferences or your creative choices. "
+                "Preserve the user's original wording and language in new entries. Retain the existing "
+                "suggested_user_requirements, including pending changes, unless the latest user message "
+                "explicitly revises them. Unrelated feedback does not confirm or reject pending changes. The user will "
+                "confirm or reject changes separately; do not add confirmation requests to open_questions. "
+                "Keep contract requirements and proposed changes out "
+                "of effective_request; it describes the remaining design context. Superseded requirements "
+                "are no longer mandatory, not prohibited visual elements. Do not restore them from old "
+                "messages unless the latest user message explicitly asks to reintroduce them.\n\n"
                 + json.dumps({
                     "effective_request": value["effective_request"],
+                    "user_requirements": value["user_requirements"],
+                    "suggested_user_requirements": value["suggested_user_requirements"],
+                    "superseded_user_requirements": value["superseded_user_requirements"],
                     "reference_notes": value["reference_notes"],
                     "open_questions": value["open_questions"],
                     "conversation": value["messages"], "previous_round": pending["context"],
@@ -272,7 +328,7 @@ class ConversationMixin:
             self.store.json(attempt, "answer.json", answer)
             value["revision"] += 1
             value.update({key: answer[key] for key in (
-                "effective_request", "reference_notes", "open_questions",
+                "effective_request", "reference_notes", "open_questions", "suggested_user_requirements",
             )})
             value["messages"].append({
                 "role": "assistant", "text": answer["reply"], "attachments": [],
@@ -302,6 +358,8 @@ class ConversationMixin:
             raise ValueError("Discuss the design requirements before preparing a round.")
         if value["open_questions"]:
             raise ValueError("Answer the outstanding design questions before preparing a round.")
+        if value["suggested_user_requirements"] != value["user_requirements"]:
+            raise ValueError("Confirm or reject the suggested user requirements before preparing a round.")
         if value["rounds"] and value["rounds"][-1]["revision"] == value["revision"]:
             raise ValueError("Add feedback before preparing another round.")
         manifest = self.store.manifest(root)

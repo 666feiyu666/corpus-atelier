@@ -21,7 +21,7 @@ from corpus_atelier.application import (
     CorpusAtelierApplication,
 )
 from corpus_atelier.artifacts.hashing import digest_file
-from corpus_atelier.conversation import load_conversation
+from corpus_atelier.conversation import BUSY_ROUND_STATUSES, load_conversation
 from corpus_atelier.artifacts.store import ArtifactStore
 from corpus_atelier.i18n import (
     DEFAULT_LANGUAGE,
@@ -913,6 +913,10 @@ def _render_brief(result: RunResult) -> None:
             st.markdown(f"**{_t('exact_copy')}:**")
             for item in exact_copy:
                 st.markdown(f"- {item}")
+        if brief.get("user_requirements"):
+            st.markdown(f"**{_t('confirmed_user_requirements')}:**")
+            for item in brief["user_requirements"]:
+                st.markdown(f"- {item}")
 
 
 def _ready_candidates(result: RunResult) -> list[dict[str, Any]]:
@@ -1318,6 +1322,46 @@ def _render_legacy_followup(summary: RunSummary, *, active: bool) -> None:
         _conversation_error(exc)
 
 
+def _render_user_requirements(summary: RunSummary, conversation: dict, *, disabled: bool) -> None:
+    confirmed = conversation["user_requirements"]
+    suggested = conversation["suggested_user_requirements"]
+    changed = suggested != confirmed
+    revision = conversation["revision"]
+    with st.container(border=True):
+        st.subheader(_t("design_contract"))
+        st.markdown(f"**{_t('confirmed_user_requirements')}**")
+        if confirmed:
+            for requirement in confirmed:
+                st.markdown(f"- {requirement}")
+        else:
+            st.caption(_t("no_user_requirements"))
+        if changed:
+            st.info(_t("suggested_requirements_hint"))
+        with st.form(f"requirements_form_{summary.run_id}_{revision}", border=False, enter_to_submit=False):
+            edited = st.text_area(
+                _t("user_requirements_editor"), value="\n".join(suggested),
+                key=f"requirements_{summary.run_id}_{revision}",
+                help=_t("user_requirements_help"), disabled=disabled,
+            )
+            with st.container(horizontal=True):
+                confirmed_edit = st.form_submit_button(
+                    _t("confirm_user_requirements"), key=f"confirm_requirements_{summary.run_id}",
+                    disabled=disabled,
+                )
+                kept_current = changed and st.form_submit_button(
+                    _t("keep_user_requirements"), key=f"keep_requirements_{summary.run_id}",
+                    disabled=disabled,
+                )
+        if confirmed_edit or kept_current:
+            requirements = confirmed if kept_current else [line.strip() for line in edited.splitlines() if line.strip()]
+            try:
+                with _app_for_manifest(summary.manifest) as app:
+                    app.update_user_requirements(summary.run_id, requirements, expected_revision=revision)
+                st.rerun(scope="app")
+            except Exception as exc:
+                _conversation_error(exc)
+
+
 def _render_conversation_task(summary: RunSummary) -> None:
     try:
         with _app_for_manifest(summary.manifest) as app:
@@ -1363,6 +1407,11 @@ def _render_conversation_task(summary: RunSummary) -> None:
                 st.markdown(f"- {note}")
     for question in conversation["open_questions"]:
         st.info(question)
+    _render_user_requirements(
+        summary, conversation,
+        disabled=busy or bool(conversation.get("pending")) or not conversation["effective_request"]
+        or any(r.status in BUSY_ROUND_STATUSES for r in rounds),
+    )
 
     selected_round = None
     candidate_id = None
@@ -1394,6 +1443,7 @@ def _render_conversation_task(summary: RunSummary) -> None:
         _t("prepare_design_round"), type="primary", key=f"prepare_round_{summary.run_id}",
         disabled=busy or bool(conversation.get("pending")) or not conversation["effective_request"]
         or bool(conversation["open_questions"]) or latest_revision == conversation["revision"]
+        or conversation["suggested_user_requirements"] != conversation["user_requirements"]
         or _current_credential() is None,
     ):
         try:

@@ -8,7 +8,7 @@ import unittest
 from corpus_atelier.artifacts.records import read_json, write_json
 from corpus_atelier.state import HumanDecision, NaturalLanguageDesignJob
 from tests import test_conversation as fixtures
-from tests.test_conversation import ConversationTextProvider
+from tests.test_conversation import ConversationTextProvider, seed_brief
 from tests.test_language import LanguageTextProvider
 
 
@@ -19,6 +19,7 @@ class BriefEditingTests(unittest.TestCase):
     def ready(self, app, profile="rhetoric-graphic"):
         task = app.create_conversation(NaturalLanguageDesignJob("brief-edit", profile, "Design a reading poster."))
         app.continue_task(task.run_id)
+        seed_brief(app, task.run_id)
         return task, app.conversation(task.run_id)
 
     def test_manual_save_for_every_profile_is_exact_and_makes_no_model_call(self):
@@ -92,7 +93,7 @@ class BriefEditingTests(unittest.TestCase):
             app.save_conversation_brief(task.run_id, initial["design_brief"], expected_revision=1)
             self.assertEqual(app.conversation(task.run_id), initial)
             for change, kwargs in (({"purpose": ""}, {}), ({"unknown": "field"}, {}),
-                                   ({"user_requirements": [" "]}, {}), ({"content_language": "zh-CN"}, {}),
+                                   ({"user_requirements": [" "]}, {}),
                                    ({}, {"expected_revision": 0}), ({}, {"source_revision": 999}),
                                    ({}, {"open_questions": [""]})):
                 with self.subTest(change=change, kwargs=kwargs), self.assertRaises(ValueError):
@@ -123,7 +124,7 @@ class BriefEditingTests(unittest.TestCase):
             app.continue_task(task.run_id)
             saved = app.conversation(task.run_id)
             self.assertEqual(saved["brief_history"][0]["revision"], 0)
-            language = saved["content_language"] or saved["brief_proposals"][-1]["brief"]["content_language"]
+            language = saved["content_language"] or saved["discussion_language"]
             edited = {**original, "content_language": language, "purpose": "An edited original brief."}
             app.save_conversation_brief(task.run_id, edited, expected_revision=0, source_revision=0)
             self.assertEqual(app.conversation(task.run_id)["brief_history"][-1]["based_on"], 0)
@@ -145,28 +146,11 @@ class BriefEditingTests(unittest.TestCase):
             self.assertEqual(recovered["brief_history"][0]["brief"], initial["design_brief"])
             self.assertEqual(path.read_bytes(), before)
 
-    def test_explicit_language_refresh_preserves_manual_source_copy_and_ratio(self):
-        with TemporaryDirectory() as directory:
-            text = LanguageTextProvider()
-            with self.app(directory, text) as app:
-                task, initial = self.ready(app)
-                brief = {**initial["design_brief"], "purpose": "手动确认的设计目的。",
-                         "exact_copy": ["  保留原文  "], "canvas": {"aspect_ratio": {"width": 4, "height": 5}}}
-                app.save_conversation_brief(task.run_id, brief, expected_revision=1)
-                # The fixture also retains exact source data during a language refresh.
-                propose = text.propose
-                def translated(prompt, *, schema_name, reference_paths=None):
-                    value, response = propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
-                    if schema_name.endswith("-brief.schema.json"):
-                        value.update(exact_copy=brief["exact_copy"], canvas=brief["canvas"])
-                    return value, response
-                text.propose = translated
-                app.refresh_conversation_brief(task.run_id, expected_revision=2, content_language="en")
-                app.continue_task(task.run_id)
-                pending = app.conversation(task.run_id)
-                self.assertEqual(pending["design_brief"], brief)
-                app.save_conversation_brief(task.run_id, pending["brief_proposals"][-1]["brief"], expected_revision=pending["revision"])
-                saved = app.conversation(task.run_id)
-                self.assertEqual(saved["content_language"], "en")
-                self.assertEqual(saved["design_brief"]["exact_copy"], brief["exact_copy"])
-                self.assertEqual(saved["manual_brief_fields"]["purpose"], saved["design_brief"]["purpose"])
+    def test_manual_language_change_preserves_source_copy_and_ratio(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            task, initial = self.ready(app)
+            brief = {**initial["design_brief"], "content_language": "zh-CN",
+                     "purpose": "手动确认的设计目的。", "exact_copy": ["  保留原文  "],
+                     "canvas": {"aspect_ratio": {"width": 4, "height": 5}}}
+            app.save_conversation_brief(task.run_id, brief, expected_revision=1)
+            self.assertEqual(app.conversation(task.run_id)["design_brief"], brief)

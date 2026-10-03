@@ -1335,16 +1335,13 @@ def _render_user_requirements(summary: RunSummary, conversation: dict, *, disabl
     with st.container(border=True, key=f"brief_workspace_{summary.run_id}"):
         st.subheader(_t("design_contract"))
         st.caption(_t("brief_review_hint"))
-        if conversation["design_brief"] is None and brief_editor.draft_key(summary.run_id) not in st.session_state:
-            st.info(_t("brief_not_ready"))
-            return False
         if brief_editor.draft_key(summary.run_id) not in st.session_state:
             brief_editor.load_draft(summary.run_id, conversation)
         draft = st.session_state[brief_editor.draft_key(summary.run_id)]
         stale = draft["base_revision"] != revision
         if stale:
             st.warning(_t("brief_stale_draft"))
-        st.caption(_t("brief_editing_revision", revision=draft["source_revision"]))
+        st.caption(_t("brief_editing_revision", revision=draft["source_revision"]) if draft["source_revision"] is not None else _t("brief_new_draft"))
         with st.expander(_t("brief_saved_preview")):
             if conversation["design_brief"]:
                 _render_brief_contents(conversation["design_brief"])
@@ -1362,7 +1359,6 @@ def _render_user_requirements(summary: RunSummary, conversation: dict, *, disabl
                         app.save_conversation_brief(
                             summary.run_id, edited_brief, expected_revision=draft["base_revision"],
                             source_revision=draft["source_revision"], open_questions=questions,
-                            source_suggestion_ids=draft["source_suggestion_ids"],
                         )
                     st.session_state.pop(brief_editor.draft_key(summary.run_id), None)
                     st.toast(_t("brief_saved"))
@@ -1378,67 +1374,10 @@ def _render_user_requirements(summary: RunSummary, conversation: dict, *, disabl
     return dirty
 
 
-def _add_assistant_suggestion(run_id, conversation, suggestion, mode, replacement_index):
-    try:
-        brief_editor.add_suggestion(run_id, conversation, suggestion, mode=mode,
-                                    replacement_index=replacement_index)
-        follow_latest(run_id)
-    except Exception as exc:
-        _conversation_error(exc)
 
 
-def _load_brief_proposal(run_id, conversation, proposal):
-    brief_editor.load_draft(run_id, conversation, proposal["brief"],
-                            conversation["brief_revision"])
-    st.session_state[brief_editor.field_key(run_id, "open_questions")] = "\n".join(proposal["questions"])
-    follow_latest(run_id)
 
 
-def _render_assistant_suggestion(summary, conversation, suggestion, *, disabled, reply):
-    identity = suggestion["id"]
-    if suggestion["status"] == "dismissed":
-        st.caption(_t("suggestion_dismissed", aspect=suggestion["aspect"]))
-        return
-    if suggestion["text"] not in reply:
-        st.markdown(suggestion["text"])
-    st.caption(_t("suggestion_destination", aspect=suggestion["aspect"], field=_t(suggestion["field"])))
-    if suggestion.get("images"):
-        st.caption(_t("suggestion_source", source=" · ".join(item["name"] for item in suggestion["images"])))
-    if brief_editor.draft_key(summary.run_id) not in st.session_state:
-        st.caption(_t("brief_not_ready"))
-        return
-    draft = st.session_state[brief_editor.draft_key(summary.run_id)]
-    brief, _ = brief_editor.draft_values(summary.run_id)
-    field = suggestion["field"]
-    if field not in brief:
-        return
-    entries = brief[field] if field in brief_editor.LIST_FIELDS else None
-    replacement_index = None
-    mode = "append" if entries is not None else "replace"
-    if entries:
-        mode = st.selectbox(_t("suggestion_action"), ["append", "replace"],
-                            format_func=lambda value: _t(f"suggestion_{value}"),
-                            key=f"suggestion_mode_{identity}", disabled=disabled)
-        if mode == "replace":
-            replacement_index = st.selectbox(_t("suggestion_replace_entry"), list(range(len(entries))),
-                                             format_func=lambda index: entries[index],
-                                             key=f"suggestion_target_{identity}", disabled=disabled)
-    elif entries is None:
-        st.caption(_t("suggestion_replace_text"))
-    with st.container(horizontal=True):
-        st.button(_t("add_to_brief"), key=f"add_suggestion_{identity}",
-                  on_click=_add_assistant_suggestion,
-                  args=(summary.run_id, conversation, suggestion, mode, replacement_index),
-                  disabled=disabled or draft["base_revision"] != conversation["revision"])
-        if st.button(_t("ignore_suggestion"), key=f"dismiss_suggestion_{identity}", disabled=disabled):
-            try:
-                with _app_for_manifest(summary.manifest) as app:
-                    app.dismiss_conversation_suggestion(summary.run_id, identity)
-                st.rerun(scope="app")
-            except Exception as exc:
-                _conversation_error(exc)
-    if identity in draft["source_suggestion_ids"]:
-        st.caption(_t("suggestion_in_draft"))
 
 
 def _render_conversation_task(summary: RunSummary) -> None:
@@ -1464,7 +1403,7 @@ def _render_conversation_task(summary: RunSummary) -> None:
         design_column, assistant_column = st.columns([2.2, 1], gap="large", vertical_alignment="top")
     else:
         design_column, assistant_column = st.container(), st.container()
-    if conversation["design_brief"] is not None and brief_editor.draft_key(summary.run_id) not in st.session_state:
+    if brief_editor.draft_key(summary.run_id) not in st.session_state:
         brief_editor.load_draft(summary.run_id, conversation)
     dirty = brief_editor.draft_dirty(summary.run_id)
     selected_id = st.session_state.get(f"round_{summary.run_id}_{len(rounds)}", rounds[-1].run_id if rounds else None)
@@ -1515,7 +1454,6 @@ def _render_conversation_task(summary: RunSummary) -> None:
         with assistant_column:
             st.subheader(_t("design_assistant"))
             st.caption(_t("assistant_hint"))
-            st.caption(_t("assistant_brief_context", revision=conversation["brief_revision"]))
             if selected_round:
                 number = next(i for i, record in enumerate(conversation["rounds"], 1) if record["run_id"] == selected_round.run_id)
                 st.caption(_t("feedback_round", number=number, candidate=_t("all_candidates")))
@@ -1524,15 +1462,16 @@ def _render_conversation_task(summary: RunSummary) -> None:
                     candidates = json.loads((selected_round.run_dir / relative).read_text(encoding="utf-8"))
                     candidate_id = st.selectbox(_t("feedback_candidate"), options=[None, *[c["candidate_id"] for c in candidates]],
                                                 format_func=lambda value: value or _t("all_candidates"), key=f"feedback_candidate_{selected_round.run_id}")
-            suggestions = {item["id"]: item for item in conversation["assistant_suggestions"]}
-            proposals = {item["id"]: item for item in conversation["brief_proposals"]}
             with st.container(height=460, key=f"assistant_messages_{summary.run_id}", autoscroll=False):
                 for message in conversation["messages"]:
+                    if message.get("kind", "discussion") != "discussion":
+                        continue
                     with st.chat_message(message["role"]):
-                        if message.get("kind") in {"brief_edit", "brief_refresh"}:
-                            st.caption(_t("brief_edit_event" if message["kind"] == "brief_edit" else "brief_refresh_event"))
                         if message["text"]:
                             st.markdown(message["text"])
+                            if message["role"] == "assistant":
+                                with st.expander(_t("copy_reply"), icon=":material/content_copy:"):
+                                    st.code(message["text"], language=None, wrap_lines=True)
                         for attachment in message.get("attachments", []):
                             path = (summary.run_dir / attachment["path"]).resolve()
                             if summary.run_dir in path.parents and path.is_file():
@@ -1540,25 +1479,6 @@ def _render_conversation_task(summary: RunSummary) -> None:
                         if message.get("feedback_run_id"):
                             number = next((i for i, record in enumerate(conversation["rounds"], 1) if record["run_id"] == message["feedback_run_id"]), None)
                             st.caption(_t("feedback_round", number=number, candidate=message.get("candidate_id") or _t("all_candidates")))
-                        for question in message.get("questions", []):
-                            st.info(question)
-                        for identity in message.get("suggestion_ids", []):
-                            if identity in suggestions:
-                                _render_assistant_suggestion(summary, conversation, suggestions[identity], disabled=assistant_busy,
-                                                             reply=message["text"])
-                        proposal = proposals.get(message.get("proposal_id"))
-                        if proposal:
-                            with st.expander(_t("brief_proposal")):
-                                current = conversation["design_brief"] or {}
-                                for field, proposed in proposal["brief"].items():
-                                    if current.get(field) != proposed:
-                                        st.markdown(f"**{_t(field)}:**")
-                                        st.json({"before": current.get(field), "after": proposed}, expanded=False)
-                                if dirty:
-                                    st.caption(_t("proposal_preserve_draft"))
-                                st.button(_t("load_brief_proposal"), key=f"load_proposal_{proposal['id']}",
-                                          on_click=_load_brief_proposal, args=(summary.run_id, conversation, proposal),
-                                          disabled=assistant_busy or dirty or proposal["based_on"] != conversation["revision"])
                 render_viewport(summary.run_id, conversation, label=_t("return_latest_brief"), controller=_VIEWPORT,
                                 surface="assistant_messages")
             if conversation.get("pending"):
@@ -1588,22 +1508,7 @@ def _render_conversation_task(summary: RunSummary) -> None:
                     st.rerun(scope="app")
                 except Exception as exc:
                     _conversation_error(exc)
-            with st.expander(_t("request_brief_proposal")):
-                language = conversation["content_language"]
-                languages = list(dict.fromkeys(([None] if language is None else []) + ["zh-CN", "en"] + ([language] if language else [])))
-                selected_language = st.selectbox(_t("task_content_language"), languages, index=languages.index(language),
-                                                 format_func=lambda value: _t("content_language_auto") if value is None else LANGUAGE_LABELS.get(value, value),
-                                                 key=f"brief_language_{summary.run_id}_{conversation['revision']}", disabled=assistant_busy)
-                if st.button(_t("refresh_brief"), key=f"refresh_brief_{summary.run_id}", disabled=assistant_busy or _current_credential() is None):
-                    try:
-                        with _app_for_manifest(summary.manifest) as app:
-                            app.refresh_conversation_brief(summary.run_id, expected_revision=conversation["revision"], content_language=selected_language)
-                            saved = app.inspect_task(summary.run_id)
-                        _submit_saved_task(saved, _current_credential().value)
-                        follow_latest(summary.run_id, "assistant_messages")
-                        st.rerun(scope="app")
-                    except Exception as exc:
-                        _conversation_error(exc)
+
 
 
 def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed: bool = True) -> None:

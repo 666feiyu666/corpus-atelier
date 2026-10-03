@@ -20,6 +20,7 @@ class DesignJob:
     profile: str
     brief: dict[str, Any]
     candidate_count: int = 1  # Maximum number of meaningful directions.
+    content_language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class NaturalLanguageDesignJob:
     profile: str
     request: str
     candidate_count: int = 1  # Maximum number of meaningful directions.
+    content_language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,9 @@ class AtelierState(TypedDict, total=False):
     run_dir: str
     profile: str
     user_request: str
+    content_language: str | None
+    user_requirements: list[str]
+    superseded_user_requirements: list[str]
     brief: dict[str, Any]
     candidate_limit: int
     candidate_count: int

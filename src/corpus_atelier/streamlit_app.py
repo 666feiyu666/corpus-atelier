@@ -21,7 +21,11 @@ from corpus_atelier.application import (
     CorpusAtelierApplication,
 )
 from corpus_atelier.artifacts.hashing import digest_file
-from corpus_atelier.conversation import load_conversation
+from corpus_atelier.artifacts.records import read_json
+from corpus_atelier.conversation import BUSY_ROUND_STATUSES
+from corpus_atelier.conversation_records import ConversationRecord, load_conversation
+from corpus_atelier import brief_editor
+from corpus_atelier.conversation_viewport import create_viewport, follow_latest, render_viewport
 from corpus_atelier.artifacts.store import ArtifactStore
 from corpus_atelier.i18n import (
     DEFAULT_LANGUAGE,
@@ -56,6 +60,7 @@ from corpus_atelier.task_supervisor import TaskSupervisor
 
 
 LOGGER = logging.getLogger(__name__)
+_VIEWPORT = create_viewport()
 ROOT = Path(__file__).resolve().parents[2]
 SHOWCASE_ROOT = Path(
     os.environ.get(
@@ -130,13 +135,9 @@ def _current_credential() -> ApiCredential | None:
     )
 
 
-def _read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def read_json_artifact(result: RunResult, name: str) -> Any:
     path = result.artifacts.get(name)
-    return _read_json(Path(path)) if path else {}
+    return read_json(Path(path)) if path else {}
 
 
 def _showcase_items() -> list[ShowcaseItem]:
@@ -144,7 +145,7 @@ def _showcase_items() -> list[ShowcaseItem]:
     if not manifest_path.is_file():
         return []
     try:
-        manifest = _read_json(manifest_path)
+        manifest = read_json(manifest_path)
     except (OSError, json.JSONDecodeError):
         return []
     if (
@@ -300,12 +301,7 @@ def _run_in_background(
             run_dir = store.find_run(run_id)
             current = store.manifest(run_dir)
             if current.get("status") != "failed":
-                store.update(
-                    run_dir,
-                    "failed",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                )
+                store.fail(run_dir, exc)
         except Exception:
             LOGGER.exception(
                 "Could not persist the failure for task %s.", run_id
@@ -892,27 +888,35 @@ def _render_new_task() -> None:
         )
 
 
+def _render_brief_contents(brief: dict, *, include_requirements: bool = True) -> None:
+    fields = ("deliverable", "topic", "article_title", "article_summary", "purpose",
+              "audience", "use_context", "setting", "art_direction")
+    for key in fields:
+        if key in brief:
+            st.markdown(f"**{_t(key)}:** {brief[key] or _t('brief_unspecified')}")
+    ratio = brief.get("canvas", {}).get("aspect_ratio")
+    if ratio:
+        st.markdown(f"**{_t('brief_canvas')}:** {ratio['width']}:{ratio['height']}")
+    groups = ["exact_copy", "constraints", "preferences"]
+    if include_requirements:
+        groups.append("user_requirements")
+    for key in groups:
+        if key not in brief:
+            continue
+        label = "confirmed_user_requirements" if key == "user_requirements" else key
+        st.markdown(f"**{_t(label)}:**")
+        if brief[key]:
+            for item in brief[key]:
+                st.markdown(f"- {item}")
+        else:
+            st.caption(_t("brief_no_copy" if key == "exact_copy" else "brief_unspecified"))
+
+
 def _render_brief(result: RunResult) -> None:
     brief = read_json_artifact(result, "brief")
-    if not brief:
-        return
-    with st.expander(_t("understood_request"), icon=":material/description:"):
-        fields = (
-            ("deliverable", "deliverable"),
-            ("topic", "topic"),
-            ("purpose", "purpose"),
-            ("audience", "audience"),
-            ("use_context", "use_context"),
-            ("setting", "setting"),
-        )
-        for label_key, key in fields:
-            if brief.get(key):
-                st.markdown(f"**{_t(label_key)}:** {brief[key]}")
-        exact_copy = brief.get("exact_copy", [])
-        if exact_copy:
-            st.markdown(f"**{_t('exact_copy')}:**")
-            for item in exact_copy:
-                st.markdown(f"- {item}")
+    if brief:
+        with st.expander(_t("understood_request"), icon=":material/description:"):
+            _render_brief_contents(brief)
 
 
 def _ready_candidates(result: RunResult) -> list[dict[str, Any]]:
@@ -1318,7 +1322,215 @@ def _render_legacy_followup(summary: RunSummary, *, active: bool) -> None:
         _conversation_error(exc)
 
 
+def _render_brief_editor(summary: RunSummary, conversation: ConversationRecord, *, disabled: bool) -> bool:
+    """Render the single authoritative brief editor, without a second contract form."""
+    revision = conversation["revision"]
+    with st.container(border=True, key=f"brief_workspace_{summary.run_id}"):
+        st.subheader(_t("design_contract"))
+        st.caption(_t("brief_review_hint"))
+        if brief_editor.draft_key(summary.run_id) not in st.session_state:
+            brief_editor.load_draft(summary.run_id, conversation)
+        draft = st.session_state[brief_editor.draft_key(summary.run_id)]
+        stale = draft["base_revision"] != revision
+        if stale:
+            st.warning(_t("brief_stale_draft"))
+        st.caption(_t("brief_editing_revision", revision=draft["source_revision"]) if draft["source_revision"] is not None else _t("brief_new_draft"))
+        with st.expander(_t("brief_saved_preview")):
+            if conversation["design_brief"]:
+                _render_brief_contents(conversation["design_brief"])
+        with st.expander(_t("brief_edit_fields"), expanded=not conversation["rounds"]):
+            brief_editor.render_fields(summary.run_id, disabled=disabled, translate=_t)
+        dirty = brief_editor.draft_dirty(summary.run_id)
+        if dirty:
+            st.info(_t("brief_unsaved_hint"))
+        with st.container(horizontal=True):
+            if st.button(_t("save_brief"), key=f"save_brief_{summary.run_id}", type="primary",
+                         disabled=disabled or stale or bool(conversation.get("pending"))):
+                try:
+                    edited_brief, questions = brief_editor.draft_values(summary.run_id)
+                    with _app_for_manifest(summary.manifest) as app:
+                        app.save_conversation_brief(
+                            summary.run_id, edited_brief, expected_revision=draft["base_revision"],
+                            source_revision=draft["source_revision"], open_questions=questions,
+                        )
+                    st.session_state.pop(brief_editor.draft_key(summary.run_id), None)
+                    st.toast(_t("brief_saved"))
+                    st.rerun(scope="app")
+                except Exception as exc:
+                    _conversation_error(exc)
+            st.button(_t("load_latest_brief"), key=f"load_latest_brief_{summary.run_id}",
+                      on_click=brief_editor.load_draft, args=(summary.run_id, conversation),
+                      disabled=disabled or conversation["design_brief"] is None)
+            if stale and dirty:
+                st.button(_t("rebase_brief_draft"), key=f"rebase_brief_{summary.run_id}",
+                          on_click=_rebase_brief_draft, args=(summary.run_id, revision), disabled=disabled)
+    return dirty
+
+
+def _rebase_brief_draft(run_id: str, revision: int) -> None:
+    st.session_state[brief_editor.draft_key(run_id)]["base_revision"] = revision
+
+
+def _edit_historical_brief(run_id: str, conversation: ConversationRecord, snapshot: dict) -> None:
+    brief_editor.load_draft(run_id, conversation, snapshot["brief"], snapshot["revision"])
+    follow_latest(run_id)
+
+
+def _render_brief_history(summary: RunSummary, conversation: ConversationRecord, *, disabled: bool) -> None:
+    history_by_revision = {entry["revision"]: entry for entry in conversation["brief_history"]}
+    history = sorted(history_by_revision.values(),
+                     key=lambda entry: entry["revision"] if entry["revision"] is not None else -1,
+                     reverse=True)
+    with st.expander(_t("brief_version_history")):
+        for snapshot in history:
+            revision = snapshot["revision"]
+            with st.expander(_t("brief_history_revision", revision=revision)):
+                _render_brief_contents(snapshot["brief"])
+                st.button(
+                    _t("edit_historical_brief"), key=f"edit_brief_{summary.run_id}_{revision}",
+                    on_click=_edit_historical_brief, args=(summary.run_id, conversation, snapshot),
+                    disabled=disabled,
+                )
+
+
+def _can_prepare_round(summary: RunSummary, conversation: ConversationRecord, *, busy: bool, dirty: bool) -> bool:
+    draft = st.session_state[brief_editor.draft_key(summary.run_id)]
+    current_saved_brief = (conversation["design_brief"] is not None
+                           and conversation["brief_revision"] == conversation["revision"])
+    current_draft = draft["base_revision"] == conversation["revision"] and not dirty
+    already_prepared = bool(conversation["rounds"] and
+                            conversation["rounds"][-1]["revision"] == conversation["revision"])
+    return (
+        current_saved_brief and current_draft and not already_prepared and not busy
+        and bool(conversation["effective_request"]) and not conversation["open_questions"]
+        and conversation["content_language"] is not None and _current_credential() is not None
+    )
+
+
+def _render_round_picker(summary: RunSummary, conversation: ConversationRecord,
+                         rounds: list[RunSummary], *, busy: bool) -> RunSummary | None:
+    if not rounds:
+        return None
+    numbers = {round_.run_id: index for index, round_ in enumerate(rounds, 1)}
+    selected_id = st.selectbox(
+        _t("design_versions"), options=list(numbers), index=len(rounds) - 1,
+        key=f"round_{summary.run_id}_{len(rounds)}",
+        format_func=lambda run_id: _t("design_round", number=numbers[run_id]),
+    )
+    selected = next(round_ for round_ in rounds if round_.run_id == selected_id)
+    record = next(record for record in conversation["rounds"] if record["run_id"] == selected_id)
+    stale = selected_id != rounds[-1].run_id or record["revision"] != conversation["revision"]
+    if stale:
+        st.caption(_t("historical_round_hint"))
+    _render_task(selected, embedded=True, actions_allowed=not stale and not busy)
+    return selected
+
+
+def _render_design_panel(summary: RunSummary, conversation: ConversationRecord,
+                         rounds: list[RunSummary], *, busy: bool, design_busy: bool) -> RunSummary | None:
+    with st.container(height=700, key=f"design_panel_{summary.run_id}", autoscroll=False):
+        render_viewport(summary.run_id, conversation, label=_t("return_latest_brief"), controller=_VIEWPORT)
+        st.html('<div id="atelier-latest-brief" aria-hidden="true"></div>')
+        dirty = _render_brief_editor(summary, conversation, disabled=design_busy)
+        if st.button(
+            _t("prepare_design_round"), type="primary", key=f"prepare_round_{summary.run_id}",
+            disabled=not _can_prepare_round(summary, conversation, busy=busy, dirty=dirty),
+        ):
+            try:
+                with _app_for_manifest(summary.manifest) as app:
+                    result = app.create_conversation_round(summary.run_id)
+                    child = app.inspect_task(result.run_id)
+                _submit_saved_task(child, _current_credential().value)
+                st.rerun(scope="app")
+            except Exception as exc:
+                _conversation_error(exc)
+        selected = _render_round_picker(summary, conversation, rounds, busy=busy)
+        _render_brief_history(summary, conversation, disabled=busy or dirty)
+        return selected
+
+
+def _render_assistant_messages(summary: RunSummary, conversation: ConversationRecord) -> None:
+    round_numbers = {record["run_id"]: index for index, record in enumerate(conversation["rounds"], 1)}
+    with st.container(height=460, key=f"assistant_messages_{summary.run_id}", autoscroll=False):
+        for message in conversation["messages"]:
+            if message.get("kind", "discussion") != "discussion":
+                continue
+            with st.chat_message(message["role"]):
+                if message["text"]:
+                    st.markdown(message["text"])
+                    if message["role"] == "assistant":
+                        with st.expander(_t("copy_reply"), icon=":material/content_copy:"):
+                            st.code(message["text"], language=None, wrap_lines=True)
+                for attachment in message.get("attachments", []):
+                    path = (summary.run_dir / attachment["path"]).resolve()
+                    if summary.run_dir in path.parents and path.is_file():
+                        st.image(path, caption=attachment["name"], width="stretch")
+                if message.get("feedback_run_id"):
+                    st.caption(_t("feedback_round", number=round_numbers.get(message["feedback_run_id"]),
+                                  candidate=message.get("candidate_id") or _t("all_candidates")))
+        render_viewport(summary.run_id, conversation, label=_t("return_latest_brief"),
+                        controller=_VIEWPORT, surface="assistant_messages")
+
+
+def _render_feedback_picker(selected: RunSummary | None, conversation: ConversationRecord) -> str | None:
+    if selected is None:
+        return None
+    number = next(index for index, record in enumerate(conversation["rounds"], 1)
+                  if record["run_id"] == selected.run_id)
+    st.caption(_t("feedback_round", number=number, candidate=_t("all_candidates")))
+    relative = selected.manifest.get("artifacts", {}).get("candidate_index")
+    if not relative:
+        return None
+    candidates = read_json(selected.run_dir / relative)
+    return st.selectbox(
+        _t("feedback_candidate"), options=[None, *[candidate["candidate_id"] for candidate in candidates]],
+        format_func=lambda value: value or _t("all_candidates"), key=f"feedback_candidate_{selected.run_id}",
+    )
+
+
+def _render_assistant_panel(summary: RunSummary, conversation: ConversationRecord,
+                            selected: RunSummary | None, *, busy: bool) -> None:
+    st.subheader(_t("design_assistant"))
+    st.caption(_t("assistant_hint"))
+    candidate_id = _render_feedback_picker(selected, conversation)
+    _render_assistant_messages(summary, conversation)
+    if summary.status == "failed":
+        st.error(_t("conversation_failed"))
+        if st.button(_t("retry_conversation"), key=f"retry_chat_{summary.run_id}",
+                     disabled=_task_is_live(summary) or _current_credential() is None):
+            try:
+                with _app_for_manifest(summary.manifest) as app:
+                    app.retry_conversation(summary.run_id)
+                    saved = app.inspect_task(summary.run_id)
+                if saved.status == "discussing_request":
+                    _submit_saved_task(saved, _current_credential().value)
+                st.rerun(scope="app")
+            except Exception as exc:
+                _conversation_error(exc)
+    elif conversation.get("pending"):
+        st.info(_t("status.discussing_request"))
+    submission = st.chat_input(
+        _t("followup_placeholder"), key=f"conversation_input_{summary.run_id}",
+        accept_file="multiple", file_type=["png", "jpg", "jpeg", "webp"], max_upload_size=10,
+        submit_mode="disable", disabled=busy or _current_credential() is None,
+    )
+    if submission:
+        try:
+            with _app_for_manifest(summary.manifest) as app:
+                app.queue_conversation_message(
+                    summary.run_id, _submission_text(submission), attachments=_submission_attachments(submission),
+                    feedback_run_id=selected.run_id if selected else None, candidate_id=candidate_id,
+                )
+                saved = app.inspect_task(summary.run_id)
+            _submit_saved_task(saved, _current_credential().value)
+            follow_latest(summary.run_id, "assistant_messages")
+            st.rerun(scope="app")
+        except Exception as exc:
+            _conversation_error(exc)
+
+
 def _render_conversation_task(summary: RunSummary) -> None:
+    """Arrange the workspace; each panel owns its rendering and user actions."""
     try:
         with _app_for_manifest(summary.manifest) as app:
             conversation = app.conversation(summary.run_id)
@@ -1328,102 +1540,30 @@ def _render_conversation_task(summary: RunSummary) -> None:
         return
     st.title(summary.manifest.get("title", summary.run_id))
     st.caption(_t("conversation_hint"))
-    for message in conversation["messages"]:
-        with st.chat_message(message["role"]):
-            if message["text"]:
-                st.markdown(message["text"])
-            for attachment in message.get("attachments", []):
-                path = (summary.run_dir / attachment["path"]).resolve()
-                if summary.run_dir in path.parents and path.is_file():
-                    st.image(path, caption=attachment["name"], width=300)
-            if message.get("feedback_run_id"):
-                number = next((i for i, record in enumerate(conversation["rounds"], 1)
-                               if record["run_id"] == message["feedback_run_id"]), None)
-                st.caption(_t("feedback_round", number=number, candidate=message.get("candidate_id") or _t("all_candidates")))
-    busy = _task_is_live(summary) or any(_task_supervisor().is_running(r.run_id) for r in rounds)
-    if conversation.get("pending"):
-        if summary.status == "failed":
-            st.error(_t("conversation_failed"))
-            if st.button(_t("retry_conversation"), key=f"retry_chat_{summary.run_id}",
-                         disabled=busy or _current_credential() is None):
-                try:
-                    with _app_for_manifest(summary.manifest) as app:
-                        app.retry_conversation(summary.run_id)
-                        saved = app.inspect_task(summary.run_id)
-                    _submit_saved_task(saved, _current_credential().value)
-                    st.rerun(scope="app")
-                except Exception as exc:
-                    _conversation_error(exc)
-        else:
-            st.info(_t("status.discussing_request") if busy else _t("recovery_waiting_for_key"))
-    if conversation["effective_request"]:
-        with st.expander(_t("current_design_requirements")):
-            st.markdown(conversation["effective_request"])
-            for note in conversation["reference_notes"]:
-                st.markdown(f"- {note}")
-    for question in conversation["open_questions"]:
-        st.info(question)
-
-    selected_round = None
-    candidate_id = None
-    if rounds:
-        selected_id = st.selectbox(
-            _t("design_versions"), options=[r.run_id for r in rounds],
-            index=len(rounds) - 1, key=f"round_{summary.run_id}_{len(rounds)}",
-            format_func=lambda value: _t("design_round", number=next(i for i, r in enumerate(rounds, 1) if r.run_id == value)),
-        )
-        selected_round = next(r for r in rounds if r.run_id == selected_id)
-        record = next(r for r in conversation["rounds"] if r["run_id"] == selected_id)
-        stale = selected_id != rounds[-1].run_id or record["revision"] != conversation["revision"]
-        if stale:
-            st.caption(_t("historical_round_hint"))
-        _render_task(selected_round, embedded=True, actions_allowed=not stale and not busy and not conversation.get("pending"))
-        index_relative = selected_round.manifest.get("artifacts", {}).get("candidate_index")
-        if index_relative:
-            candidates = json.loads((selected_round.run_dir / index_relative).read_text(encoding="utf-8"))
-            ids = [candidate["candidate_id"] for candidate in candidates]
-            if ids:
-                candidate_id = st.selectbox(
-                    _t("feedback_candidate"), options=[None, *ids],
-                    format_func=lambda value: value or _t("all_candidates"),
-                    key=f"feedback_candidate_{selected_id}",
-                )
-
-    latest_revision = conversation["rounds"][-1]["revision"] if rounds else -1
-    if st.button(
-        _t("prepare_design_round"), type="primary", key=f"prepare_round_{summary.run_id}",
-        disabled=busy or bool(conversation.get("pending")) or not conversation["effective_request"]
-        or bool(conversation["open_questions"]) or latest_revision == conversation["revision"]
-        or _current_credential() is None,
-    ):
-        try:
-            with _app_for_manifest(summary.manifest) as app:
-                result = app.create_conversation_round(summary.run_id)
-                child = app.inspect_task(result.run_id)
-            _submit_saved_task(child, _current_credential().value)
-            st.rerun(scope="app")
-        except Exception as exc:
-            _conversation_error(exc)
-    submission = st.chat_input(
-        _t("followup_placeholder"), key=f"conversation_input_{summary.run_id}",
-        accept_file="multiple", file_type=["png", "jpg", "jpeg", "webp"],
-        max_upload_size=10, submit_mode="disable",
-        disabled=busy or bool(conversation.get("pending")) or _current_credential() is None,
-    )
-    if submission:
-        try:
-            with _app_for_manifest(summary.manifest) as app:
-                app.queue_conversation_message(
-                    summary.run_id, _submission_text(submission),
-                    attachments=_submission_attachments(submission),
-                    feedback_run_id=selected_round.run_id if selected_round else None,
-                    candidate_id=candidate_id,
-                )
-                saved = app.inspect_task(summary.run_id)
-            _submit_saved_task(saved, _current_credential().value)
-            st.rerun(scope="app")
-        except Exception as exc:
-            _conversation_error(exc)
+    assistant_busy = _task_is_live(summary) or bool(conversation.get("pending"))
+    design_busy = any(_task_supervisor().is_running(round_.run_id) or round_.status in BUSY_ROUND_STATUSES
+                      for round_ in rounds)
+    workspace_busy = assistant_busy or design_busy
+    view = st.segmented_control(
+        _t("workspace_view"), ["split", "design", "assistant"], default="split",
+        format_func=lambda value: _t(f"workspace_{value}"), key=f"workspace_view_{summary.run_id}",
+        persist_state="session", required=True,
+    ) or "split"
+    if view == "split":
+        design_column, assistant_column = st.columns([2.2, 1], gap="large", vertical_alignment="top")
+    else:
+        design_column, assistant_column = st.container(), st.container()
+    if brief_editor.draft_key(summary.run_id) not in st.session_state:
+        brief_editor.load_draft(summary.run_id, conversation)
+    selected_id = st.session_state.get(f"round_{summary.run_id}_{len(rounds)}", rounds[-1].run_id if rounds else None)
+    selected = next((round_ for round_ in rounds if round_.run_id == selected_id), None)
+    if view != "assistant":
+        with design_column:
+            selected = _render_design_panel(summary, conversation, rounds,
+                                            busy=workspace_busy, design_busy=design_busy)
+    if view != "design":
+        with assistant_column:
+            _render_assistant_panel(summary, conversation, selected, busy=assistant_busy)
 
 
 def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed: bool = True) -> None:
@@ -1545,7 +1685,7 @@ def _render_live_task(run_id: str) -> None:
         return
     _ensure_recoverable_tasks(tasks)
     _render_task(summary)
-    if not _task_is_live(summary):
+    if not _task_is_live(summary) and not summary.manifest.get("is_conversation"):
         st.rerun(scope="app")
 
 
@@ -1578,7 +1718,7 @@ def main() -> None:
         return
 
     summary = next(task for task in tasks if task.run_id == selected)
-    if _task_is_live(summary):
+    if _task_is_live(summary) or summary.manifest.get("is_conversation"):
         _render_live_task(summary.run_id)
     else:
         _render_task(summary)

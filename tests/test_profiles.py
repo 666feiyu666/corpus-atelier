@@ -56,6 +56,15 @@ class ProfileTests(unittest.TestCase):
             get_profile("art-article-cover").objective,
         )
 
+    def test_brief_contract_is_optional_locally_and_required_in_provider_outputs(self):
+        for schema_name in {profile.brief_schema for profile in PROFILES.values()}:
+            local = load_schema(schema_name)
+            self.assertIn("user_requirements", local["properties"])
+            self.assertNotIn("user_requirements", local["required"])
+            provider = _schema_for_openai(schema_name)
+            self.assertEqual(set(provider["required"]), set(provider["properties"]))
+            self.assertNotIn("user_requirements", load_schema(schema_name)["required"])
+
     def test_general_graphic_brief_accepts_open_delivery_and_explicit_canvas(self):
         brief = {
             "deliverable": "museum ticket graphic",

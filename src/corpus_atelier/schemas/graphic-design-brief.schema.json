@@ -2,12 +2,14 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "content_language": {"type": "string", "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"},
     "deliverable": {"type": "string", "minLength": 1},
     "purpose": {"type": "string", "minLength": 1},
     "audience": {"type": "string", "minLength": 1},
     "use_context": {"type": "string", "minLength": 1},
     "exact_copy": {"type": "array", "items": {"type": "string"}},
     "constraints": {"type": "array", "items": {"type": "string"}},
+    "user_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "preferences": {"type": "array", "items": {"type": "string"}},
     "canvas": {
       "type": "object",

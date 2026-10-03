@@ -16,11 +16,15 @@ def _schema_for_openai(schema_name: str) -> dict:
 
     def strip_unsupported_keywords(value):
         if isinstance(value, dict):
-            return {
+            result = {
                 key: strip_unsupported_keywords(item)
                 for key, item in value.items()
                 if key != "uniqueItems"
             }
+            # Local briefs accept older records; strict provider outputs include every field.
+            if result.get("type") == "object" and "properties" in result:
+                result["required"] = list(result["properties"])
+            return result
         if isinstance(value, list):
             return [strip_unsupported_keywords(item) for item in value]
         return value

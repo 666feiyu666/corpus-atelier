@@ -7,6 +7,7 @@
     "audience": {"type": "string", "minLength": 1},
     "exact_copy": {"type": "array", "items": {"type": "string"}},
     "constraints": {"type": "array", "items": {"type": "string"}},
+    "user_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "art_direction": {"type": "string"}
   },
   "required": ["article_title", "article_summary", "audience", "exact_copy", "constraints", "art_direction"]

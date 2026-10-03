@@ -14,6 +14,9 @@ problem actionable without prematurely designing its solution.
 
 - Identify the actual deliverable, communication purpose, audience, and viewing or use context.
 - Preserve explicit requirements and prohibitions without weakening or embellishing them.
+- Use `user_requirements` for explicit mandatory requirements. When a confirmed contract is
+  supplied, copy that list exactly; never add, remove, translate, or paraphrase its entries.
+  Otherwise, extract only explicit mandatory requirements from the request, or use an empty list.
 - Distinguish user requirements from creative latitude. Treat unspecified visual choices as
   delegated when the user expresses uncertainty, asks for development, or simply leaves them
   open.

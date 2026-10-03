@@ -40,7 +40,7 @@ class BriefEditingTests(unittest.TestCase):
                     saved = app.conversation(task.run_id)
                     self.assertEqual(saved["design_brief"], brief)
                     self.assertEqual(saved["user_requirements"], brief["user_requirements"])
-                    self.assertEqual(saved["suggested_user_requirements"], brief["user_requirements"])
+                    self.assertNotIn("suggested_user_requirements", saved)
                     self.assertEqual(len(text.design_calls) + len(text.chat_calls), calls)
                     self.assertEqual(saved["brief_history"][0]["brief"], original["design_brief"])
                     self.assertEqual(saved["brief_history"][-1]["brief"], brief)
@@ -67,7 +67,7 @@ class BriefEditingTests(unittest.TestCase):
                 self.assertEqual(len(saved["brief_history"]), 2)
                 self.assertIn('"design_brief"', text.chat_calls[-1]["prompt"])
             with self.app(directory, text) as reopened:
-                self.assertEqual(reopened.conversation(task.run_id)["manual_brief_fields"]["exact_copy"], [])
+                self.assertEqual(reopened.conversation(task.run_id)["design_brief"]["exact_copy"], [])
 
     def test_editing_historical_brief_creates_new_revision_and_invalidates_old_approval(self):
         with TemporaryDirectory() as directory, self.app(directory) as app:
@@ -109,11 +109,17 @@ class BriefEditingTests(unittest.TestCase):
     def test_resolving_questions_in_editor_enables_preparation(self):
         with TemporaryDirectory() as directory:
             text = ConversationTextProvider()
-            text.questions = ["Which audience is intended?"]
             with self.app(directory, text) as app:
                 task, initial = self.ready(app)
+                previous_manifest = app.store.manifest(task.run_dir)
+                app.save_conversation_brief(task.run_id, initial["design_brief"], expected_revision=1,
+                                            open_questions=["Which audience is intended?"])
+                self.assertEqual(app.conversation(task.run_id)["revision"], 2)
+                self.assertNotEqual(app.store.manifest(task.run_dir)["updated_at"], previous_manifest["updated_at"])
+                with self.assertRaisesRegex(ValueError, "outstanding design questions"):
+                    app.create_conversation_round(task.run_id)
                 edited = {**initial["design_brief"], "audience": "Workshop attendees."}
-                app.save_conversation_brief(task.run_id, edited, expected_revision=1, open_questions=[])
+                app.save_conversation_brief(task.run_id, edited, expected_revision=2, open_questions=[])
                 self.assertEqual(app.create_conversation_round(task.run_id).status, "created")
 
     def test_promoted_single_round_brief_can_be_used_as_revision_zero_source(self):
@@ -138,7 +144,6 @@ class BriefEditingTests(unittest.TestCase):
             path = task.run_dir / "conversation.json"
             value = read_json(path)
             del value["brief_history"]
-            del value["manual_brief_fields"]
             write_json(path, value)
             before = path.read_bytes()
             recovered = app.conversation(task.run_id)

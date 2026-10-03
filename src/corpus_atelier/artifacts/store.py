@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import logging
 from pathlib import Path
 import re
@@ -32,6 +31,40 @@ def validate_run_id(run_id: str) -> str:
     if not isinstance(run_id, str) or not RUN_ID_PATTERN.fullmatch(run_id):
         raise ValueError("Run ID must use the generated timestamp_hash format.")
     return run_id
+
+
+def read_manifest(path: Path) -> dict:
+    """Read the minimum task contract required by listing and recovery."""
+    manifest = read_json(path)
+    if not isinstance(manifest, dict):
+        raise ValueError("The task manifest must be an object.")
+    validate_case_id(manifest.get("case_id"))
+    validate_run_id(manifest.get("run_id"))
+    if manifest["run_id"] != path.parent.name or manifest["case_id"] != path.parent.parent.name:
+        raise ValueError("The task manifest identity differs from its directory.")
+    if not isinstance(manifest.get("status"), str) or not manifest["status"]:
+        raise ValueError("The task manifest must include a status.")
+    for field in ("created_at", "updated_at"):
+        if field in manifest and not isinstance(manifest[field], str):
+            raise ValueError(f"The task manifest's {field} must be a string.")
+    for field in ("artifacts", "models"):
+        if field in manifest and not isinstance(manifest[field], dict):
+            raise ValueError(f"The task manifest's {field} must be an object.")
+    return manifest
+
+
+def _listed_conversation(manifest: dict, path: Path) -> dict:
+    """Reflect pending work while isolating an unreadable conversation record."""
+    try:
+        conversation = read_json(path)
+        if not isinstance(conversation, dict):
+            raise ValueError("The conversation record must be an object.")
+    except (OSError, ValueError) as exc:
+        LOGGER.warning("Could not read conversation %s: %s", path, exc)
+        return {**manifest, "status": "failed", "error_type": type(exc).__name__, "error": str(exc)}
+    if conversation.get("pending") and manifest["status"] != "failed":
+        return {**manifest, "status": "discussing_request"}
+    return manifest
 
 
 class ArtifactStore:
@@ -120,7 +153,7 @@ class ArtifactStore:
         return run_id, run_dir
 
     def manifest(self, run_dir: Path) -> dict:
-        return read_json(run_dir / "manifest.json")
+        return read_manifest(run_dir / "manifest.json")
 
     def update(self, run_dir: Path, status: str, **details) -> dict:
         manifest = self.manifest(run_dir)
@@ -136,6 +169,13 @@ class ArtifactStore:
             except Exception:
                 LOGGER.exception("Task status callback failed.")
         return manifest
+
+    def fail(self, run_dir: Path, error: Exception) -> None:
+        """Persist a failure without masking it if its record cannot be written."""
+        try:
+            self.update(run_dir, "failed", error_type=type(error).__name__, error=str(error))
+        except Exception:
+            LOGGER.exception("Could not persist the failure for task %s.", run_dir.name)
 
     def register(self, run_dir: Path, **artifacts: str) -> dict:
         manifest = self.manifest(run_dir)
@@ -168,15 +208,12 @@ class ArtifactStore:
             if not path.is_file():
                 continue
             try:
-                manifest = read_json(path)
-                validate_case_id(manifest["case_id"])
-                validate_run_id(manifest["run_id"])
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                manifest = read_manifest(path)
+            except (OSError, ValueError) as exc:
+                LOGGER.warning("Skipping unreadable manifest %s: %s", path, exc)
                 continue
-            if manifest.get("is_conversation") and manifest["status"] != "failed":
-                conversation_path = path.parent / "conversation.json"
-                if conversation_path.is_file() and read_json(conversation_path).get("pending"):
-                    manifest["status"] = "discussing_request"
+            if manifest.get("is_conversation"):
+                manifest = _listed_conversation(manifest, path.parent / "conversation.json")
             tasks.append((path.parent.resolve(), manifest))
         tasks.sort(
             key=lambda item: item[1].get(

@@ -6,6 +6,12 @@ from importlib.resources import files
 from jsonschema import Draft202012Validator, ValidationError
 
 
+def validate_candidate_count(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value not in {1, 2, 3}:
+        raise ValueError("Candidate limit must be 1, 2, or 3.")
+    return value
+
+
 def load_schema(name: str) -> dict:
     schema = json.loads(files("corpus_atelier").joinpath("schemas", name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)

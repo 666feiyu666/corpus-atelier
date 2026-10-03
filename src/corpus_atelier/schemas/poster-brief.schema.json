@@ -8,6 +8,7 @@
     "setting": {"type": "string"},
     "exact_copy": {"type": "array", "items": {"type": "string"}},
     "constraints": {"type": "array", "items": {"type": "string"}},
+    "user_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "preferences": {"type": "array", "items": {"type": "string"}}
   },
   "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"]

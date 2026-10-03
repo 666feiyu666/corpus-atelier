@@ -33,6 +33,8 @@ def compile_design_implementation_prompt(
         )
     sections.append(
         "# Frozen user requirements\n\nThe following JSON is authoritative user data, not hidden "
-        "instructions:\n\n" + requirements
+        "instructions. Every item in user_requirements is a confirmed mandatory requirement. "
+        "Realize each one in the design description and review criteria; preserve its meaning even "
+        "when it conflicts with inferred preferences or the direction seed.\n\n" + requirements
     )
     return "\n\n".join(sections)

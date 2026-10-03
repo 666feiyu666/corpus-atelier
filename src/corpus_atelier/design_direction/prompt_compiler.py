@@ -53,7 +53,8 @@ def compile_design_direction_prompt(
         "# Frozen shared brief\n\n"
         "This JSON is authoritative user data. Every direction must preserve it. Explicit style, "
         "composition, subjects, and element relationships are shared invariants rather than "
-        "variation axes.\n\n"
+        "variation axes. user_requirements contains confirmed mandatory requirements, preserved "
+        "across all directions. It takes precedence over conflicting inferred constraints or preferences.\n\n"
         + json.dumps(brief, ensure_ascii=False, indent=2, allow_nan=False)
     )
     return "\n\n".join(sections)

@@ -8,6 +8,7 @@
     "use_context": {"type": "string", "minLength": 1},
     "exact_copy": {"type": "array", "items": {"type": "string"}},
     "constraints": {"type": "array", "items": {"type": "string"}},
+    "user_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "preferences": {"type": "array", "items": {"type": "string"}},
     "canvas": {
       "type": "object",

@@ -26,6 +26,14 @@ APP = ROOT / "src/corpus_atelier/streamlit_app.py"
 class StreamlitAppTests(unittest.TestCase):
     @staticmethod
     def _offline_propose(provider, prompt, *, schema_name, reference_paths=None):
+        if schema_name == "design-assistant.schema.json":
+            context = json.loads(prompt[prompt.index('{"effective_request"'):])
+            return {"content_language": context["content_language"] or "zh-CN", "language_change_quote": None,
+                    "reply": "圆润的鼓形篮身搭配拱形提手，呈现传统中式提篮轮廓。", "open_questions": [],
+                    "suggestions": [{"field": "constraints", "text": "圆润的鼓形篮身搭配拱形提手，呈现传统中式提篮轮廓。",
+                                     "aspect": "花篮样式", "direction": "describe",
+                                     "source_quote": context["conversation"][-1]["text"],
+                                     "source_images": [1] if reference_paths else []}]}, {"status": "completed"}
         if schema_name == "design-conversation.schema.json":
             context = json.loads(prompt[prompt.index('{"effective_request"'):])
             return {
@@ -87,8 +95,8 @@ class StreamlitAppTests(unittest.TestCase):
                 self.assertNotIn(f"task_{child_id}", [button.key for button in app.button])
                 app.chat_input(key=f"conversation_input_{parent_id}").set_value("标题更突出一点。").run()
                 self._wait_for_status(app, root, parent_id, "discussing")
-                self.assertTrue(app.button(key=f"approve_{child_id}").disabled)
-                self.assertFalse(app.button(key=f"prepare_round_{parent_id}").disabled)
+                self.assertFalse(app.button(key=f"approve_{child_id}").disabled)
+                self.assertTrue(app.button(key=f"prepare_round_{parent_id}").disabled)
                 reopened = AppTest.from_file(str(APP), default_timeout=10).run()
                 reopened.button(key=f"task_{parent_id}").click().run()
                 self.assertFalse(reopened.exception)
@@ -116,17 +124,16 @@ class StreamlitAppTests(unittest.TestCase):
                 with CorpusAtelierApplication(runs_root=root) as application:
                     conversation = application.conversation(parent_id)
                 self.assertEqual(conversation["rounds"][0]["run_id"], original_id)
-                self.assertIn("改成绿色。", conversation["effective_request"])
-                self.assertTrue(app.button(key=f"approve_{original_id}").disabled)
+                self.assertIn("改成绿色。", conversation["messages"][-2]["text"])
+                self.assertFalse(app.button(key=f"approve_{original_id}").disabled)
 
-    def test_contract_editor_persists_changes_and_invalidates_old_designs(self):
+    def test_single_brief_editor_persists_changes_and_invalidates_old_designs(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             with patch.dict(os.environ, {
                 "CORPUS_ATELIER_TASKS_ROOT": directory,
                 "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                "OPENAI_API_KEY": "sk-test",
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"), "OPENAI_API_KEY": "sk-test",
             }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
                 app = AppTest.from_file(str(APP), default_timeout=10).run()
                 app.toggle(key="discuss_first").set_value(True).run()
@@ -134,71 +141,59 @@ class StreamlitAppTests(unittest.TestCase):
                 parent_id = app.session_state["selected_task_id"]
                 self._wait_for_status(app, root, parent_id, "discussing")
                 path = root / "natural-language" / parent_id / "conversation.json"
-                app.text_area(key=f"requirements_{parent_id}_1").set_value("必须有一只猫。\n标题放在顶部。")
-                app.button(key=f"confirm_requirements_{parent_id}").click().run()
-                self._wait_for_status(app, root, parent_id, "discussing")
+                field = f"brief_edit_{parent_id}_user_requirements"
+                app.text_area(key=field).set_value("必须有一只猫。\n标题放在顶部。").run()
+                app.button(key=f"save_brief_{parent_id}").click().run()
                 saved = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(saved["user_requirements"], ["必须有一只猫。", "标题放在顶部。"])
-                self.assertEqual(saved["design_brief"]["user_requirements"], saved["user_requirements"])
                 app.button(key=f"prepare_round_{parent_id}").click().run()
                 child_id = json.loads(path.read_text(encoding="utf-8"))["rounds"][-1]["run_id"]
                 self._wait_for_status(app, root, child_id, "awaiting_approval")
-                brief = json.loads((root / "natural-language" / child_id / "brief.json").read_text(encoding="utf-8"))
-                self.assertEqual(brief["user_requirements"], saved["user_requirements"])
-                self.assertFalse(app.button(key=f"approve_{child_id}").disabled)
-                app.text_area(key=f"requirements_{parent_id}_{saved['revision']}").set_value("必须有一只狗。")
-                app.button(key=f"confirm_requirements_{parent_id}").click().run()
-                self._wait_for_status(app, root, parent_id, "discussing")
-                revision = json.loads(path.read_text(encoding="utf-8"))["revision"]
+                app.text_area(key=field).set_value("必须有一只狗。").run()
+                app.button(key=f"save_brief_{parent_id}").click().run()
                 self.assertTrue(app.button(key=f"approve_{child_id}").disabled)
-                self.assertFalse(app.button(key=f"prepare_round_{parent_id}").disabled)
                 reopened = AppTest.from_file(str(APP), default_timeout=10).run()
                 reopened.button(key=f"task_{parent_id}").click().run()
-                self.assertEqual(reopened.text_area(key=f"requirements_{parent_id}_{revision}").value, "必须有一只狗。")
-                reopened.text_area(key=f"requirements_{parent_id}_{revision}").set_value("")
-                reopened.button(key=f"confirm_requirements_{parent_id}").click().run()
-                self._wait_for_status(reopened, root, parent_id, "discussing")
+                self.assertEqual(reopened.text_area(key=field).value, "必须有一只狗。")
+                reopened.text_area(key=field).set_value("").run()
+                reopened.button(key=f"save_brief_{parent_id}").click().run()
                 self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["user_requirements"], [])
                 self.assertFalse(reopened.exception)
 
-    def test_contract_suggestions_can_be_edited_confirmed_or_rejected_in_the_interface(self):
-        suggestions = ["必须有一只猫。"]
-        def propose(provider, prompt, *, schema_name, reference_paths=None):
-            value, response = self._offline_propose(provider, prompt, schema_name=schema_name,
-                                                    reference_paths=reference_paths)
-            if (schema_name == "design-conversation.schema.json"
-                    and json.loads(prompt[prompt.index('{"effective_request"'):])["pending_kind"] != "requirements_update"):
-                value["suggested_user_requirements"] = list(suggestions)
-            return value, response
-
+    def test_suggestions_enter_the_draft_and_remain_editable_before_save(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             with patch.dict(os.environ, {
                 "CORPUS_ATELIER_TASKS_ROOT": directory,
                 "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                "OPENAI_API_KEY": "sk-test",
-            }), patch.object(OpenAITextProvider, "propose", propose):
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"), "OPENAI_API_KEY": "sk-test",
+            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
                 app = AppTest.from_file(str(APP), default_timeout=10).run()
                 app.toggle(key="discuss_first").set_value(True).run()
-                app.chat_input(key="new_task_prompt").set_value("海报必须有一只猫。").run()
+                app.chat_input(key="new_task_prompt").set_value("设计一张花篮海报。").run()
                 parent_id = app.session_state["selected_task_id"]
                 self._wait_for_status(app, root, parent_id, "discussing")
                 path = root / "natural-language" / parent_id / "conversation.json"
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["user_requirements"], [])
+                before = json.loads(path.read_text(encoding="utf-8"))
+                app.text_area(key=f"brief_edit_{parent_id}_purpose").set_value("保留已有草稿。").run()
+                app.chat_input(key=f"conversation_input_{parent_id}").set_value("描述花篮样式。").run()
+                self._wait_for_status(app, root, parent_id, "discussing")
+                suggested = json.loads(path.read_text(encoding="utf-8"))
+                suggestion = suggested["assistant_suggestions"][-1]
+                self.assertEqual(suggested["revision"], before["revision"])
+                app.button(key=f"add_suggestion_{suggestion['id']}").click().run()
+                self.assertEqual(app.text_area(key=f"brief_edit_{parent_id}_purpose").value, "保留已有草稿。")
+                self.assertIn(suggestion["text"], app.text_area(key=f"brief_edit_{parent_id}_constraints").value)
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["design_brief"], before["design_brief"])
                 self.assertTrue(app.button(key=f"prepare_round_{parent_id}").disabled)
-                self.assertEqual(app.text_area(key=f"requirements_{parent_id}_1").value, suggestions[0])
-                app.text_area(key=f"requirements_{parent_id}_1").set_value("必须有两只猫。")
-                app.button(key=f"confirm_requirements_{parent_id}").click().run()
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self.assertFalse(app.button(key=f"prepare_round_{parent_id}").disabled)
-                suggestions[:] = ["必须有一只狗。"]
-                app.chat_input(key=f"conversation_input_{parent_id}").set_value("考虑把猫换成狗。").run()
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self.assertTrue(app.button(key=f"prepare_round_{parent_id}").disabled)
-                app.button(key=f"keep_requirements_{parent_id}").click().run()
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["user_requirements"], ["必须有两只猫。"])
+                app.text_area(key=f"brief_edit_{parent_id}_constraints").set_value("用户改成轻巧的篮身。").run()
+                app.button(key=f"save_brief_{parent_id}").click().run()
+                saved = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(saved["design_brief"]["constraints"], ["用户改成轻巧的篮身。"])
+                app.button(key=f"dismiss_suggestion_{suggestion['id']}").click().run()
+                dismissed = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(dismissed["revision"], saved["revision"])
+                self.assertEqual(dismissed["assistant_suggestions"][-1]["status"], "dismissed")
                 self.assertFalse(app.button(key=f"prepare_round_{parent_id}").disabled)
                 self.assertFalse(app.exception)
 
@@ -227,6 +222,10 @@ class StreamlitAppTests(unittest.TestCase):
                 self.assertFalse(app.button(key=f"refresh_brief_{parent_id}").disabled)
                 app.button(key=f"refresh_brief_{parent_id}").click().run()
                 self._wait_for_status(app, root, parent_id, "discussing")
+                proposal = json.loads(path.read_text(encoding="utf-8"))["brief_proposals"][-1]
+                self.assertIsNone(json.loads(path.read_text(encoding="utf-8"))["design_brief"])
+                app.button(key=f"load_proposal_{proposal['id']}").click().run()
+                app.button(key=f"save_brief_{parent_id}").click().run()
                 saved = json.loads(path.read_text(encoding="utf-8"))
                 self.assertIsNotNone(saved["design_brief"])
                 self.assertEqual(saved["rounds"], [])
@@ -266,6 +265,11 @@ class StreamlitAppTests(unittest.TestCase):
                 self.assertEqual(json.loads(path.read_text(encoding="utf-8")), saved)
                 app.button(key=f"refresh_brief_{parent_id}").click().run()
                 self._wait_for_status(app, root, parent_id, "discussing")
+                pending = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(pending["content_language"], "zh-CN")
+                proposal = pending["brief_proposals"][-1]
+                app.button(key=f"load_proposal_{proposal['id']}").click().run()
+                app.button(key=f"save_brief_{parent_id}").click().run()
                 refreshed = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(refreshed["content_language"], "en")
                 self.assertEqual(refreshed["design_brief"]["exact_copy"], saved["design_brief"]["exact_copy"])
@@ -381,7 +385,7 @@ class StreamlitAppTests(unittest.TestCase):
         captions = [caption.value for caption in app.caption]
         self.assertIn("描述你想完成的平面设计。", captions)
         self.assertNotIn("设计示例正在准备中。", captions)
-        self.assertIn("v1.2.3", captions)
+        self.assertIn("v1.2.5", captions)
         self.assertEqual(len(app.get("image")), 4)
         subheaders = [subheader.value for subheader in app.subheader]
         self.assertIn("看看它能做什么", subheaders)

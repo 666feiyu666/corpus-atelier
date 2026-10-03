@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "corpus-atelier"
-version = "1.2.3"
+version = "1.2.5"
 description = "An AI-powered tool for creating complete graphic designs from natural-language requests"
 requires-python = ">=3.10"
 dependencies = [

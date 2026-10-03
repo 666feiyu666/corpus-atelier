@@ -36,7 +36,9 @@ class LanguageTextProvider(ConversationTextProvider):
         language = self.change_language or prompt_language(prompt)["content_language"] or self.initial_language
         value, response = super().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
         chinese = language.startswith("zh")
-        if schema_name == "design-conversation.schema.json":
+        if schema_name == "design-assistant.schema.json":
+            value.update(content_language=self.change_language or language, language_change_quote=self.change_quote)
+        elif schema_name == "design-conversation.schema.json":
             value.update(
                 content_language=self.change_language or language,
                 language_change_quote=self.change_quote,
@@ -153,6 +155,9 @@ class LanguageTests(unittest.TestCase):
                 text.change_quote = "改用英语说明设计需求"
                 app.retry_conversation(parent.run_id)
                 app.continue_task(parent.run_id)
+                proposal = app.conversation(parent.run_id)
+                self.assertEqual(proposal["content_language"], "zh-CN")
+                app.save_conversation_brief(parent.run_id, proposal["brief_proposals"][-1]["brief"], expected_revision=proposal["revision"])
                 self.assertEqual(app.conversation(parent.run_id)["content_language"], "en")
                 self.assertEqual(app.conversation(parent.run_id)["design_brief"]["exact_copy"], COPY)
 
@@ -181,6 +186,9 @@ class LanguageTests(unittest.TestCase):
                     app.create_conversation_round(parent.run_id)
                 app.refresh_conversation_brief(parent.run_id, expected_revision=legacy["revision"])
                 app.continue_task(parent.run_id)
+                proposal = app.conversation(parent.run_id)
+                self.assertIsNone(proposal["content_language"])
+                app.save_conversation_brief(parent.run_id, proposal["brief_proposals"][-1]["brief"], expected_revision=proposal["revision"])
                 updated = app.conversation(parent.run_id)
                 self.assertEqual(updated["content_language"], "zh-CN")
                 self.assertEqual(updated["design_brief"]["purpose"], "以写实广式插花传递国庆祝福。")
@@ -206,6 +214,9 @@ class LanguageTests(unittest.TestCase):
                 app.retry_conversation(parent.run_id)
                 app.continue_task(parent.run_id)
                 self.assertEqual(len(text.chat_calls), count)
+                proposal = app.conversation(parent.run_id)
+                self.assertEqual(proposal["content_language"], "zh-CN")
+                app.save_conversation_brief(parent.run_id, proposal["brief_proposals"][-1]["brief"], expected_revision=proposal["revision"])
                 self.assertEqual(app.conversation(parent.run_id)["content_language"], "en")
                 self.assertEqual(app.inspect_task(parent.run_id).manifest["content_language"], "en")
 
@@ -256,7 +267,7 @@ class LanguageTests(unittest.TestCase):
                 reopened.continue_task(parent.run_id)
                 self.assertEqual(len(text.chat_calls), previous_calls + 1)
                 self.assertEqual(reopened.conversation(parent.run_id)["content_language"], "zh-CN")
-                self.assertEqual(reopened.conversation(parent.run_id)["effective_request"], "设计一张国庆花篮海报，右下角留白。")
+                self.assertEqual(reopened.conversation(parent.run_id)["design_brief"]["content_language"], "zh-CN")
 
     def test_refresh_rejects_translated_source_copy_and_retains_previous_brief(self):
         class AlteredCopyProvider(LanguageTextProvider):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from copy import deepcopy
 from functools import wraps
 from io import BytesIO
 import json
@@ -63,6 +64,27 @@ def load_conversation(root: Path) -> dict:
     value.setdefault("brief_revision", None)
     value.setdefault("requirement_interpretations", [])
     value.setdefault("content_language", None)
+    value.setdefault("manual_brief_fields", {})
+    value.setdefault("discussion_revision", 0)
+    value.setdefault("assistant_suggestions", [])
+    value.setdefault("brief_proposals", [])
+    if "brief_history" not in value:
+        # Recover prior turn snapshots without rewriting archived records.
+        history = []
+        message_id = None
+        for message in value["messages"]:
+            if message["role"] == "user":
+                message_id = message.get("id")
+            elif message_id and message.get("revision") is not None:
+                path = root / "conversation-turns" / message_id / "brief/brief.json"
+                if path.is_file():
+                    history.append({"revision": message["revision"], "brief": read_json(path),
+                                    "origin": "assistant", "created_at": message["created_at"]})
+        if value["design_brief"] is not None and not any(
+                entry["revision"] == value["brief_revision"] for entry in history):
+            history.append({"revision": value["brief_revision"], "brief": deepcopy(value["design_brief"]),
+                            "origin": "legacy", "created_at": ""})
+        value["brief_history"] = history
     value.setdefault("language_source_request", next(
         (message["text"] for message in value["messages"]
          if message["role"] == "user" and message.get("kind", "discussion") == "discussion"
@@ -80,6 +102,16 @@ def load_conversation(root: Path) -> dict:
         except (OSError, KeyError, ValueError):
             continue
     value["rounds"].sort(key=lambda record: record["created_at"])
+    for record in value["rounds"]:
+        if any(entry["revision"] == record["revision"] for entry in value["brief_history"]):
+            continue
+        path = root.parent / record["run_id"] / "brief.json"
+        if path.is_file():
+            value["brief_history"].append({
+                "revision": record["revision"], "brief": read_json(path), "origin": "legacy",
+                "created_at": record["created_at"],
+            })
+    value["brief_history"].sort(key=lambda entry: entry["revision"] if entry["revision"] is not None else -1)
     return value
 
 
@@ -134,6 +166,89 @@ class ConversationMixin:
     def _save_conversation(self, root: Path, value: dict) -> None:
         write_json(root / "conversation.json", value)
 
+    def _record_brief(self, value: dict, *, origin: str, based_on: int | None = None) -> None:
+        value["brief_history"].append({
+            "revision": value["brief_revision"], "brief": deepcopy(value["design_brief"]),
+            "origin": origin, "based_on": based_on, "created_at": now(),
+        })
+
+    @serialized_conversation
+    def save_conversation_brief(self, run_id: str, brief: dict, *, expected_revision: int,
+                                source_revision: int | None = None,
+                                open_questions: list[str] | None = None,
+                                source_suggestion_ids: list[str] | None = None):
+        """Make a user-edited brief authoritative without invoking a model."""
+        root, value = self._conversation_idle(run_id)
+        if expected_revision != value["revision"]:
+            raise ValueError("The brief changed. Review the latest version before saving your draft.")
+        if source_revision is not None and not any(
+                item["revision"] == source_revision for item in value["brief_history"]):
+            raise ValueError("The source brief revision does not exist.")
+        brief = deepcopy(validate(brief, get_profile(value["profile"]).brief_schema))
+        language = validate_content_language(brief.get("content_language"))
+        if not language:
+            raise ValueError("Establish the brief's task content language before saving.")
+        if language != value["content_language"] and not any(
+                item["brief"].get("content_language") == language for item in value["brief_proposals"]):
+            raise ValueError("Review a language proposal before changing the task content language.")
+        source_ids = list(source_suggestion_ids or [])
+        if any(item not in {s["id"] for s in value["assistant_suggestions"]} for item in source_ids):
+            raise ValueError("A brief edit refers to an unknown assistant suggestion.")
+        requirements = brief.get("user_requirements", [])
+        if any(not item.strip() for item in requirements):
+            raise ValueError("User requirements must be distinct, nonempty strings.")
+        questions = value["open_questions"] if open_questions is None else open_questions
+        if not isinstance(questions, list) or any(not isinstance(q, str) or not q.strip() for q in questions):
+            raise ValueError("Open questions must be nonempty strings.")
+        if (brief == value["design_brief"] and questions == value["open_questions"]
+                and requirements == value["suggested_user_requirements"]):
+            return self._result(run_id)
+        previous = value["design_brief"] or {}
+        value["manual_brief_fields"].update({
+            key: deepcopy(item) for key, item in brief.items()
+            if key != "content_language" and previous.get(key) != item
+        })
+        superseded = list(dict.fromkeys(value["superseded_user_requirements"]
+                                       + value["user_requirements"] + value["suggested_user_requirements"]))
+        value["superseded_user_requirements"] = [item for item in superseded if item not in requirements]
+        if requirements != value["user_requirements"]:
+            value["requirement_history"].append({
+                "revision": value["revision"] + 1, "requirements": list(requirements),
+                "superseded_user_requirements": list(value["superseded_user_requirements"]),
+                "confirmed_at": now(),
+            })
+        value["revision"] += 1
+        value.update(design_brief=brief, brief_revision=value["revision"], format_version=6,
+                     user_requirements=list(requirements), suggested_user_requirements=list(requirements),
+                     open_questions=list(questions), requirement_interpretations=[], content_language=language)
+        value["effective_request"] = "User-confirmed design brief:\n" + json.dumps(brief, ensure_ascii=False)
+        value["messages"].append({
+            "id": uuid4().hex, "role": "user", "text": "", "kind": "brief_edit",
+            "revision": value["revision"], "attachments": [], "created_at": now(),
+        })
+        self._record_brief(value, origin="user", based_on=(
+            source_revision if source_revision is not None else expected_revision))
+        value["brief_history"][-1]["source_suggestion_ids"] = source_ids
+        self._save_conversation(root, value)
+        self.store.json(root, "brief.json", brief)
+        self.store.register(root, brief="brief.json")
+        self.store.update(root, "discussing", error=None, content_language=language)
+        return self._result(run_id)
+
+    @serialized_conversation
+    def dismiss_conversation_suggestion(self, run_id: str, suggestion_id: str):
+        """Dismiss a discussion proposal without changing any design revision."""
+        root = self.store.find_run(run_id)
+        value = self.conversation(run_id)
+        if value.get("pending"):
+            raise ValueError("Wait for the current conversation response before dismissing a suggestion.")
+        suggestion = next((item for item in value["assistant_suggestions"] if item["id"] == suggestion_id), None)
+        if suggestion is None:
+            raise ValueError("The assistant suggestion does not exist.")
+        suggestion["status"] = "dismissed"
+        self._save_conversation(root, value)
+        return self._result(run_id)
+
     def _conversation_idle(self, run_id: str) -> tuple[Path, dict]:
         root = self.store.find_run(run_id)
         value = self.conversation(run_id)
@@ -159,7 +274,7 @@ class ConversationMixin:
                 raise ValueError("Wait for the design task to finish processing.")
             self._assert_model_binding(previous.run_dir)
         value = {
-            "format_version": 4, "profile": job.profile,
+            "format_version": 6, "profile": job.profile,
             "content_language": validate_content_language(job.content_language),
             "language_source_request": job.request,
             "messages": [], "effective_request": "", "reference_notes": [],
@@ -167,6 +282,8 @@ class ConversationMixin:
             "user_requirements": [], "suggested_user_requirements": [],
             "superseded_user_requirements": [], "requirement_history": [],
             "design_brief": None, "brief_revision": None, "requirement_interpretations": [],
+            "brief_history": [], "manual_brief_fields": {},
+            "discussion_revision": 0, "assistant_suggestions": [], "brief_proposals": [],
         }
         if previous is not None:
             request_path = previous.manifest.get("artifacts", {}).get("user_request")
@@ -179,8 +296,12 @@ class ConversationMixin:
             value["content_language"] = job.content_language or previous.manifest.get("content_language")
             brief_path = previous.manifest.get("artifacts", {}).get("brief")
             if brief_path:
-                value["user_requirements"] = read_json(previous.run_dir / brief_path).get("user_requirements", [])
+                value["design_brief"] = read_json(previous.run_dir / brief_path)
+                value["brief_revision"] = 0
+                value["user_requirements"] = value["design_brief"].get("user_requirements", [])
                 value["suggested_user_requirements"] = list(value["user_requirements"])
+                value["brief_history"].append({"revision": 0, "brief": deepcopy(value["design_brief"]),
+                                               "origin": "legacy", "created_at": previous.manifest["created_at"]})
             value["rounds"].append({
                 "run_id": previous.run_id, "revision": 0, "created_at": previous.manifest["created_at"],
             })
@@ -215,7 +336,7 @@ class ConversationMixin:
         value["user_requirements"] = list(requirements)
         value["suggested_user_requirements"] = list(requirements)
         value["revision"] += 1
-        value["format_version"] = 4
+        value["format_version"] = max(4, value["format_version"])
         value["requirement_history"].append({
             "revision": value["revision"], "requirements": list(requirements),
             "superseded_user_requirements": value["superseded_user_requirements"],
@@ -234,9 +355,13 @@ class ConversationMixin:
     @serialized_conversation
     def refresh_conversation_brief(self, run_id: str, *, expected_revision: int,
                                    content_language: str | None = None):
-        """Explicitly rephrase the live brief without changing historical rounds."""
+        """Request a reviewable brief proposal; saving it remains a user action."""
         validate_content_language(content_language)
-        root, value = self._conversation_idle(run_id)
+        root = self.store.find_run(run_id)
+        value = self.conversation(run_id)
+        if value.get("pending"):
+            raise ValueError("Wait for the current conversation response or retry it.")
+        self._assert_model_binding(root)
         if value["revision"] != expected_revision:
             raise ValueError("The design requirements changed. Reload them before refreshing.")
         # This is an application operation, not user-authored design feedback.
@@ -290,7 +415,11 @@ class ConversationMixin:
     def _queue_message(self, run_id, text, normalized, *, feedback_run_id=None, candidate_id=None):
         if not isinstance(text, str) or (not text.strip() and not normalized):
             raise ValueError("Send a message or attach a reference image.")
-        root, value = self._conversation_idle(run_id)
+        root = self.store.find_run(run_id)
+        value = self.conversation(run_id)
+        if value.get("pending"):
+            raise ValueError("Wait for the current conversation response or retry it.")
+        self._assert_model_binding(root)
         if feedback_run_id is None and value["rounds"]:
             feedback_run_id = value["rounds"][-1]["run_id"]
         context, images = {}, []
@@ -333,6 +462,10 @@ class ConversationMixin:
                 self.store.register(root, brief="brief.json")
             self.store.update(root, "discussing", content_language=value["content_language"])
             return self._result(run_id)
+        if ((value["design_brief"] is not None and pending.get("kind") != "requirements_update")
+                or pending.get("kind") == "brief_refresh"):
+            from .assistant import run_assistant_turn
+            return run_assistant_turn(self, run_id, root, value, pending)
         self.store.update(root, "discussing_request", error=None)
         try:
             references = []
@@ -392,6 +525,10 @@ class ConversationMixin:
                 "When pending_kind is brief_refresh, rebuild the current brief in the selected task "
                 "language, retaining the existing design meaning, questions, and proposed requirements "
                 "without introducing design changes or treating the refresh as new source copy.\n\n"
+                "manual_brief_fields contains authoritative user edits, including deliberate empty lists. "
+                "Keep them exactly unless explicitly refreshing their prose into another task language. "
+                "Do not resurrect deleted copy or constraints from earlier messages. If new feedback conflicts "
+                "with an edited field, explain the conflict and ask the user to revise that field in the brief editor.\n\n"
                 + compile_language_policy(
                     pending.get("content_language", value["content_language"]),
                     source_request=value["language_source_request"], conversation=True,
@@ -405,6 +542,7 @@ class ConversationMixin:
                     "reference_notes": value["reference_notes"],
                     "open_questions": value["open_questions"],
                     "design_brief": value["design_brief"],
+                    "manual_brief_fields": value["manual_brief_fields"],
                     "pending_kind": pending.get("kind", "discussion"),
                     "conversation": value["messages"], "previous_round": pending["context"],
                     "image_labels": labels,
@@ -432,31 +570,47 @@ class ConversationMixin:
                 self.store.json(attempt, "response.json", response)
                 self.store.json(attempt, "answer.json", answer)
             profile = get_profile(value["profile"])
-            request = answer["effective_request"]
-            if answer["reference_notes"]:
-                request += "\n\nReference findings (follow adoption decisions):\n" + "\n".join(answer["reference_notes"])
+            initial = value["design_brief"] is None
+            latest = next(message for message in value["messages"] if message.get("id") == pending["message_id"])
+            request = latest["text"] if initial else answer["effective_request"]
             brief_prompt = compile_intake_prompt(
-                profile, request, user_requirements=value["user_requirements"],
+                profile, request, user_requirements=None if initial else value["user_requirements"],
                 superseded_user_requirements=value["superseded_user_requirements"],
                 current_brief=value["design_brief"],
                 requirement_interpretations=answer["requirement_interpretations"],
                 open_questions=answer["open_questions"],
                 content_language=answer["content_language"],
+                manual_brief_fields=value["manual_brief_fields"],
+                reference_analysis_only=True,
             )
             self.store.text(attempt, "brief/prompt.md", brief_prompt)
             brief, brief_response = self.runtime.text_provider.propose(brief_prompt, schema_name=profile.brief_schema)
+            protected = deepcopy(value["manual_brief_fields"])
+            language_refresh = answer["content_language"] != value["content_language"]
+            if language_refresh:
+                protected = {key: item for key, item in protected.items()
+                             if key in {"exact_copy", "canvas", "article_title", "user_requirements"}}
+            if pending.get("kind") == "requirements_update":
+                protected.pop("user_requirements", None)
+            brief.update(protected)
             if pending.get("kind") == "brief_refresh" and value["design_brief"] is not None:
                 for field in ("exact_copy", "canvas", "article_title"):
                     if field in value["design_brief"] and brief.get(field) != value["design_brief"][field]:
                         raise ValueError(f"Refreshing the brief changed its {field} source data.")
             brief = validate({
                 **bind_brief_language(brief, answer["content_language"]),
-                "user_requirements": list(value["user_requirements"]),
+                "user_requirements": list(brief.get("user_requirements", [])) if initial else list(value["user_requirements"]),
             }, profile.brief_schema)
             self.store.json(attempt, "brief/response.json", brief_response)
             self.store.json(attempt, "brief/brief.json", brief)
             value["revision"] += 1
-            value.update(design_brief=brief, brief_revision=value["revision"], format_version=4)
+            value.update(design_brief=brief, brief_revision=value["revision"],
+                         format_version=max(4, value["format_version"]))
+            if language_refresh:
+                value["manual_brief_fields"] = {key: deepcopy(brief[key]) for key in value["manual_brief_fields"]}
+            elif pending.get("kind") == "requirements_update" and "user_requirements" in value["manual_brief_fields"]:
+                value["manual_brief_fields"]["user_requirements"] = list(value["user_requirements"])
+            self._record_brief(value, origin="assistant")
             value.update({key: answer[key] for key in (
                 "effective_request", "reference_notes", "open_questions", "suggested_user_requirements",
                 "requirement_interpretations",
@@ -466,6 +620,19 @@ class ConversationMixin:
                 "role": "assistant", "text": answer["reply"], "attachments": [],
                 "revision": value["revision"], "created_at": now(),
             })
+            if initial:
+                value["user_requirements"] = list(brief.get("user_requirements", []))
+                value["suggested_user_requirements"] = list(value["user_requirements"])
+                value["requirement_interpretations"] = []
+                value["effective_request"] = "Saved design brief:\n" + json.dumps(brief, ensure_ascii=False)
+                # Reference analysis stays in the assistant panel, never in the initial contract.
+                if latest.get("attachments"):
+                    from .assistant import run_assistant_turn
+                    value["messages"].pop()
+                    self._save_conversation(root, value)
+                    self.store.json(root, "brief.json", brief)
+                    self.store.register(root, brief="brief.json")
+                    return run_assistant_turn(self, run_id, root, value, pending)
             value["pending"] = None
             self._save_conversation(root, value)
             self.store.json(root, "brief.json", brief)
@@ -492,8 +659,6 @@ class ConversationMixin:
             raise ValueError("Discuss the design requirements before preparing a round.")
         if value["open_questions"]:
             raise ValueError("Answer the outstanding design questions before preparing a round.")
-        if value["suggested_user_requirements"] != value["user_requirements"]:
-            raise ValueError("Confirm or reject the suggested user requirements before preparing a round.")
         if value["design_brief"] is None or value["brief_revision"] != value["revision"]:
             raise ValueError("Update and review the current design brief before preparing a round.")
         if value["content_language"] is None:
@@ -506,9 +671,7 @@ class ConversationMixin:
         if value["rounds"] and value["rounds"][-1]["revision"] == value["revision"]:
             raise ValueError("Add feedback before preparing another round.")
         manifest = self.store.manifest(root)
-        request = value["effective_request"]
-        if value["reference_notes"]:
-            request += "\n\nReference findings (follow adoption decisions):\n" + "\n".join(value["reference_notes"])
+        request = "Saved design brief:\n" + json.dumps(value["design_brief"], ensure_ascii=False)
         child = self.create_request(NaturalLanguageDesignJob(
             case_id=manifest["case_id"], profile=value["profile"], request=request,
             candidate_count=manifest["candidate_limit"],

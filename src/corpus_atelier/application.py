@@ -807,6 +807,7 @@ class CorpusAtelierApplication(ConversationMixin):
                 request_path.read_text(encoding="utf-8")
             )
             contract = {}
+            frozen_brief = None
             snapshot_relative = manifest.get("artifacts", {}).get("conversation_snapshot")
             if snapshot_relative:
                 snapshot_path = (run_dir / snapshot_relative).resolve(strict=True)
@@ -818,6 +819,12 @@ class CorpusAtelierApplication(ConversationMixin):
                         "user_requirements": snapshot["user_requirements"],
                         "superseded_user_requirements": snapshot.get("superseded_user_requirements", []),
                     }
+                if snapshot.get("design_brief") is not None:
+                    if snapshot.get("brief_revision") != manifest.get("conversation_revision"):
+                        raise ValueError("The saved design brief belongs to a different conversation revision.")
+                    frozen_brief = validate(snapshot["design_brief"], profile.brief_schema)
+                    if frozen_brief.get("user_requirements", []) != snapshot.get("user_requirements", []):
+                        raise ValueError("The saved design brief changed the confirmed user requirements.")
         except Exception as exc:
             self.store.update(
                 run_dir,
@@ -836,6 +843,12 @@ class CorpusAtelierApplication(ConversationMixin):
             "candidate_limit": candidate_count,
             "status": "created",
         }
+        if frozen_brief is not None:
+            # The reviewed conversation brief is the graph's input; do not reinterpret it.
+            state.pop("user_request")
+            state["brief"] = frozen_brief
+            self.store.json(run_dir, "brief.json", frozen_brief)
+            self.store.register(run_dir, brief="brief.json")
         return self._invoke_start(run_id, run_dir, state)
 
     def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:

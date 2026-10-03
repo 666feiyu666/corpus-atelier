@@ -16,7 +16,7 @@ from tests import test_streamlit_app as fixtures
 
 class BriefEditorUITests(unittest.TestCase):
     @contextmanager
-    def workspace(self):
+    def workspace(self, *, seed=True):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             with patch.dict(os.environ, {
@@ -30,6 +30,8 @@ class BriefEditorUITests(unittest.TestCase):
                 run_id = app.session_state["selected_task_id"]
                 fixtures.StreamlitAppTests._wait_for_status(app, root, run_id, "discussing")
                 path = root / "natural-language" / run_id / "conversation.json"
+                if seed:
+                    fixtures.StreamlitAppTests._save_initial_brief(app, run_id)
                 yield root, app, run_id, path
 
     def test_save_all_brief_fields_and_use_saved_values_for_next_design(self):
@@ -110,10 +112,21 @@ class BriefEditorUITests(unittest.TestCase):
             self.assertNotIn(f"save_brief_{run_id}", [button.key for button in app.button])
             app.chat_input(key=f"conversation_input_{run_id}").set_value("描述花篮样式。").run()
             fixtures.StreamlitAppTests._wait_for_status(app, root, run_id, "discussing")
-            suggestion = json.loads(path.read_text(encoding="utf-8"))["assistant_suggestions"][-1]
-            app.button(key=f"add_suggestion_{suggestion['id']}").click().run()
             app.segmented_control(key=f"workspace_view_{run_id}").set_value("design").run()
             self.assertFalse(app.exception)
             self.assertEqual(app.text_area(key=f"brief_edit_{run_id}_purpose").value, "切换对话时保留这份草稿。")
-            self.assertIn(suggestion["text"], app.text_area(key=f"brief_edit_{run_id}_constraints").value)
+            self.assertEqual(app.text_area(key=f"brief_edit_{run_id}_constraints").value, "")
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["design_brief"], original["design_brief"])
+
+    def test_prompt_chat_is_a_continuing_dialogue_without_brief_controls(self):
+        with self.workspace(seed=False) as (root, app, run_id, path):
+            self.assertEqual(app.text_area(key=f"brief_edit_{run_id}_purpose").value, "")
+            self.assertTrue(app.button(key=f"prepare_round_{run_id}").disabled)
+            for message in ("只描述花篮，不需要描述花。", "两侧提手竖直，连接的弧度很低。"):
+                app.chat_input(key=f"conversation_input_{run_id}").set_value(message).run()
+                fixtures.StreamlitAppTests._wait_for_status(app, root, run_id, "discussing")
+            self.assertFalse(app.exception)
+            self.assertEqual(len(json.loads(path.read_text(encoding="utf-8"))["messages"]), 6)
+            self.assertIn("深色藤编花篮，篮身圆鼓，口沿外扩，两侧竖直提把以低弧度横向连接。", [m.value for m in app.markdown])
+            controls = [b.key or "" for b in app.button]
+            self.assertFalse(any(k.startswith(("add_suggestion_", "dismiss_suggestion_", "refresh_brief_", "load_proposal_")) for k in controls))

@@ -15,11 +15,11 @@ from PIL import Image
 
 from .artifacts.hashing import digest_file
 from .artifacts.records import read_json, write_json
-from .artifacts.paths import verified_image
 from .conversation_records import (
     FORMAT_VERSION, ConversationRecord, load_conversation, new_conversation, now, record_brief,
 )
 from .design_support.validation import validate
+from .discussion_context import load_round_context
 from .language import validate_content_language
 from .registry import get_profile
 from .state import NaturalLanguageDesignJob, RunResult, RunSummary
@@ -195,30 +195,6 @@ class ConversationMixin:
         })
 
 
-    def _round_context(self, run_id: str, candidate_id: str | None = None) -> tuple[dict, list[Path]]:
-        summary = self.inspect_task(run_id)
-        relative = summary.manifest.get("artifacts", {}).get("candidate_index")
-        if not relative:
-            return {"run_id": run_id, "candidates": []}, []
-        candidates = read_json(summary.run_dir / relative)
-        if candidate_id is not None and candidate_id not in {c["candidate_id"] for c in candidates}:
-            raise ValueError("The feedback candidate does not exist in this round.")
-        selected_id = candidate_id
-        images = []
-        records = []
-        for candidate in candidates:
-            if selected_id is not None and candidate["candidate_id"] != selected_id:
-                continue
-            record = {key: candidate.get(key) for key in (
-                "candidate_id", "proposal", "generation_prompt", "status",
-            )}
-            if candidate.get("image_path"):
-                path = verified_image(summary.run_dir, candidate["image_path"], candidate.get("image_sha256"))
-                images.append(path)
-                record["image_label"] = f"Previous result image {len(images)}"
-            records.append(record)
-        return {"run_id": run_id, "candidates": records}, images
-
     @serialized_conversation
     def queue_conversation_message(self, run_id: str, text: str, *,
                                    attachments: list[tuple[str, bytes]] | None = None,
@@ -242,7 +218,7 @@ class ConversationMixin:
         if feedback_run_id is not None:
             if feedback_run_id not in {r["run_id"] for r in value["rounds"]}:
                 raise ValueError("Feedback must refer to a round of this conversation.")
-            context, images = self._round_context(feedback_run_id, candidate_id)
+            context, images = load_round_context(self.inspect_task(feedback_run_id), candidate_id)
         message_id = uuid4().hex
         attached = []
         for index, (name, data) in enumerate(normalized, 1):
@@ -260,7 +236,7 @@ class ConversationMixin:
         })
         value["pending"] = {
             "message_id": message_id, "context": context,
-            "images": [{"path": str(path), "sha256": digest_file(path)} for path in images],
+            "images": images,
         }
         self._save_conversation(root, value)
         self.store.update(root, "discussing_request", error=None)

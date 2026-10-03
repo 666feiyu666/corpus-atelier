@@ -11,6 +11,7 @@ def synthesize_design_implementation(
     canvas: dict | None = None,
     direction_seed: dict | None = None,
     historical_knowledge: list[str] | None = None,
+    content_language: str | None = None,
 ) -> tuple[str, dict, dict]:
     if canvas is None or direction_seed is None:
         raise ValueError("Design implementation requires a canvas and approved direction seed.")
@@ -19,6 +20,7 @@ def synthesize_design_implementation(
         canvas=canvas,
         direction_seed=direction_seed,
         historical_knowledge=historical_knowledge,
+        content_language=content_language,
     )
     proposal, response = provider.propose(
         prompt,

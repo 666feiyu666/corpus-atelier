@@ -3,6 +3,7 @@
 import json
 
 from ..design_support.validation import load_schema
+from ..language import compile_language_policy
 from ..skill_loader import load_skill
 
 
@@ -11,7 +12,8 @@ def compile_intake_prompt(profile, user_request: str, *,
                           superseded_user_requirements: list[str] | None = None,
                           current_brief: dict | None = None,
                           requirement_interpretations: list[dict] | None = None,
-                          open_questions: list[str] | None = None) -> str:
+                          open_questions: list[str] | None = None,
+                          content_language: str | None = None) -> str:
     """Return the provider-independent design-intake prompt."""
     profile_context = {
         "name": profile.name,
@@ -21,6 +23,7 @@ def compile_intake_prompt(profile, user_request: str, *,
     }
     sections = [
         load_skill("design-intake"),
+        compile_language_policy(content_language, source_request=user_request),
         "# Active design profile\n\n" + json.dumps(
             profile_context, ensure_ascii=False, indent=2, allow_nan=False,
         ),

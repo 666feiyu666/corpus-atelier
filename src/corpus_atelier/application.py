@@ -29,6 +29,7 @@ from .design_support.validation import validate, validate_image_spec, validate_p
 from .graphs import build_graph
 from .image_prompt import compile_generation_prompt, synthesize_image_spec
 from .intake import compile_intake_prompt
+from .language import bind_brief_language, validate_content_language
 from .providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
 from .state import (
@@ -68,6 +69,7 @@ class _Runtime:
             profile, state["user_request"],
             user_requirements=state.get("user_requirements"),
             superseded_user_requirements=state.get("superseded_user_requirements"),
+            content_language=state.get("content_language"),
         )
         request = {
             "model": getattr(
@@ -90,7 +92,7 @@ class _Runtime:
             )
             if "user_requirements" in state:
                 brief = {**brief, "user_requirements": list(state["user_requirements"])}
-            brief = validate(brief, profile.brief_schema)
+            brief = validate(bind_brief_language(brief, state.get("content_language")), profile.brief_schema)
             self.store.json(run_dir, "intake/response.json", response)
             self.store.json(run_dir, "brief.json", brief)
             self.store.register(
@@ -98,7 +100,7 @@ class _Runtime:
                 intake_response="intake/response.json",
                 brief="brief.json",
             )
-            return {"brief": brief, "status": "designing"}
+            return {"brief": brief, "content_language": brief.get("content_language"), "status": "designing"}
         except Exception as exc:
             self.store.json(run_dir, "intake/response.json", {
                 "status": "failed",
@@ -150,6 +152,7 @@ class _Runtime:
         )
         self.store.update(
             run_dir, "designing_directions", candidate_limit=candidate_limit,
+            content_language=state.get("content_language") or state["brief"].get("content_language"),
         )
         prompt = ""
         try:
@@ -159,6 +162,7 @@ class _Runtime:
                 self.text_provider,
                 canvas=canvas,
                 candidate_limit=candidate_limit,
+                content_language=state.get("content_language"),
             )
             raw_plan = validate_design_direction_plan(
                 raw_plan, candidate_limit, objective=profile.objective,
@@ -243,6 +247,7 @@ class _Runtime:
                     historical_knowledge=load_historical_cards(
                         profile.objective, seed["movement_references"],
                     ),
+                    content_language=state.get("content_language"),
                 )
                 proposal = validate_proposal(
                     proposal, profile.proposal_schema, candidate_id=candidate_id,
@@ -260,7 +265,8 @@ class _Runtime:
                 self.store.json(root, "design-implementation/response.json", response)
                 self.store.json(root, "design-implementation/proposal.json", proposal)
                 self.store.text(
-                    root, "design-implementation/presentation.md", render(proposal),
+                    root, "design-implementation/presentation.md",
+                    render(proposal, content_language=state.get("content_language")),
                 )
                 return {
                     "candidate_id": candidate_id,
@@ -324,6 +330,7 @@ class _Runtime:
                     canvas=state["canvas"],
                     provider_profile=target_model,
                     provider=self.text_provider,
+                    content_language=state.get("content_language"),
                 )
                 image_spec = validate_image_spec(
                     image_spec, state["brief"].get("exact_copy", []),
@@ -735,21 +742,24 @@ class CorpusAtelierApplication(ConversationMixin):
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
         candidate_count = self._validate_candidate_count(job.candidate_count)
-        validate(job.brief, profile.brief_schema)
+        content_language = validate_content_language(job.content_language or job.brief.get("content_language"))
+        brief = validate(bind_brief_language(job.brief, content_language), profile.brief_schema)
         run_id, run_dir = self.store.create(
             case_id=job.case_id,
-            brief=job.brief,
+            brief=brief,
             profile=profile,
             title=job.case_id,
             models=self._models(),
             candidate_limit=candidate_count,
+            content_language=content_language,
         )
         state = {
             "case_id": job.case_id,
             "run_id": run_id,
             "run_dir": str(run_dir),
             "profile": profile.name,
-            "brief": job.brief,
+            "brief": brief,
+            "content_language": content_language,
             "candidate_limit": candidate_count,
             "status": "created",
         }
@@ -762,6 +772,9 @@ class CorpusAtelierApplication(ConversationMixin):
                        conversation_state: dict | None = None,
                        conversation_snapshot: dict | None = None) -> RunResult:
         self._validate_request(job.request)
+        content_language = validate_content_language(job.content_language)
+        if conversation_state is not None:
+            content_language = validate_content_language(conversation_state.get("content_language"))
         candidate_count = self._validate_candidate_count(job.candidate_count)
         profile = get_profile(job.profile)
         run_id, run_dir = self.store.create(
@@ -776,6 +789,7 @@ class CorpusAtelierApplication(ConversationMixin):
             conversation_revision=conversation_revision,
             conversation_state=conversation_state,
             conversation_snapshot=conversation_snapshot,
+            content_language=content_language,
         )
         return self._result(run_id)
 
@@ -806,6 +820,7 @@ class CorpusAtelierApplication(ConversationMixin):
             request = self._validate_request(
                 request_path.read_text(encoding="utf-8")
             )
+            content_language = validate_content_language(manifest.get("content_language"))
             contract = {}
             frozen_brief = None
             snapshot_relative = manifest.get("artifacts", {}).get("conversation_snapshot")
@@ -814,6 +829,10 @@ class CorpusAtelierApplication(ConversationMixin):
                 if run_dir not in snapshot_path.parents:
                     raise ValueError("The conversation snapshot escapes its task directory.")
                 snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                snapshot_language = validate_content_language(snapshot.get("content_language"))
+                if snapshot_language and content_language and snapshot_language != content_language:
+                    raise ValueError("The saved task language differs from the conversation snapshot.")
+                content_language = content_language or snapshot_language
                 if "user_requirements" in snapshot:
                     contract = {
                         "user_requirements": snapshot["user_requirements"],
@@ -823,6 +842,10 @@ class CorpusAtelierApplication(ConversationMixin):
                     if snapshot.get("brief_revision") != manifest.get("conversation_revision"):
                         raise ValueError("The saved design brief belongs to a different conversation revision.")
                     frozen_brief = validate(snapshot["design_brief"], profile.brief_schema)
+                    if (frozen_brief.get("content_language") and content_language
+                            and frozen_brief["content_language"] != content_language):
+                        raise ValueError("The saved brief differs from the task content language.")
+                    content_language = content_language or frozen_brief.get("content_language")
                     if frozen_brief.get("user_requirements", []) != snapshot.get("user_requirements", []):
                         raise ValueError("The saved design brief changed the confirmed user requirements.")
         except Exception as exc:
@@ -839,6 +862,7 @@ class CorpusAtelierApplication(ConversationMixin):
             "run_dir": str(run_dir),
             "profile": profile.name,
             "user_request": request,
+            "content_language": content_language,
             **contract,
             "candidate_limit": candidate_count,
             "status": "created",

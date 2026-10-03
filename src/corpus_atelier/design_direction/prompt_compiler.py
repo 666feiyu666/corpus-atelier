@@ -2,6 +2,7 @@
 
 import json
 
+from ..language import compile_language_policy
 from ..skill_loader import load_skill, load_skill_reference
 from .validation import (
     historical_index_reference,
@@ -20,9 +21,11 @@ def _historical_catalog(objective: str) -> str:
 
 def compile_design_direction_prompt(
     profile, brief: dict, *, canvas: dict, candidate_limit: int,
+    content_language: str | None = None,
 ) -> str:
     sections = [
         load_skill("design-direction"),
+        compile_language_policy(content_language or brief.get("content_language")),
         "# Design objective\n\n" + load_skill_reference(
             "design-direction", profile.objective_reference,
         ),

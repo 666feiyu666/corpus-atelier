@@ -1340,15 +1340,30 @@ def _render_user_requirements(summary: RunSummary, conversation: dict, *, disabl
                 st.caption(_t("brief_update_failed" if summary.status == "failed" else "brief_updating"))
         else:
             st.info(_t("brief_not_ready"))
-            if st.button(_t("refresh_brief"), key=f"refresh_brief_{summary.run_id}", disabled=disabled):
-                try:
-                    with _app_for_manifest(summary.manifest) as app:
-                        app.queue_conversation_message(summary.run_id, _t("refresh_brief_request"))
-                        saved = app.inspect_task(summary.run_id)
-                    _submit_saved_task(saved, _current_credential().value)
-                    st.rerun(scope="app")
-                except Exception as exc:
-                    _conversation_error(exc)
+        current_language = conversation.get("content_language")
+        if current_language is None and conversation["design_brief"] is not None:
+            st.info(_t("content_language_not_set"))
+        languages = list(dict.fromkeys(
+            ([None] if current_language is None else []) + ["zh-CN", "en"]
+            + ([current_language] if current_language else [])
+        ))
+        selected_language = st.selectbox(
+            _t("task_content_language"), languages, index=languages.index(current_language),
+            format_func=lambda value: _t("content_language_auto") if value is None else LANGUAGE_LABELS.get(value, value),
+            key=f"brief_language_{summary.run_id}_{revision}", disabled=disabled,
+            help=_t("content_language_help"),
+        )
+        if st.button(_t("refresh_brief"), key=f"refresh_brief_{summary.run_id}", disabled=disabled):
+            try:
+                with _app_for_manifest(summary.manifest) as app:
+                    app.refresh_conversation_brief(
+                        summary.run_id, expected_revision=revision, content_language=selected_language,
+                    )
+                    saved = app.inspect_task(summary.run_id)
+                _submit_saved_task(saved, _current_credential().value)
+                st.rerun(scope="app")
+            except Exception as exc:
+                _conversation_error(exc)
         for question in conversation["open_questions"]:
             st.info(question)
         st.markdown(f"**{_t('confirmed_user_requirements')}**")
@@ -1412,6 +1427,8 @@ def _render_conversation_task(summary: RunSummary) -> None:
     )
     for message in conversation["messages"]:
         with st.chat_message(message["role"]):
+            if message.get("kind") == "brief_refresh":
+                st.caption(_t("brief_refresh_event"))
             if message["text"]:
                 st.markdown(message["text"])
             for attachment in message.get("attachments", []):
@@ -1473,6 +1490,7 @@ def _render_conversation_task(summary: RunSummary) -> None:
         or bool(conversation["open_questions"]) or latest_revision == conversation["revision"]
         or conversation["suggested_user_requirements"] != conversation["user_requirements"]
         or conversation["design_brief"] is None or conversation["brief_revision"] != conversation["revision"]
+        or conversation.get("content_language") is None
         or _current_credential() is None,
     ):
         try:

@@ -50,6 +50,7 @@ class ArtifactStore:
                title: str | None = None,
                models: dict | None = None,
                candidate_limit: int | None = None,
+               content_language: str | None = None,
                is_conversation: bool = False,
                conversation_parent_id: str | None = None,
                conversation_revision: int | None = None,
@@ -100,6 +101,8 @@ class ArtifactStore:
             manifest["models"] = models
         if candidate_limit is not None:
             manifest["candidate_limit"] = candidate_limit
+        if content_language is not None:
+            manifest["content_language"] = content_language
         if is_conversation:
             manifest.update(is_conversation=True, status="discussing")
             write_json(run_dir / "conversation.json", conversation_state)

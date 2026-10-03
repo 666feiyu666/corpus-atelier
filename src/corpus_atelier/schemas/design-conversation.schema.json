@@ -2,6 +2,8 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "content_language": {"type": "string", "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"},
+    "language_change_quote": {"type": ["string", "null"], "minLength": 1},
     "reply": {"type": "string", "minLength": 1},
     "effective_request": {"type": "string", "minLength": 1},
     "suggested_user_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
@@ -18,5 +20,5 @@
     "reference_notes": {"type": "array", "items": {"type": "string"}},
     "open_questions": {"type": "array", "items": {"type": "string"}}
   },
-  "required": ["reply", "effective_request", "reference_notes", "open_questions", "suggested_user_requirements", "requirement_interpretations"]
+  "required": ["content_language", "language_change_quote", "reply", "effective_request", "reference_notes", "open_questions", "suggested_user_requirements", "requirement_interpretations"]
 }

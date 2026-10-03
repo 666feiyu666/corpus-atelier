@@ -2,14 +2,17 @@
 
 import json
 
+from ..language import compile_language_policy
 from ..skill_loader import load_skill, load_skill_reference
 
 
 def compile_image_spec_prompt(
     proposal: dict, *, brief: dict, canvas: dict, provider_profile: str,
+    content_language: str | None = None,
 ) -> str:
     sections = [
         load_skill("image-llm-prompt"),
+        compile_language_policy(content_language or brief.get("content_language")),
         "# Visual-semantic disambiguation guidance\n\n" + load_skill_reference(
             "image-llm-prompt", "semantic-disambiguation.md",
         ),

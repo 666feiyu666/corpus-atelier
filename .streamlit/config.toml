@@ -2,38 +2,56 @@
 toolbarMode = "minimal"
 
 [theme]
+# Ink on paper with a single indigo action colour. Finished work supplies
+# the saturation; the interface itself stays quiet.
+baseFontSize = 15
 font = "sans-serif"
 codeFont = "monospace"
-baseFontSize = 15
+codeFontSize = "0.875rem"
+headingFontSizes = ["38px", "26px", "20px", "17px", "15px", "14px"]
 headingFontWeights = [650, 600, 600, 550, 550, 550]
-baseRadius = "large"
-buttonRadius = "large"
+baseRadius = "small"
+buttonRadius = "small"
 showWidgetBorder = true
 showSidebarBorder = true
 linkUnderline = false
 
 [theme.light]
-primaryColor = "#111827"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F5F4"
-textColor = "#1C1917"
-borderColor = "#E7E5E4"
-codeBackgroundColor = "#F5F5F4"
+primaryColor = "#2B4C7E"
+backgroundColor = "#FAFAF8"
+secondaryBackgroundColor = "#F1F2EE"
+textColor = "#16181A"
+borderColor = "#DCDED8"
+linkColor = "#2B4C7E"
+codeBackgroundColor = "#F1F2EE"
+grayColor = "#6B7079"
+greenColor = "#2F6B4F"
+orangeColor = "#A1601C"
+redColor = "#A6402F"
+blueColor = "#2B4C7E"
 
 [theme.dark]
-primaryColor = "#E7E5E4"
-backgroundColor = "#171717"
-secondaryBackgroundColor = "#262626"
-textColor = "#F5F5F4"
-borderColor = "#404040"
-codeBackgroundColor = "#0A0A0A"
+primaryColor = "#9DB4D8"
+backgroundColor = "#141618"
+secondaryBackgroundColor = "#1D2023"
+textColor = "#E8E7E2"
+borderColor = "#33383D"
+linkColor = "#A9C0E4"
+codeBackgroundColor = "#0F1113"
+grayColor = "#9AA0A6"
+greenColor = "#7FB79B"
+orangeColor = "#D6A05C"
+redColor = "#E08A7B"
+blueColor = "#9DB4D8"
 
 [theme.light.sidebar]
-backgroundColor = "#F7F7F5"
-secondaryBackgroundColor = "#EFEFED"
-borderColor = "#E7E5E4"
+backgroundColor = "#F4F5F1"
+secondaryBackgroundColor = "#E9EBE5"
+borderColor = "#DCDED8"
+primaryColor = "#2B4C7E"
 
 [theme.dark.sidebar]
-backgroundColor = "#111111"
-secondaryBackgroundColor = "#202020"
-borderColor = "#303030"
+backgroundColor = "#101214"
+secondaryBackgroundColor = "#1A1D20"
+borderColor = "#2C3136"
+primaryColor = "#9DB4D8"

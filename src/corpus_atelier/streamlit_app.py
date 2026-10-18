@@ -118,6 +118,23 @@ def _t(key: str, **values: Any) -> str:
     return translate(_language(), key, **values)
 
 
+def _one_line(value: str) -> str:
+    return " ".join(str(value).split())
+
+
+def _display_title(value: str, *, limit: int) -> str:
+    """Keep one readable line for headings and list rows; full text stays in help."""
+    text = _one_line(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip("，,、;；:： ") + "…"
+
+
+def _task_row_title(task: RunSummary) -> str:
+    limit = 11 if _language() == "zh-CN" else 22
+    return _display_title(task.manifest.get("title", task.run_id), limit=limit)
+
+
 def _status_label(status: str) -> str:
     return _t(f"status.{status}")
 
@@ -560,8 +577,10 @@ def _task_icon(task: RunSummary) -> str:
 
 def _render_task_buttons(tasks: list[RunSummary]) -> None:
     tasks = [task for task in tasks if not task.manifest.get("conversation_parent_id")]
+    st.caption(_t("tasks_count", count=len(tasks)))
     if not tasks:
         st.caption(_t("no_saved_tasks"))
+        st.caption(_t("tasks_empty_hint"))
         return
 
     active_ids = sorted(_task_supervisor().running_ids())
@@ -583,19 +602,28 @@ def _render_task_buttons(tasks: list[RunSummary]) -> None:
         """)
 
     with st.container(height=520, gap="small"):
+        current_day: str | None = None
         for task in tasks:
             title = task.manifest.get("title", task.run_id)
+            day = str(
+                task.manifest.get("updated_at")
+                or task.manifest.get("created_at")
+                or ""
+            )[:10]
+            if day != current_day:
+                current_day = day
+                st.caption(day or _t("not_recorded"))
             paused = (
                 task.status in RECOVERABLE_TASK_STATUSES
                 and not _task_supervisor().is_running(task.run_id)
                 and _current_credential() is None
             )
             if st.button(
-                title,
+                _task_row_title(task),
                 icon=_task_icon(task),
                 width="stretch",
                 key=f"task_{task.run_id}",
-                help=(
+                help=f"{_one_line(title)}\n\n" + (
                     _t("recovery_waiting_for_key")
                     if paused else _status_label(task.status)
                 ),
@@ -660,7 +688,6 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
             _select_task(None)
             st.rerun()
 
-        st.caption(_t("tasks"))
         if any(_task_is_live(task) for task in tasks):
             _render_live_task_buttons()
         else:
@@ -717,7 +744,9 @@ def _render_new_task_settings() -> tuple[str, str, str, str, int]:
 
 
 def _render_showcase() -> None:
-    st.subheader(_t("showcase_heading"))
+    heading, action = st.columns([3, 1], vertical_alignment="center")
+    with heading:
+        st.subheader(_t("showcase_heading"))
     items = _showcase_items()
     if not items:
         st.caption(_t("showcase_preparing"))
@@ -736,16 +765,11 @@ def _render_showcase() -> None:
 
     columns = st.columns(
         len(featured),
-        gap="small",
+        gap="medium",
         vertical_alignment="top",
     )
     for column, item in zip(columns, featured, strict=True):
-        with column.container(
-            border=True,
-            height="stretch",
-            vertical_alignment="center",
-            gap="small",
-        ):
+        with column:
             st.image(
                 item.image_path,
                 caption=item.title,
@@ -754,26 +778,31 @@ def _render_showcase() -> None:
             )
 
     if len(items) > len(featured):
-        with st.container(horizontal_alignment="right"):
-            st.button(
-                _t("view_all_designs"),
-                icon=":material/grid_view:",
-                key="showcase_view_all",
-                on_click=_set_product_view,
-                args=("gallery",),
-            )
+        with action:
+            with st.container(horizontal_alignment="right"):
+                st.button(
+                    _t("view_all_designs"),
+                    icon=":material/grid_view:",
+                    key="showcase_view_all",
+                    on_click=_set_product_view,
+                    args=("gallery",),
+                )
 
 
 def _render_showcase_gallery() -> None:
-    st.button(
-        _t("back_to_creation"),
-        icon=":material/arrow_back:",
-        key="showcase_back",
-        on_click=_set_product_view,
-        args=("home",),
-    )
-    st.title(_t("gallery_title"))
-    st.caption(_t("gallery_tagline"))
+    heading, action = st.columns([3, 1], vertical_alignment="center")
+    with heading:
+        st.title(_t("gallery_title"))
+        st.caption(_t("gallery_tagline"))
+    with action:
+        with st.container(horizontal_alignment="right"):
+            st.button(
+                _t("back_to_creation"),
+                icon=":material/arrow_back:",
+                key="showcase_back",
+                on_click=_set_product_view,
+                args=("home",),
+            )
 
     items = _showcase_items()
     if not items:
@@ -790,16 +819,11 @@ def _render_showcase_gallery() -> None:
     with gallery_slot.container():
         columns = st.columns(
             len(page_items),
-            gap="small",
+            gap="medium",
             vertical_alignment="top",
         )
         for column, item in zip(columns, page_items, strict=True):
-            with column.container(
-                border=True,
-                height="stretch",
-                vertical_alignment="center",
-                gap="small",
-            ):
+            with column:
                 st.image(
                     item.image_path,
                     caption=item.title,
@@ -858,15 +882,15 @@ def _start_task(
 def _render_new_task() -> None:
     st.title(_t("product_name"))
     st.caption(_t("product_tagline"))
-    with st.popover(_t("task_settings"), icon=":material/tune:"):
-        model, reasoning, image_model, profile, candidate_count = (
-            _render_new_task_settings()
-        )
-
     _render_showcase()
     st.subheader(_t("start_from_request"))
-    discuss_first = st.toggle(_t("discuss_first"), key="discuss_first")
     st.caption(_t("reference_upload_hint"))
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        discuss_first = st.toggle(_t("discuss_first"), key="discuss_first")
+        with st.popover(_t("task_settings"), icon=":material/tune:"):
+            model, reasoning, image_model, profile, candidate_count = (
+                _render_new_task_settings()
+            )
     submission = st.chat_input(
         _t("request_placeholder"),
         key="new_task_prompt",
@@ -1027,7 +1051,7 @@ def _render_generation_preview(result: RunResult) -> None:
                 st.caption(proposal["design_rationale"])
             request = candidate.get("generation_request", {})
             st.caption(
-                " · ".join([
+                _t("meta_separator").join([
                     _t("image_model_meta", value=request.get("model", _t("not_recorded"))),
                     _t("quality_meta", value=request.get("quality", _t("not_recorded"))),
                     _t("size_meta", value=request.get("size", _t("not_recorded"))),
@@ -1118,6 +1142,11 @@ def _render_image_gallery(
             seed = candidate.get("direction_seed", {})
             proposal = candidate.get("proposal", {})
             with column.container(border=True, height="stretch"):
+                image_data = _verified_image_bytes(candidate)
+                if image_data is None:
+                    st.error(_t("image_invalid"))
+                else:
+                    st.image(image_data, width="stretch")
                 with st.container(horizontal=True, vertical_alignment="center"):
                     st.subheader(seed.get("label", candidate_id))
                     if is_selected:
@@ -1128,15 +1157,9 @@ def _render_image_gallery(
                         )
                     elif not selectable:
                         st.badge(_t("alternative"), color="gray")
-                image_data = _verified_image_bytes(candidate)
-                if image_data is None:
-                    st.error(_t("image_invalid"))
-                else:
-                    st.image(
-                        image_data,
-                        caption=proposal.get("chosen_direction", candidate_id),
-                        width="stretch",
-                    )
+                if proposal.get("chosen_direction"):
+                    st.caption(proposal["chosen_direction"])
+                if image_data is not None:
                     if proposal.get("design_rationale"):
                         st.caption(proposal["design_rationale"])
                     st.download_button(
@@ -1257,7 +1280,7 @@ def _render_design_details(result: RunResult) -> None:
                 request = candidate.get("generation_request", {})
                 if request:
                     st.caption(
-                        " · ".join([
+                        _t("meta_separator").join([
                             _t("image_model_meta", value=request.get("model", _t("not_recorded"))),
                             _t("quality_meta", value=request.get("quality", _t("not_recorded"))),
                             _t("size_meta", value=request.get("size", _t("not_recorded"))),
@@ -1434,6 +1457,7 @@ def _render_design_panel(summary: RunSummary, conversation: ConversationRecord,
         dirty = _render_brief_editor(summary, conversation, disabled=design_busy)
         if st.button(
             _t("prepare_design_round"), type="primary", key=f"prepare_round_{summary.run_id}",
+            width="stretch",
             disabled=not _can_prepare_round(summary, conversation, busy=busy, dirty=dirty),
         ):
             try:
@@ -1490,43 +1514,44 @@ def _render_feedback_picker(selected: RunSummary | None, conversation: Conversat
 
 def _render_assistant_panel(summary: RunSummary, conversation: ConversationRecord,
                             selected: RunSummary | None, *, busy: bool) -> None:
-    st.subheader(_t("design_assistant"))
-    st.caption(_t("assistant_hint"))
-    candidate_id = _render_feedback_picker(selected, conversation)
-    _render_assistant_messages(summary, conversation)
-    if summary.status == "failed":
-        st.error(_t("conversation_failed"))
-        if st.button(_t("retry_conversation"), key=f"retry_chat_{summary.run_id}",
-                     disabled=_task_is_live(summary) or _current_credential() is None):
+    with st.container(border=True, key=f"assistant_panel_{summary.run_id}"):
+        st.subheader(_t("design_assistant"))
+        st.caption(_t("assistant_hint"))
+        candidate_id = _render_feedback_picker(selected, conversation)
+        _render_assistant_messages(summary, conversation)
+        if summary.status == "failed":
+            st.error(_t("conversation_failed"))
+            if st.button(_t("retry_conversation"), key=f"retry_chat_{summary.run_id}",
+                         disabled=_task_is_live(summary) or _current_credential() is None):
+                try:
+                    with _app_for_manifest(summary.manifest) as app:
+                        app.retry_conversation(summary.run_id)
+                        saved = app.inspect_task(summary.run_id)
+                    if saved.status == "discussing_request":
+                        _submit_saved_task(saved, _current_credential().value)
+                    st.rerun(scope="app")
+                except Exception as exc:
+                    _conversation_error(exc)
+        elif conversation.get("pending"):
+            st.info(_t("status.discussing_request"))
+        submission = st.chat_input(
+            _t("followup_placeholder"), key=f"conversation_input_{summary.run_id}",
+            accept_file="multiple", file_type=["png", "jpg", "jpeg", "webp"], max_upload_size=10,
+            submit_mode="disable", disabled=busy or _current_credential() is None,
+        )
+        if submission:
             try:
                 with _app_for_manifest(summary.manifest) as app:
-                    app.retry_conversation(summary.run_id)
+                    app.queue_conversation_message(
+                        summary.run_id, _submission_text(submission), attachments=_submission_attachments(submission),
+                        feedback_run_id=selected.run_id if selected else None, candidate_id=candidate_id,
+                    )
                     saved = app.inspect_task(summary.run_id)
-                if saved.status == "discussing_request":
-                    _submit_saved_task(saved, _current_credential().value)
+                _submit_saved_task(saved, _current_credential().value)
+                follow_latest(summary.run_id, "assistant_messages")
                 st.rerun(scope="app")
             except Exception as exc:
                 _conversation_error(exc)
-    elif conversation.get("pending"):
-        st.info(_t("status.discussing_request"))
-    submission = st.chat_input(
-        _t("followup_placeholder"), key=f"conversation_input_{summary.run_id}",
-        accept_file="multiple", file_type=["png", "jpg", "jpeg", "webp"], max_upload_size=10,
-        submit_mode="disable", disabled=busy or _current_credential() is None,
-    )
-    if submission:
-        try:
-            with _app_for_manifest(summary.manifest) as app:
-                app.queue_conversation_message(
-                    summary.run_id, _submission_text(submission), attachments=_submission_attachments(submission),
-                    feedback_run_id=selected.run_id if selected else None, candidate_id=candidate_id,
-                )
-                saved = app.inspect_task(summary.run_id)
-            _submit_saved_task(saved, _current_credential().value)
-            follow_latest(summary.run_id, "assistant_messages")
-            st.rerun(scope="app")
-        except Exception as exc:
-            _conversation_error(exc)
 
 
 def _render_conversation_task(summary: RunSummary) -> None:
@@ -1538,19 +1563,22 @@ def _render_conversation_task(summary: RunSummary) -> None:
     except Exception as exc:
         _conversation_error(exc)
         return
-    st.title(summary.manifest.get("title", summary.run_id))
+    title_column, view_column = st.columns([2.5, 1.5], vertical_alignment="center")
+    with title_column:
+        st.subheader(_display_title(summary.manifest.get("title", summary.run_id), limit=44))
+    with view_column:
+        view = st.segmented_control(
+            _t("workspace_view"), ["split", "design", "assistant"], default="split",
+            format_func=lambda value: _t(f"workspace_{value}"), key=f"workspace_view_{summary.run_id}",
+            persist_state="session", required=True,
+        ) or "split"
     st.caption(_t("conversation_hint"))
     assistant_busy = _task_is_live(summary) or bool(conversation.get("pending"))
     design_busy = any(_task_supervisor().is_running(round_.run_id) or round_.status in BUSY_ROUND_STATUSES
                       for round_ in rounds)
     workspace_busy = assistant_busy or design_busy
-    view = st.segmented_control(
-        _t("workspace_view"), ["split", "design", "assistant"], default="split",
-        format_func=lambda value: _t(f"workspace_{value}"), key=f"workspace_view_{summary.run_id}",
-        persist_state="session", required=True,
-    ) or "split"
     if view == "split":
-        design_column, assistant_column = st.columns([2.2, 1], gap="large", vertical_alignment="top")
+        design_column, assistant_column = st.columns([1.5, 1], gap="large", vertical_alignment="top")
     else:
         design_column, assistant_column = st.container(), st.container()
     if brief_editor.draft_key(summary.run_id) not in st.session_state:
@@ -1588,7 +1616,7 @@ def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed
 
     with st.container(horizontal=True, vertical_alignment="center"):
         if not embedded:
-            st.title(manifest.get("title", summary.run_id))
+            st.header(_display_title(manifest.get("title", summary.run_id), limit=52))
         st.badge(
             (
                 _t("recovery_paused")
@@ -1610,7 +1638,7 @@ def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed
 
     model, effort, image_model, _ = _model_settings(manifest)
     st.caption(
-        " · ".join([
+        _t("meta_separator").join([
             _text_model_label(model),
             _t("image_model_meta", value=_image_model_label(image_model)),
             f"{_t('reasoning_effort')} {effort}",

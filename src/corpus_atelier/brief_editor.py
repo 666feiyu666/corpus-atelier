@@ -1,7 +1,7 @@
 """Session drafts for native, field-by-field design brief editing."""
 
 from copy import deepcopy
-from typing import Callable, TypedDict
+from typing import Any, Callable, TypedDict
 
 import streamlit as st
 
@@ -35,6 +35,17 @@ def draft_key(run_id: str) -> str:
 
 def field_key(run_id: str, field: str) -> str:
     return f"brief_edit_{run_id}_{field}"
+
+
+def _widget_default(run_id: str, field: str, **defaults: Any) -> dict[str, Any]:
+    """Skip widget defaults when the draft already seeded this key.
+
+    Streamlit warns when a widget is given a default and its key is also set
+    through session state, so the seeded draft remains the single source here.
+    """
+    if field_key(run_id, field) in st.session_state:
+        return {}
+    return defaults
 
 
 def _empty_brief(profile: str) -> dict:
@@ -121,35 +132,42 @@ def render_fields(run_id: str, *, disabled: bool, translate: Callable[[str], str
     languages = [None, "zh-CN", "en"]
     if language and language not in languages:
         languages.append(language)
-    st.selectbox(translate("task_content_language"), languages, index=languages.index(language),
+    st.selectbox(translate("task_content_language"), languages,
                  format_func=lambda value: translate("choose_content_language") if value is None else LANGUAGE_LABELS.get(value, value),
-                 key=field_key(run_id, "content_language"), disabled=disabled, persist_state="session")
-    # Defaults also travel to the browser: a new chat turn may remount this subtree.
+                 key=field_key(run_id, "content_language"), disabled=disabled, persist_state="session",
+                 **_widget_default(run_id, "content_language", index=languages.index(language)))
+    # Defaults only apply when no seeded draft exists; a new chat turn may
+    # remount this subtree, so the draft (not the widget) stays authoritative.
     short_fields = [field for field in SHORT_TEXT_FIELDS if field in brief]
     for start in range(0, len(short_fields), 2):
         columns = st.columns(2)
         for column, field in zip(columns, short_fields[start:start + 2]):
             with column:
-                st.text_area(translate(field), value=brief[field], key=field_key(run_id, field), height=SHORT_FIELD_HEIGHT,
-                             disabled=disabled, persist_state="session")
+                st.text_area(translate(field), key=field_key(run_id, field), height=SHORT_FIELD_HEIGHT,
+                             disabled=disabled, persist_state="session",
+                             **_widget_default(run_id, field, value=brief[field]))
     for field in TEXT_FIELDS:
         if field in brief and field not in SHORT_TEXT_FIELDS:
-            st.text_area(translate(field), value=brief[field], key=field_key(run_id, field), height=LONG_FIELD_HEIGHT,
-                         disabled=disabled, persist_state="session")
+            st.text_area(translate(field), key=field_key(run_id, field), height=LONG_FIELD_HEIGHT,
+                         disabled=disabled, persist_state="session",
+                         **_widget_default(run_id, field, value=brief[field]))
     if "canvas" in brief:
         width, height = st.columns(2)
         for column, field in ((width, "width"), (height, "height")):
             with column:
-                st.number_input(translate(f"brief_ratio_{field}"), min_value=1, max_value=100,
-                                value=brief["canvas"]["aspect_ratio"][field], step=1,
+                st.number_input(translate(f"brief_ratio_{field}"), min_value=1, max_value=100, step=1,
                                 key=field_key(run_id, field), disabled=disabled,
-                                persist_state="session")
+                                persist_state="session",
+                                **_widget_default(run_id, field, value=brief["canvas"]["aspect_ratio"][field]))
     for field in LIST_FIELDS:
         if field in brief:
             st.text_area(translate("user_requirements_editor" if field == "user_requirements" else field),
-                         value="\n".join(brief[field]), key=field_key(run_id, field), height=LONG_FIELD_HEIGHT, disabled=disabled,
-                         help=translate("brief_list_help"), persist_state="session")
+                         key=field_key(run_id, field), height=LONG_FIELD_HEIGHT, disabled=disabled,
+                         help=translate("brief_list_help"), persist_state="session",
+                         **_widget_default(run_id, field, value="\n".join(brief[field])))
     st.text_area(translate("brief_open_questions"), key=field_key(run_id, "open_questions"),
-                 value="\n".join(st.session_state[draft_key(run_id)]["questions"]), height=SHORT_FIELD_HEIGHT,
+                 height=SHORT_FIELD_HEIGHT,
                  help=translate("brief_questions_help"), disabled=disabled,
-                 persist_state="session")
+                 persist_state="session",
+                 **_widget_default(run_id, "open_questions",
+                                   value="\n".join(st.session_state[draft_key(run_id)]["questions"])))

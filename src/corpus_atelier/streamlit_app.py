@@ -27,6 +27,7 @@ from corpus_atelier.conversation_records import ConversationRecord, load_convers
 from corpus_atelier import brief_editor
 from corpus_atelier.conversation_viewport import create_viewport, follow_latest, render_viewport
 from corpus_atelier.artifacts.store import ArtifactStore
+from corpus_atelier.favorites import FavoriteStore, FavoriteSummary
 from corpus_atelier.i18n import (
     DEFAULT_LANGUAGE,
     LANGUAGE_LABELS,
@@ -70,6 +71,12 @@ SHOWCASE_ROOT = Path(
 ).resolve()
 TASKS_ROOT = Path(
     os.environ.get("CORPUS_ATELIER_TASKS_ROOT", ROOT / ".atelier" / "tasks")
+).resolve()
+FAVORITES_ROOT = Path(
+    os.environ.get(
+        "CORPUS_ATELIER_FAVORITES_ROOT",
+        ROOT / ".atelier" / "favorites",
+    )
 ).resolve()
 ENV_PATH = Path(
     os.environ.get("CORPUS_ATELIER_ENV_PATH", ROOT / ".env")
@@ -217,6 +224,7 @@ def _application(
     get_image_model_profile(image_model)
     return CorpusAtelierApplication(
         runs_root=TASKS_ROOT,
+        favorites_root=FAVORITES_ROOT,
         text_provider=OpenAITextProvider(
             model=text_model,
             reasoning_effort=reasoning_effort,
@@ -388,6 +396,9 @@ def _initialize_state() -> None:
     st.session_state.setdefault("settings_dialog_open", False)
     st.session_state.setdefault("selected_task_id", None)
     st.session_state.setdefault("product_view", "home")
+    st.session_state.setdefault("product_view_tabs", "home")
+    st.session_state.setdefault("product_view_pending", None)
+    st.session_state.setdefault("favorite_open_id", None)
     st.session_state.setdefault("showcase_page", 1)
     st.session_state.setdefault("new_task_model", _default_text_model())
     st.session_state.setdefault("new_task_image_model", _default_image_model())
@@ -411,12 +422,23 @@ def _saved_tasks() -> list[RunSummary]:
 def _select_task(run_id: str | None) -> None:
     st.session_state.selected_task_id = run_id
     st.session_state.product_view = "home"
+    st.session_state["product_view_pending"] = "home"
 
 
 def _set_product_view(view: str) -> None:
     st.session_state.product_view = view
+    st.session_state["product_view_pending"] = view
+    if view != "favorites":
+        st.session_state.favorite_open_id = None
     if view == "gallery":
         st.session_state.showcase_page = 1
+
+
+def _sync_product_view_tabs() -> None:
+    """Apply programmatic view changes before the tabs widget is rendered."""
+    pending = st.session_state.pop("product_view_pending", None)
+    if pending is not None:
+        st.session_state["product_view_tabs"] = pending
 
 
 def _test_openai_connection(api_key: str) -> bool:
@@ -707,6 +729,22 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
         _show_settings_dialog()
 
 
+def _render_product_tabs() -> str:
+    """Top-level product navigation shared by the studio, gallery and favorites."""
+    view = st.segmented_control(
+        _t("view_switch"),
+        ["home", "gallery", "favorites"],
+        format_func=lambda value: _t(f"view_{value}"),
+        key="product_view_tabs",
+        persist_state="session",
+        required=True,
+        label_visibility="collapsed",
+        width="stretch",
+    ) or "home"
+    st.session_state.product_view = view
+    return view
+
+
 def _render_new_task_settings() -> tuple[str, str, str, str, int]:
     model_ids = [profile.model for profile in TEXT_MODEL_PROFILES]
     model = st.selectbox(
@@ -875,6 +913,271 @@ def _start_task(
         app.close()
     if summary is not None:
         _submit_saved_task(summary, credential.value)
+        _select_task(summary.run_id)
+        st.rerun()
+
+
+def _favorite_store() -> FavoriteStore:
+    return FavoriteStore(FAVORITES_ROOT)
+
+
+def _favorite_summaries() -> list[FavoriteSummary]:
+    try:
+        return _favorite_store().list()
+    except OSError:
+        LOGGER.exception("Could not list favorites.")
+        return []
+
+
+def _favorite_meta(record: dict[str, Any]) -> str:
+    updated = str(record.get("updated_at") or "")[:16].replace("T", " ")
+    return _t("meta_separator").join([
+        _t("favorite_rounds_count", count=len(record.get("rounds", []))),
+        _t("updated_at", value=updated or _t("not_recorded")),
+    ])
+
+
+def _favorite_markdown(record: dict[str, Any]) -> str:
+    """Export every saved prompt as readable Markdown."""
+    lines = [f"# {record.get('title', '')}", ""]
+    if record.get("note"):
+        lines += [str(record["note"]), ""]
+    lines += [_favorite_meta(record), ""]
+    for index, round_ in enumerate(record.get("rounds", []), 1):
+        lines += [f"## {_t('favorite_round', number=index)}", ""]
+        for candidate in round_.get("candidates", []):
+            label = candidate.get("label") or candidate.get("candidate_id") or ""
+            lines += [f"### {candidate.get('candidate_id', '')} · {label}", ""]
+            for field in ("chosen_direction", "design_description", "design_rationale"):
+                if candidate.get(field):
+                    lines += [str(candidate[field]), ""]
+            if candidate.get("generation_prompt"):
+                lines += ["```text", str(candidate["generation_prompt"]), "```", ""]
+    return "\n".join(lines).strip() + "\n"
+
+
+def _render_favorite_prompts(record: dict[str, Any]) -> None:
+    rounds = record.get("rounds", [])
+    has_prompt = any(
+        candidate.get("generation_prompt")
+        for round_ in rounds
+        for candidate in round_.get("candidates", [])
+    )
+    if not has_prompt:
+        st.caption(_t("favorite_prompts_empty"))
+        return
+    labels = [_t("favorite_round", number=index) for index in range(1, len(rounds) + 1)]
+    for tab, round_ in zip(st.tabs(labels), rounds, strict=True):
+        with tab:
+            selected = round_.get("selected_candidate_id")
+            candidates = round_.get("candidates", [])
+            if not candidates:
+                st.caption(_t("favorite_prompts_empty"))
+                continue
+            candidate_labels = []
+            for candidate in candidates:
+                label = _t("favorite_candidate", candidate=candidate.get("candidate_id") or "?")
+                if candidate.get("candidate_id") == selected:
+                    label = f"{label} · {_t('final_choice')}"
+                candidate_labels.append(label)
+            for candidate_tab, candidate in zip(
+                st.tabs(candidate_labels), candidates, strict=True
+            ):
+                with candidate_tab:
+                    if candidate.get("error"):
+                        st.warning(candidate["error"])
+                    if candidate.get("chosen_direction"):
+                        st.markdown(candidate["chosen_direction"])
+                    if candidate.get("design_description"):
+                        with st.expander(_t("full_visual_description")):
+                            st.markdown(candidate["design_description"])
+                    if candidate.get("design_rationale"):
+                        st.caption(candidate["design_rationale"])
+                    request = candidate.get("generation_request") or {}
+                    if request:
+                        st.caption(_t("meta_separator").join([
+                            _t("image_model_meta", value=request.get("model", _t("not_recorded"))),
+                            _t("quality_meta", value=request.get("quality", _t("not_recorded"))),
+                            _t("size_meta", value=request.get("size", _t("not_recorded"))),
+                        ]))
+                    if candidate.get("generation_prompt"):
+                        st.code(candidate["generation_prompt"], language=None, wrap_lines=True)
+
+
+def _close_favorite_detail() -> None:
+    st.session_state.favorite_open_id = None
+
+
+def _render_favorite_detail(favorite_id: str) -> None:
+    try:
+        record = _favorite_store().read(favorite_id)
+    except (OSError, ValueError):
+        st.session_state.favorite_open_id = None
+        st.rerun()
+        return
+    st.button(
+        _t("favorite_back"),
+        icon=":material/arrow_back:",
+        key="favorite_back",
+        on_click=_close_favorite_detail,
+    )
+    st.subheader(_display_title(str(record.get("title", favorite_id)), limit=64))
+    if record.get("note"):
+        st.caption(f"{_t('favorite_note')}{_t('meta_separator')}{record['note']}")
+    st.caption(_favorite_meta(record))
+
+    brief_tab, conversation_tab, prompts_tab = st.tabs([
+        _t("favorite_tab_brief"),
+        _t("favorite_tab_conversation"),
+        _t("favorite_tab_prompts"),
+    ])
+    with brief_tab:
+        if isinstance(record.get("brief"), dict):
+            _render_brief_contents(record["brief"])
+        else:
+            st.caption(_t("favorite_no_brief"))
+    with conversation_tab:
+        messages = record.get("messages", [])
+        if not messages:
+            st.caption(_t("favorite_messages_empty"))
+        for message in messages:
+            with st.chat_message(message.get("role", "user")):
+                if message.get("text"):
+                    st.markdown(message["text"])
+                for attachment in message.get("attachments", []):
+                    st.caption(attachment.get("name", ""))
+    with prompts_tab:
+        _render_favorite_prompts(record)
+
+    st.space("small")
+    with st.container(horizontal=True, vertical_alignment="center"):
+        if st.button(
+            _t("favorite_start"),
+            type="primary",
+            icon=":material/play_arrow:",
+            key="favorite_detail_start",
+        ):
+            _start_from_favorite(favorite_id)
+        st.download_button(
+            _t("favorite_download_prompts"),
+            data=_favorite_markdown(record),
+            file_name=(
+                _safe_filename_part(str(record.get("title", "")), fallback="favorite")
+                + "_prompts.md"
+            ),
+            mime="text/markdown",
+            icon=":material/download:",
+            on_click="ignore",
+        )
+        with st.popover(_t("favorite_delete"), icon=":material/delete:"):
+            st.caption(_t("favorite_delete_confirm"))
+            if st.button(
+                _t("favorite_delete_yes"),
+                type="primary",
+                key="favorite_detail_delete",
+            ):
+                _favorite_store().delete(favorite_id)
+                st.session_state.favorite_open_id = None
+                st.toast(_t("favorite_removed"), icon=":material/delete:")
+                st.rerun(scope="app")
+
+
+def _render_favorite_row(summary: FavoriteSummary) -> None:
+    with st.container(border=True, key=f"favorite_row_{summary.favorite_id}"):
+        cover, body, actions = st.columns([1, 3.2, 1.3], vertical_alignment="center")
+        with cover:
+            if summary.cover_path is not None:
+                st.image(summary.cover_path, width="stretch")
+            else:
+                st.caption(_t("favorite_missing_cover"))
+        with body:
+            st.subheader(_display_title(summary.title, limit=56))
+            if summary.note:
+                st.caption(f"{_t('favorite_note')}{_t('meta_separator')}{summary.note}")
+            st.caption(_t("meta_separator").join([
+                _t("favorite_rounds_count", count=summary.round_count),
+                _t("updated_at", value=summary.updated_at[:16].replace("T", " ")),
+            ]))
+        with actions:
+            if st.button(
+                _t("favorite_start"),
+                type="primary",
+                key=f"favorite_start_{summary.favorite_id}",
+                width="stretch",
+            ):
+                _start_from_favorite(summary.favorite_id)
+            if st.button(
+                _t("favorite_view"),
+                icon=":material/visibility:",
+                key=f"favorite_view_{summary.favorite_id}",
+                width="stretch",
+            ):
+                st.session_state.favorite_open_id = summary.favorite_id
+                st.rerun()
+
+
+def _render_favorites() -> None:
+    open_id = st.session_state.get("favorite_open_id")
+    if open_id:
+        _render_favorite_detail(open_id)
+        return
+    st.title(_t("favorites_title"))
+    st.caption(_t("favorites_tagline"))
+    summaries = _favorite_summaries()
+    if not summaries:
+        st.caption(_t("favorites_empty"))
+        st.caption(_t("favorites_empty_hint"))
+        return
+    for summary in summaries:
+        _render_favorite_row(summary)
+
+
+def _save_conversation_favorite(summary: RunSummary) -> None:
+    app = _app_for_manifest(summary.manifest)
+    try:
+        app.favorite_conversation(summary.run_id)
+    except Exception:
+        LOGGER.exception("Could not save favorite for %s.", summary.run_id)
+        st.error(_t("operation_failed"), icon=":material/error:")
+        return
+    finally:
+        app.close()
+    st.toast(_t("favorite_saved"), icon=":material/star:")
+    st.rerun()
+
+
+def _render_favorite_button(summary: RunSummary) -> None:
+    existing = _favorite_store().find_by_source(summary.run_id)
+    label = _t("favorite_update") if existing else _t("favorite_conversation")
+    icon = ":material/star:" if existing else ":material/star_border:"
+    if st.button(label, icon=icon, key=f"favorite_{summary.run_id}"):
+        _save_conversation_favorite(summary)
+
+
+def _start_from_favorite(favorite_id: str) -> None:
+    credential = _current_credential()
+    if credential is None:
+        st.error(_t("api_key_missing"), icon=":material/key_off:")
+        return
+    app = _application(
+        st.session_state.get("new_task_model", _default_text_model()),
+        st.session_state.get("new_task_reasoning", "medium"),
+        st.session_state.get("new_task_image_model", _default_image_model()),
+        api_key=credential.value,
+    )
+    summary: RunSummary | None = None
+    try:
+        result = app.create_conversation_from_favorite(
+            favorite_id,
+            candidate_count=st.session_state.get("new_task_candidates", 3),
+        )
+        summary = app.inspect_task(result.run_id)
+    except Exception:
+        LOGGER.exception("Could not start a conversation from favorite %s.", favorite_id)
+        st.error(_t("favorite_created_task_failed"), icon=":material/error:")
+    finally:
+        app.close()
+    if summary is not None:
         _select_task(summary.run_id)
         st.rerun()
 
@@ -1563,16 +1866,18 @@ def _render_conversation_task(summary: RunSummary) -> None:
     except Exception as exc:
         _conversation_error(exc)
         return
-    title_column, view_column = st.columns([2.5, 1.5], vertical_alignment="center")
+    title_column, action_column = st.columns([3, 1], vertical_alignment="center")
     with title_column:
         st.subheader(_display_title(summary.manifest.get("title", summary.run_id), limit=44))
-    with view_column:
-        view = st.segmented_control(
-            _t("workspace_view"), ["split", "design", "assistant"], default="split",
-            format_func=lambda value: _t(f"workspace_{value}"), key=f"workspace_view_{summary.run_id}",
-            persist_state="session", required=True,
-        ) or "split"
+    with action_column:
+        with st.container(horizontal_alignment="right"):
+            _render_favorite_button(summary)
     st.caption(_t("conversation_hint"))
+    view = st.segmented_control(
+        _t("workspace_view"), ["split", "design", "assistant"], default="split",
+        format_func=lambda value: _t(f"workspace_{value}"), key=f"workspace_view_{summary.run_id}",
+        persist_state="session", required=True,
+    ) or "split"
     assistant_busy = _task_is_live(summary) or bool(conversation.get("pending"))
     design_busy = any(_task_supervisor().is_running(round_.run_id) or round_.status in BUSY_ROUND_STATUSES
                       for round_ in rounds)
@@ -1726,6 +2031,7 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     _initialize_state()
+    _sync_product_view_tabs()
     settings_notice = st.session_state.pop("settings_notice", None)
     if settings_notice:
         st.toast(settings_notice, icon=":material/check_circle:")
@@ -1739,8 +2045,11 @@ def main() -> None:
 
     _render_sidebar(tasks)
     if selected is None:
-        if st.session_state.product_view == "gallery":
+        view = _render_product_tabs()
+        if view == "gallery":
             _render_showcase_gallery()
+        elif view == "favorites":
+            _render_favorites()
         else:
             _render_new_task()
         return

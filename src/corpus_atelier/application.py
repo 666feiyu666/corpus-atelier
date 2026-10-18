@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 from pathlib import Path
 import sqlite3
+from threading import Lock
 from typing import Callable
+from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
@@ -13,7 +17,14 @@ from .artifacts.paths import task_path
 from .artifacts.records import read_json
 from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
 from .conversation import ConversationMixin, serialized_conversation
+from .conversation_records import new_conversation, now
 from .design_support.validation import validate, validate_candidate_count
+from .favorites import (
+    FavoriteRecord,
+    FavoriteStore,
+    FavoriteSummary,
+    capture_favorite,
+)
 from .graphs import build_graph
 from .language import bind_brief_language, validate_content_language
 from .providers import OpenAIImageProvider, OpenAITextProvider
@@ -38,12 +49,15 @@ RECOVERABLE_TASK_STATUSES = frozenset({
     "generating_candidates",
 })
 
+_FAVORITE_LOCK = Lock()
+
 
 class CorpusAtelierApplication(ConversationMixin):
     def __init__(
         self,
         *,
         runs_root: Path | str = ".atelier/tasks",
+        favorites_root: Path | str | None = None,
         checkpoint_path: Path | str | None = None,
         text_provider=None,
         image_provider=None,
@@ -54,6 +68,9 @@ class CorpusAtelierApplication(ConversationMixin):
             status_callback=status_callback,
         )
         self.store.root.mkdir(parents=True, exist_ok=True)
+        if favorites_root is None:
+            favorites_root = self.store.root.parent / "favorites"
+        self.favorites_store = FavoriteStore(favorites_root)
         self.runtime = WorkflowRuntime(
             self.store,
             text_provider or OpenAITextProvider(),
@@ -317,6 +334,98 @@ class CorpusAtelierApplication(ConversationMixin):
             )
             for run_dir, manifest in self.store.list_runs()
         ]
+
+    def favorite_conversation(self, run_id: str, *, note: str = "") -> FavoriteRecord:
+        """Snapshot one conversation; repeat favorites update the same record."""
+        summary = self.inspect_task(run_id)
+        if not summary.manifest.get("is_conversation"):
+            raise ValueError("Only a design conversation can be saved to favorites.")
+        with _FAVORITE_LOCK:
+            existing = self.favorites_store.find_by_source(run_id)
+            record, cover = capture_favorite(
+                self,
+                run_id,
+                favorite_id=existing["favorite_id"] if existing else None,
+                created_at=existing["created_at"] if existing else None,
+                note=note or (existing.get("note", "") if existing else ""),
+            )
+            return self.favorites_store.save(record, cover_path=cover)
+
+    def favorites(self) -> list[FavoriteSummary]:
+        return self.favorites_store.list()
+
+    def open_favorite(self, favorite_id: str) -> FavoriteRecord:
+        return self.favorites_store.read(favorite_id)
+
+    def remove_favorite(self, favorite_id: str) -> None:
+        self.favorites_store.delete(favorite_id)
+
+    def create_conversation_from_favorite(
+        self,
+        favorite_id: str,
+        *,
+        candidate_count: int = 1,
+    ) -> RunResult:
+        """Start a clean conversation from a saved request and brief."""
+        record = self.favorites_store.read(favorite_id)
+        brief = record.get("brief") if isinstance(record.get("brief"), dict) else None
+        language = validate_content_language(record.get("content_language"))
+        if brief is not None:
+            language = validate_content_language(brief.get("content_language")) or language
+            brief = bind_brief_language(brief, language)
+        profile = get_profile(record["profile"])
+        if brief is not None:
+            brief = validate(brief, profile.brief_schema)
+        elif not language:
+            raise ValueError("The favorite has no saved brief or content language.")
+        case_id = validate_case_id(record.get("source_case_id") or "natural-language")
+        job = NaturalLanguageDesignJob(
+            case_id=case_id,
+            profile=profile.name,
+            request=record["request"],
+            candidate_count=validate_candidate_count(candidate_count),
+            content_language=language,
+        )
+        value = new_conversation(profile.name, record["request"], language)
+        value["messages"].append({
+            "id": uuid4().hex,
+            "role": "user",
+            "text": record["request"],
+            "attachments": [],
+            "feedback_run_id": None,
+            "candidate_id": None,
+            "created_at": now(),
+        })
+        if brief is not None:
+            value.update(
+                design_brief=deepcopy(brief),
+                brief_revision=1,
+                revision=1,
+                user_requirements=list(brief.get("user_requirements", [])),
+                content_language=language,
+                effective_request=(
+                    "User-confirmed design brief:\n"
+                    + json.dumps(brief, ensure_ascii=False)
+                ),
+            )
+            value["brief_history"].append({
+                "revision": 1,
+                "brief": deepcopy(brief),
+                "origin": "favorite",
+                "based_on": None,
+                "created_at": now(),
+            })
+        result = self.create_request(job, is_conversation=True, conversation_state=value)
+        root = self.store.find_run(result.run_id)
+        self.store.update(
+            root,
+            "discussing",
+            is_conversation=True,
+            title=record["title"],
+        )
+        if brief is not None:
+            self._sync_saved_brief(root, value, refresh_manifest=True)
+        return self._result(result.run_id)
 
     def inspect_task(self, run_id: str) -> RunSummary:
         run_dir = self.store.find_run(run_id)

@@ -38,7 +38,6 @@ class BriefEditorUITests(unittest.TestCase):
                 "CORPUS_ATELIER_ENV_PATH": str(root / ".env"), "OPENAI_API_KEY": "sk-test",
             }), patch.object(OpenAITextProvider, "propose", fixtures.StreamlitAppTests._offline_propose):
                 app = AppTest.from_file(str(fixtures.APP), default_timeout=10).run()
-                app.toggle(key="discuss_first").set_value(True).run()
                 app.chat_input(key="new_task_prompt").set_value("设计一张国庆花篮海报。").run()
                 run_id = app.session_state["selected_task_id"]
                 fixtures.StreamlitAppTests._wait_for_status(app, root, run_id, "discussing")

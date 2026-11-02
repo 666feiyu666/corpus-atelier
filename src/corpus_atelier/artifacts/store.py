@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import logging
 from pathlib import Path
 import re
+import shutil
 from typing import Callable
 from uuid import uuid4
 
@@ -198,6 +199,13 @@ class ArtifactStore:
         if self.root not in run_dir.parents:
             raise ValueError("Task path escapes the task store.")
         return run_dir
+
+    def delete(self, run_dir: Path) -> None:
+        """Permanently remove one task directory inside the store root."""
+        run_dir = Path(run_dir).resolve()
+        if run_dir == self.root or self.root not in run_dir.parents:
+            raise ValueError("Task path escapes the task store.")
+        shutil.rmtree(run_dir)
 
     def list_runs(self) -> list[tuple[Path, dict]]:
         """Return saved tasks newest-first without loading graph checkpoints."""

@@ -27,7 +27,6 @@ from corpus_atelier.conversation_records import ConversationRecord, load_convers
 from corpus_atelier import brief_editor
 from corpus_atelier.conversation_viewport import create_viewport, follow_latest, render_viewport
 from corpus_atelier.artifacts.store import ArtifactStore
-from corpus_atelier.favorites import FavoriteStore, FavoriteSummary
 from corpus_atelier.i18n import (
     DEFAULT_LANGUAGE,
     LANGUAGE_LABELS,
@@ -74,12 +73,6 @@ SHOWCASE_ROOT = Path(
 ).resolve()
 TASKS_ROOT = Path(
     os.environ.get("CORPUS_ATELIER_TASKS_ROOT", ROOT / ".atelier" / "tasks")
-).resolve()
-FAVORITES_ROOT = Path(
-    os.environ.get(
-        "CORPUS_ATELIER_FAVORITES_ROOT",
-        ROOT / ".atelier" / "favorites",
-    )
 ).resolve()
 ENV_PATH = Path(
     os.environ.get("CORPUS_ATELIER_ENV_PATH", ROOT / ".env")
@@ -239,7 +232,6 @@ def _application(
     get_image_model_profile(image_model)
     return CorpusAtelierApplication(
         runs_root=TASKS_ROOT,
-        favorites_root=FAVORITES_ROOT,
         text_provider=OpenAITextProvider(
             model=text_model,
             reasoning_effort=reasoning_effort,
@@ -410,11 +402,9 @@ def _initialize_state() -> None:
     st.session_state.setdefault("session_openai_api_key", None)
     st.session_state.setdefault("settings_dialog_open", False)
     st.session_state.setdefault("selected_task_id", None)
-    st.session_state.setdefault("product_view", "home")
-    st.session_state.setdefault("product_view_tabs", "home")
+    st.session_state.setdefault("product_view", "studio")
+    st.session_state.setdefault("product_view_tabs", "studio")
     st.session_state.setdefault("product_view_pending", None)
-    st.session_state.setdefault("favorite_open_id", None)
-    st.session_state.setdefault("showcase_page", 1)
     st.session_state.setdefault("new_task_model", _default_text_model())
     st.session_state.setdefault("new_task_image_model", _default_image_model())
     st.session_state.setdefault("new_task_reasoning", "medium")
@@ -436,17 +426,13 @@ def _saved_tasks() -> list[RunSummary]:
 
 def _select_task(run_id: str | None) -> None:
     st.session_state.selected_task_id = run_id
-    st.session_state.product_view = "home"
-    st.session_state["product_view_pending"] = "home"
+    st.session_state.product_view = "studio"
+    st.session_state["product_view_pending"] = "studio"
 
 
 def _set_product_view(view: str) -> None:
     st.session_state.product_view = view
     st.session_state["product_view_pending"] = view
-    if view != "favorites":
-        st.session_state.favorite_open_id = None
-    if view == "gallery":
-        st.session_state.showcase_page = 1
 
 
 def _sync_product_view_tabs() -> None:
@@ -612,6 +598,23 @@ def _task_icon(task: RunSummary) -> str:
     return STATUS_ICONS.get(task.status, ":material/pending:")
 
 
+def _delete_conversation(task: RunSummary) -> None:
+    """Permanently delete one task and its rounds, then leave its workspace."""
+    app = CorpusAtelierApplication(runs_root=TASKS_ROOT)
+    try:
+        app.delete_task(task.run_id)
+    except Exception:
+        LOGGER.exception("Could not delete task %s.", task.run_id)
+        st.error(_t("delete_failed"), icon=":material/error:")
+        return
+    finally:
+        app.close()
+    if st.session_state.selected_task_id == task.run_id:
+        _select_task(None)
+    st.toast(_t("conversation_deleted"), icon=":material/delete:")
+    st.rerun(scope="app")
+
+
 def _render_task_buttons(tasks: list[RunSummary]) -> None:
     tasks = [task for task in tasks if not task.manifest.get("conversation_parent_id")]
     st.caption(_t("tasks_count", count=len(tasks)))
@@ -655,18 +658,31 @@ def _render_task_buttons(tasks: list[RunSummary]) -> None:
                 and not _task_supervisor().is_running(task.run_id)
                 and _current_credential() is None
             )
-            if st.button(
-                _task_row_title(task),
-                icon=_task_icon(task),
-                width="stretch",
-                key=f"task_{task.run_id}",
-                help=f"{_one_line(title)}\n\n" + (
-                    _t("recovery_waiting_for_key")
-                    if paused else _status_label(task.status)
-                ),
-            ):
-                _select_task(task.run_id)
-                st.rerun(scope="app")
+            columns = st.columns([5, 1], vertical_alignment="center")
+            with columns[0]:
+                if st.button(
+                    _task_row_title(task),
+                    icon=_task_icon(task),
+                    width="stretch",
+                    key=f"task_{task.run_id}",
+                    help=f"{_one_line(title)}\n\n" + (
+                        _t("recovery_waiting_for_key")
+                        if paused else _status_label(task.status)
+                    ),
+                ):
+                    _select_task(task.run_id)
+                    st.rerun(scope="app")
+            with columns[1]:
+                with st.popover("⋯", key=f"task_menu_{task.run_id}"):
+                    st.caption(_t("delete_conversation_confirm"))
+                    if st.button(
+                        _t("delete_conversation_yes"),
+                        icon=":material/delete:",
+                        key=f"delete_{task.run_id}",
+                        width="stretch",
+                        disabled=_task_supervisor().is_running(task.run_id),
+                    ):
+                        _delete_conversation(task)
 
 
 @st.fragment(run_every="1s")
@@ -719,7 +735,7 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
             key="new_task",
             disabled=(
                 st.session_state.selected_task_id is None
-                and st.session_state.product_view == "home"
+                and st.session_state.product_view == "studio"
             ),
         ):
             _select_task(None)
@@ -745,17 +761,17 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
 
 
 def _render_product_tabs() -> str:
-    """Top-level product navigation shared by the studio, gallery and favorites."""
+    """Top-level product navigation: chat studio and corpus gallery."""
     view = st.segmented_control(
         _t("view_switch"),
-        ["home", "gallery", "corpus", "favorites"],
+        ["studio", "gallery"],
         format_func=lambda value: _t(f"view_{value}"),
         key="product_view_tabs",
         persist_state="session",
         required=True,
         label_visibility="collapsed",
         width="stretch",
-    ) or "home"
+    ) or "studio"
     st.session_state.product_view = view
     return view
 
@@ -796,95 +812,6 @@ def _render_new_task_settings() -> tuple[str, str, str, str, int]:
     return model, reasoning, image_model, method, candidates
 
 
-def _render_showcase() -> None:
-    heading, action = st.columns([3, 1], vertical_alignment="center")
-    with heading:
-        st.subheader(_t("showcase_heading"))
-    items = _showcase_items()
-    if not items:
-        st.caption(_t("showcase_preparing"))
-        return
-    featured = [item for item in items if item.featured]
-    featured.sort(key=lambda item: (
-        item.featured_order is None,
-        item.featured_order if item.featured_order is not None else 0,
-    ))
-    if len(featured) < SHOWCASE_PAGE_SIZE:
-        featured_ids = {item.image_path for item in featured}
-        featured.extend(
-            item for item in items if item.image_path not in featured_ids
-        )
-    featured = featured[:SHOWCASE_PAGE_SIZE]
-
-    columns = st.columns(
-        len(featured),
-        gap="medium",
-        vertical_alignment="top",
-    )
-    for column, item in zip(columns, featured, strict=True):
-        with column:
-            st.image(
-                item.image_path,
-                caption=item.title,
-                width="stretch",
-                output_format="PNG",
-            )
-
-    if len(items) > len(featured):
-        with action:
-            with st.container(horizontal_alignment="right"):
-                st.button(
-                    _t("view_all_designs"),
-                    icon=":material/grid_view:",
-                    key="showcase_view_all",
-                    on_click=_set_product_view,
-                    args=("gallery",),
-                )
-
-
-def _render_showcase_gallery() -> None:
-    heading, action = st.columns([3, 1], vertical_alignment="center")
-    with heading:
-        st.title(_t("gallery_title"))
-        st.caption(_t("gallery_tagline"))
-    with action:
-        with st.container(horizontal_alignment="right"):
-            st.button(
-                _t("back_to_creation"),
-                icon=":material/arrow_back:",
-                key="showcase_back",
-                on_click=_set_product_view,
-                args=("home",),
-            )
-
-    items = _showcase_items()
-    if not items:
-        st.caption(_t("showcase_preparing"))
-        return
-
-    total_pages = ceil(len(items) / SHOWCASE_PAGE_SIZE)
-    gallery_slot = st.empty()
-    with st.container(horizontal_alignment="center"):
-        page = st.pagination(total_pages, key="showcase_page")
-
-    start = (page - 1) * SHOWCASE_PAGE_SIZE
-    page_items = items[start:start + SHOWCASE_PAGE_SIZE]
-    with gallery_slot.container():
-        columns = st.columns(
-            len(page_items),
-            gap="medium",
-            vertical_alignment="top",
-        )
-        for column, item in zip(columns, page_items, strict=True):
-            with column:
-                st.image(
-                    item.image_path,
-                    caption=item.title,
-                    width="stretch",
-                    output_format="PNG",
-                )
-
-
 def _corpus_store() -> CorpusStore:
     CORPUS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return CorpusStore(CORPUS_DB_PATH)
@@ -920,8 +847,26 @@ def _render_corpus_record(record: dict[str, Any]) -> None:
         st.caption(f"{_t('corpus_source')}: {source.get('kind', '')}")
 
 
-def _render_corpus() -> None:
-    st.title(_t("corpus_title"))
+def _render_gallery() -> None:
+    st.title(_t("gallery_title"))
+    st.caption(_t("gallery_tagline"))
+    featured = _showcase_items()
+    if featured:
+        st.subheader(_t("gallery_featured"))
+        columns = st.columns(
+            min(len(featured), SHOWCASE_PAGE_SIZE),
+            gap="medium",
+            vertical_alignment="top",
+        )
+        for column, item in zip(columns, featured[:SHOWCASE_PAGE_SIZE], strict=True):
+            with column:
+                st.image(
+                    item.image_path,
+                    caption=item.title,
+                    width="stretch",
+                    output_format="PNG",
+                )
+    st.subheader(_t("corpus_title"))
     st.caption(_t("corpus_tagline"))
     query = st.text_input(_t("corpus_search_placeholder"), key="corpus_query")
     tag_options = [tag.id for facet in FACETS for tag in tags_of(facet)]
@@ -986,7 +931,6 @@ def _start_task(
     image_model: str,
     profile: str,
     candidate_count: int,
-    discuss_first: bool = False,
     attachments: list[tuple[str, bytes]] | None = None,
 ) -> None:
     if not request.strip():
@@ -1010,10 +954,7 @@ def _start_task(
             request=request,
             candidate_count=candidate_count,
         )
-        if discuss_first or attachments:
-            result = app.create_conversation(job, attachments=attachments)
-        else:
-            result = app.create_request(job)
+        result = app.create_conversation(job, attachments=attachments)
         summary = app.inspect_task(result.run_id)
     except Exception:
         st.error(_t("create_failed"), icon=":material/error:")
@@ -1025,283 +966,15 @@ def _start_task(
         st.rerun()
 
 
-def _favorite_store() -> FavoriteStore:
-    return FavoriteStore(FAVORITES_ROOT)
-
-
-def _favorite_summaries() -> list[FavoriteSummary]:
-    try:
-        return _favorite_store().list()
-    except OSError:
-        LOGGER.exception("Could not list favorites.")
-        return []
-
-
-def _favorite_meta(record: dict[str, Any]) -> str:
-    updated = str(record.get("updated_at") or "")[:16].replace("T", " ")
-    return _t("meta_separator").join([
-        _t("favorite_rounds_count", count=len(record.get("rounds", []))),
-        _t("updated_at", value=updated or _t("not_recorded")),
-    ])
-
-
-def _favorite_markdown(record: dict[str, Any]) -> str:
-    """Export every saved prompt as readable Markdown."""
-    lines = [f"# {record.get('title', '')}", ""]
-    if record.get("note"):
-        lines += [str(record["note"]), ""]
-    lines += [_favorite_meta(record), ""]
-    for index, round_ in enumerate(record.get("rounds", []), 1):
-        lines += [f"## {_t('favorite_round', number=index)}", ""]
-        for candidate in round_.get("candidates", []):
-            label = candidate.get("label") or candidate.get("candidate_id") or ""
-            lines += [f"### {candidate.get('candidate_id', '')} · {label}", ""]
-            for field in ("chosen_direction", "design_description", "design_rationale"):
-                if candidate.get(field):
-                    lines += [str(candidate[field]), ""]
-            if candidate.get("generation_prompt"):
-                lines += ["```text", str(candidate["generation_prompt"]), "```", ""]
-    return "\n".join(lines).strip() + "\n"
-
-
-def _render_favorite_prompts(record: dict[str, Any]) -> None:
-    rounds = record.get("rounds", [])
-    has_prompt = any(
-        candidate.get("generation_prompt")
-        for round_ in rounds
-        for candidate in round_.get("candidates", [])
-    )
-    if not has_prompt:
-        st.caption(_t("favorite_prompts_empty"))
-        return
-    labels = [_t("favorite_round", number=index) for index in range(1, len(rounds) + 1)]
-    for tab, round_ in zip(st.tabs(labels), rounds, strict=True):
-        with tab:
-            selected = round_.get("selected_candidate_id")
-            candidates = round_.get("candidates", [])
-            if not candidates:
-                st.caption(_t("favorite_prompts_empty"))
-                continue
-            candidate_labels = []
-            for candidate in candidates:
-                label = _t("favorite_candidate", candidate=candidate.get("candidate_id") or "?")
-                if candidate.get("candidate_id") == selected:
-                    label = f"{label} · {_t('final_choice')}"
-                candidate_labels.append(label)
-            for candidate_tab, candidate in zip(
-                st.tabs(candidate_labels), candidates, strict=True
-            ):
-                with candidate_tab:
-                    if candidate.get("error"):
-                        st.warning(candidate["error"])
-                    if candidate.get("chosen_direction"):
-                        st.markdown(candidate["chosen_direction"])
-                    if candidate.get("design_description"):
-                        with st.expander(_t("full_visual_description")):
-                            st.markdown(candidate["design_description"])
-                    if candidate.get("design_rationale"):
-                        st.caption(candidate["design_rationale"])
-                    request = candidate.get("generation_request") or {}
-                    if request:
-                        st.caption(_t("meta_separator").join([
-                            _t("image_model_meta", value=request.get("model", _t("not_recorded"))),
-                            _t("quality_meta", value=request.get("quality", _t("not_recorded"))),
-                            _t("size_meta", value=request.get("size", _t("not_recorded"))),
-                        ]))
-                    if candidate.get("generation_prompt"):
-                        st.code(candidate["generation_prompt"], language=None, wrap_lines=True)
-
-
-def _close_favorite_detail() -> None:
-    st.session_state.favorite_open_id = None
-
-
-def _render_favorite_detail(favorite_id: str) -> None:
-    try:
-        record = _favorite_store().read(favorite_id)
-    except (OSError, ValueError):
-        st.session_state.favorite_open_id = None
-        st.rerun()
-        return
-    st.button(
-        _t("favorite_back"),
-        icon=":material/arrow_back:",
-        key="favorite_back",
-        on_click=_close_favorite_detail,
-    )
-    st.subheader(_display_title(str(record.get("title", favorite_id)), limit=64))
-    if record.get("note"):
-        st.caption(f"{_t('favorite_note')}{_t('meta_separator')}{record['note']}")
-    st.caption(_favorite_meta(record))
-
-    brief_tab, conversation_tab, prompts_tab = st.tabs([
-        _t("favorite_tab_brief"),
-        _t("favorite_tab_conversation"),
-        _t("favorite_tab_prompts"),
-    ])
-    with brief_tab:
-        if isinstance(record.get("brief"), dict):
-            _render_brief_contents(record["brief"])
-        else:
-            st.caption(_t("favorite_no_brief"))
-    with conversation_tab:
-        messages = record.get("messages", [])
-        if not messages:
-            st.caption(_t("favorite_messages_empty"))
-        for message in messages:
-            with st.chat_message(message.get("role", "user")):
-                if message.get("text"):
-                    st.markdown(message["text"])
-                for attachment in message.get("attachments", []):
-                    st.caption(attachment.get("name", ""))
-    with prompts_tab:
-        _render_favorite_prompts(record)
-
-    st.space("small")
-    with st.container(horizontal=True, vertical_alignment="center"):
-        if st.button(
-            _t("favorite_start"),
-            type="primary",
-            icon=":material/play_arrow:",
-            key="favorite_detail_start",
-        ):
-            _start_from_favorite(favorite_id)
-        st.download_button(
-            _t("favorite_download_prompts"),
-            data=_favorite_markdown(record),
-            file_name=(
-                _safe_filename_part(str(record.get("title", "")), fallback="favorite")
-                + "_prompts.md"
-            ),
-            mime="text/markdown",
-            icon=":material/download:",
-            on_click="ignore",
-        )
-        with st.popover(_t("favorite_delete"), icon=":material/delete:"):
-            st.caption(_t("favorite_delete_confirm"))
-            if st.button(
-                _t("favorite_delete_yes"),
-                type="primary",
-                key="favorite_detail_delete",
-            ):
-                _favorite_store().delete(favorite_id)
-                st.session_state.favorite_open_id = None
-                st.toast(_t("favorite_removed"), icon=":material/delete:")
-                st.rerun(scope="app")
-
-
-def _render_favorite_row(summary: FavoriteSummary) -> None:
-    with st.container(border=True, key=f"favorite_row_{summary.favorite_id}"):
-        cover, body, actions = st.columns([1, 3.2, 1.3], vertical_alignment="center")
-        with cover:
-            if summary.cover_path is not None:
-                st.image(summary.cover_path, width="stretch")
-            else:
-                st.caption(_t("favorite_missing_cover"))
-        with body:
-            st.subheader(_display_title(summary.title, limit=56))
-            if summary.note:
-                st.caption(f"{_t('favorite_note')}{_t('meta_separator')}{summary.note}")
-            st.caption(_t("meta_separator").join([
-                _t("favorite_rounds_count", count=summary.round_count),
-                _t("updated_at", value=summary.updated_at[:16].replace("T", " ")),
-            ]))
-        with actions:
-            if st.button(
-                _t("favorite_start"),
-                type="primary",
-                key=f"favorite_start_{summary.favorite_id}",
-                width="stretch",
-            ):
-                _start_from_favorite(summary.favorite_id)
-            if st.button(
-                _t("favorite_view"),
-                icon=":material/visibility:",
-                key=f"favorite_view_{summary.favorite_id}",
-                width="stretch",
-            ):
-                st.session_state.favorite_open_id = summary.favorite_id
-                st.rerun()
-
-
-def _render_favorites() -> None:
-    open_id = st.session_state.get("favorite_open_id")
-    if open_id:
-        _render_favorite_detail(open_id)
-        return
-    st.title(_t("favorites_title"))
-    st.caption(_t("favorites_tagline"))
-    summaries = _favorite_summaries()
-    if not summaries:
-        st.caption(_t("favorites_empty"))
-        st.caption(_t("favorites_empty_hint"))
-        return
-    for summary in summaries:
-        _render_favorite_row(summary)
-
-
-def _save_conversation_favorite(summary: RunSummary) -> None:
-    app = _app_for_manifest(summary.manifest)
-    try:
-        app.favorite_conversation(summary.run_id)
-    except Exception:
-        LOGGER.exception("Could not save favorite for %s.", summary.run_id)
-        st.error(_t("operation_failed"), icon=":material/error:")
-        return
-    finally:
-        app.close()
-    st.toast(_t("favorite_saved"), icon=":material/star:")
-    st.rerun()
-
-
-def _render_favorite_button(summary: RunSummary) -> None:
-    existing = _favorite_store().find_by_source(summary.run_id)
-    label = _t("favorite_update") if existing else _t("favorite_conversation")
-    icon = ":material/star:" if existing else ":material/star_border:"
-    if st.button(label, icon=icon, key=f"favorite_{summary.run_id}"):
-        _save_conversation_favorite(summary)
-
-
-def _start_from_favorite(favorite_id: str) -> None:
-    credential = _current_credential()
-    if credential is None:
-        st.error(_t("api_key_missing"), icon=":material/key_off:")
-        return
-    app = _application(
-        st.session_state.get("new_task_model", _default_text_model()),
-        st.session_state.get("new_task_reasoning", "medium"),
-        st.session_state.get("new_task_image_model", _default_image_model()),
-        api_key=credential.value,
-    )
-    summary: RunSummary | None = None
-    try:
-        result = app.create_conversation_from_favorite(
-            favorite_id,
-            candidate_count=st.session_state.get("new_task_candidates", 3),
-        )
-        summary = app.inspect_task(result.run_id)
-    except Exception:
-        LOGGER.exception("Could not start a conversation from favorite %s.", favorite_id)
-        st.error(_t("favorite_created_task_failed"), icon=":material/error:")
-    finally:
-        app.close()
-    if summary is not None:
-        _select_task(summary.run_id)
-        st.rerun()
-
-
-def _render_new_task() -> None:
+def _render_studio() -> None:
     st.title(_t("product_name"))
     st.caption(_t("product_tagline"))
-    _render_showcase()
     st.subheader(_t("start_from_request"))
     st.caption(_t("reference_upload_hint"))
-    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
-        discuss_first = st.toggle(_t("discuss_first"), key="discuss_first")
-        with st.popover(_t("task_settings"), icon=":material/tune:"):
-            model, reasoning, image_model, profile, candidate_count = (
-                _render_new_task_settings()
-            )
+    with st.popover(_t("task_settings"), icon=":material/tune:"):
+        model, reasoning, image_model, profile, candidate_count = (
+            _render_new_task_settings()
+        )
     submission = st.chat_input(
         _t("request_placeholder"),
         key="new_task_prompt",
@@ -1318,7 +991,6 @@ def _render_new_task() -> None:
             image_model=image_model,
             profile=profile,
             candidate_count=candidate_count,
-            discuss_first=discuss_first,
             attachments=_submission_attachments(submission),
         )
 
@@ -1345,13 +1017,6 @@ def _render_brief_contents(brief: dict, *, include_requirements: bool = True) ->
                 st.markdown(f"- {item}")
         else:
             st.caption(_t("brief_no_copy" if key == "exact_copy" else "brief_unspecified"))
-
-
-def _render_brief(result: RunResult) -> None:
-    brief = read_json_artifact(result, "brief")
-    if brief:
-        with st.expander(_t("understood_request"), icon=":material/description:"):
-            _render_brief_contents(brief)
 
 
 def _ready_candidates(result: RunResult) -> list[dict[str, Any]]:
@@ -1440,6 +1105,13 @@ def _image_archive(
                 data,
             )
     return output.getvalue()
+
+
+def _render_brief(result: RunResult) -> None:
+    brief = read_json_artifact(result, "brief")
+    if brief:
+        with st.expander(_t("understood_request"), icon=":material/description:"):
+            _render_brief_contents(brief)
 
 
 def _render_generation_preview(result: RunResult) -> None:
@@ -1727,35 +1399,6 @@ def _conversation_error(exc: Exception) -> None:
         st.text(str(exc))
 
 
-def _render_legacy_followup(summary: RunSummary, *, active: bool) -> None:
-    if active or summary.status in RECOVERABLE_TASK_STATUSES:
-        return
-    st.caption(_t("followup_hint"))
-    submission = st.chat_input(
-        _t("followup_placeholder"), key=f"followup_{summary.run_id}",
-        accept_file="multiple", file_type=["png", "jpg", "jpeg", "webp"],
-        max_upload_size=10, submit_mode="disable",
-        disabled=_current_credential() is None,
-    )
-    if not submission:
-        return
-    try:
-        with _app_for_manifest(summary.manifest) as app:
-            profile_path = summary.run_dir / "profile.json"
-            profile = json.loads(profile_path.read_text(encoding="utf-8"))["name"]
-            result = app.create_conversation(NaturalLanguageDesignJob(
-                case_id=summary.manifest["case_id"], profile=profile,
-                request=_submission_text(submission) or _t("reference_only_request"),
-                candidate_count=summary.manifest.get("candidate_limit", 1),
-            ), attachments=_submission_attachments(submission), previous_run_id=summary.run_id)
-            parent = app.inspect_task(result.run_id)
-        _submit_saved_task(parent, _current_credential().value)
-        _select_task(parent.run_id)
-        st.rerun(scope="app")
-    except Exception as exc:
-        _conversation_error(exc)
-
-
 def _render_brief_editor(summary: RunSummary, conversation: ConversationRecord, *, disabled: bool) -> bool:
     """Render the single authoritative brief editor, without a second contract form."""
     revision = conversation["revision"]
@@ -1974,12 +1617,7 @@ def _render_conversation_task(summary: RunSummary) -> None:
     except Exception as exc:
         _conversation_error(exc)
         return
-    title_column, action_column = st.columns([3, 1], vertical_alignment="center")
-    with title_column:
-        st.subheader(_display_title(summary.manifest.get("title", summary.run_id), limit=44))
-    with action_column:
-        with st.container(horizontal_alignment="right"):
-            _render_favorite_button(summary)
+    st.subheader(_display_title(summary.manifest.get("title", summary.run_id), limit=44))
     st.caption(_t("conversation_hint"))
     view = st.segmented_control(
         _t("workspace_view"), ["split", "design", "assistant"], default="split",
@@ -2111,9 +1749,6 @@ def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed
         if result.status != "awaiting_approval":
             _render_design_details(result)
 
-    if not embedded:
-        _render_legacy_followup(summary, active=active)
-
 
 @st.fragment(run_every="1s")
 def _render_live_task(run_id: str) -> None:
@@ -2156,17 +1791,13 @@ def main() -> None:
     if selected is None:
         view = _render_product_tabs()
         if view == "gallery":
-            _render_showcase_gallery()
-        elif view == "corpus":
-            _render_corpus()
-        elif view == "favorites":
-            _render_favorites()
+            _render_gallery()
         else:
-            _render_new_task()
+            _render_studio()
         return
 
     summary = next(task for task in tasks if task.run_id == selected)
-    if _task_is_live(summary) or summary.manifest.get("is_conversation"):
+    if summary.manifest.get("is_conversation") or _task_is_live(summary):
         _render_live_task(summary.run_id)
     else:
         _render_task(summary)

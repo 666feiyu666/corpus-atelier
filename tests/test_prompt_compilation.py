@@ -1,12 +1,12 @@
 import unittest
 
-from corpus_atelier.design_direction.prompt_compiler import (
+from corpus_atelier.atelier.design_direction.prompt_compiler import (
     compile_design_direction_prompt,
 )
-from corpus_atelier.design_implementation.prompt_compiler import (
+from corpus_atelier.atelier.design_implementation.prompt_compiler import (
     compile_design_implementation_prompt,
 )
-from corpus_atelier.image_prompt.prompt_compiler import (
+from corpus_atelier.atelier.image_prompt.prompt_compiler import (
     compile_generation_prompt, compile_image_spec_prompt,
 )
 from corpus_atelier.registry import get_profile

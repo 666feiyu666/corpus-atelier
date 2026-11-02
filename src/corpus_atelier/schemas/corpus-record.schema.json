@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CorpusRecord",
+  "description": "A traceable prompt-image pair with closed-taxonomy labels.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "prompt": {"type": "string", "minLength": 1},
+    "negative_prompt": {"type": ["string", "null"]},
+    "image": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "width": {"type": ["integer", "null"]},
+            "height": {"type": ["integer", "null"]}
+          },
+          "required": ["path"]
+        }
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["atelier", "import", "manual"]},
+        "run_id": {"type": ["string", "null"]},
+        "url": {"type": ["string", "null"]},
+        "note": {"type": ["string", "null"]}
+      },
+      "required": ["kind"]
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {"type": ["string", "null"]},
+        "quality": {"type": ["string", "null"]},
+        "size": {"type": ["string", "null"]},
+        "output_format": {"type": ["string", "null"]}
+      }
+    },
+    "translations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zh": {"type": ["string", "null"]}
+      }
+    },
+    "created_at": {"type": "string", "minLength": 1}
+  },
+  "required": ["id", "prompt", "tags", "source", "created_at"]
+}

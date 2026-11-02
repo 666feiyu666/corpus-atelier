@@ -2,8 +2,8 @@
 
 import json
 
-from ..language import compile_language_policy
-from ..skill_loader import load_skill
+from ...language import compile_language_policy
+from ...skill_loader import load_skill
 
 
 def compile_design_implementation_prompt(

@@ -1,7 +1,7 @@
 """Semantic validation and objective-specific knowledge loading."""
 
-from ..design_support.validation import validate
-from ..skill_loader import load_skill_reference
+from ...design_support.validation import validate
+from ...skill_loader import load_skill_reference
 
 
 STYLE_SPACE_REFERENCES = {

@@ -718,6 +718,60 @@ class StreamlitAppTests(unittest.TestCase):
                 st.cache_resource.clear()
                 gc.collect()
 
+    def test_corpus_view_renders_without_error(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(
+                os.environ,
+                {
+                    "CORPUS_ATELIER_TASKS_ROOT": str(root / "tasks"),
+                    "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
+                    "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                    "CORPUS_ATELIER_CORPUS_DB": str(root / "corpus.sqlite3"),
+                    "CORPUS_ATELIER_CORPUS_MEDIA": str(root / "media"),
+                    "OPENAI_API_KEY": "sk-test",
+                },
+            ):
+                app = AppTest.from_file(str(APP), default_timeout=10)
+                app.session_state["product_view_tabs"] = "corpus"
+                app.run()
+            self.assertFalse(app.exception)
+
+    def test_archive_control_renders_on_completed_task(self):
+        with TemporaryDirectory() as directory:
+            run_id = self._completed_task(directory)
+            try:
+                with patch.dict(
+                    os.environ,
+                    {
+                        "CORPUS_ATELIER_TASKS_ROOT": directory,
+                        "CORPUS_ATELIER_PREFERENCES_PATH": str(
+                            Path(directory) / "settings.json"
+                        ),
+                        "CORPUS_ATELIER_ENV_PATH": str(
+                            Path(directory) / ".env"
+                        ),
+                        "CORPUS_ATELIER_CORPUS_DB": str(
+                            Path(directory) / "corpus.sqlite3"
+                        ),
+                        "CORPUS_ATELIER_CORPUS_MEDIA": str(
+                            Path(directory) / "media"
+                        ),
+                    },
+                ):
+                    app = AppTest.from_file(str(APP), default_timeout=10)
+                    app.session_state["selected_task_id"] = run_id
+                    app.run()
+
+                self.assertFalse(app.exception)
+                archive_button = app.button(
+                    key=f"archive_confirm_{run_id}"
+                )
+                self.assertTrue(archive_button.disabled)
+            finally:
+                st.cache_resource.clear()
+                gc.collect()
+
 
 if __name__ == "__main__":
     unittest.main()

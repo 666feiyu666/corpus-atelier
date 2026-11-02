@@ -2,8 +2,8 @@
 
 import json
 
-from ..language import compile_language_policy
-from ..skill_loader import load_skill, load_skill_reference
+from ...language import compile_language_policy
+from ...skill_loader import load_skill, load_skill_reference
 
 
 def compile_image_spec_prompt(
@@ -49,9 +49,36 @@ def compile_image_spec_prompt(
     return "\n\n".join(sections)
 
 
+def compile_positive_negative(image_spec: dict) -> tuple[str, str]:
+    """Compile an image_spec into an explicit (positive, negative) prompt pair.
+
+    Positive is the resolved scene, composition, typography, visual treatment,
+    and exact copy as one coherent instruction. Negative is the targeted
+    exclusion list, kept short and specific per the image-llm-prompt skill.
+    """
+    positive_parts: list[str] = []
+    for field in ("subject_and_scene", "composition", "typography", "visual_treatment"):
+        text = (image_spec.get(field) or "").strip()
+        if text:
+            positive_parts.append(text)
+    visible_copy = image_spec.get("visible_copy") or []
+    if visible_copy:
+        positive_parts.append(
+            "Render the following text exactly as written, preserving wording and punctuation: "
+            + " | ".join(visible_copy)
+        )
+    positive = "\n\n".join(positive_parts)
+    exclusions = image_spec.get("exclusions") or []
+    negative = ", ".join(str(item) for item in exclusions) if exclusions else ""
+    return positive, negative
+
+
 def compile_generation_prompt(image_spec: dict, *, user_requirements: list[str] | None = None) -> str:
+    positive, negative = compile_positive_negative(image_spec)
     sections = [
         load_skill_reference("image-llm-prompt", "generation-boundaries.md"),
+        "# Positive prompt\n\n" + positive,
+        "# Negative prompt\n\n" + (negative or "(none)"),
         "# Approved image specification\n\n" + json.dumps(
             image_spec, ensure_ascii=False, indent=2, allow_nan=False,
         ),

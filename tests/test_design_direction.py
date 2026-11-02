@@ -1,6 +1,6 @@
 import unittest
 
-from corpus_atelier.design_direction.validation import (
+from corpus_atelier.atelier.design_direction.validation import (
     validate_design_direction_plan,
 )
 

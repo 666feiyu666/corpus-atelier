@@ -12,18 +12,18 @@ from langgraph.types import interrupt
 from .artifacts.hashing import digest_file, digest_json
 from .artifacts.records import read_json, write_json
 from .artifacts.store import ArtifactStore
-from .design_direction import (
+from .atelier.design_direction import (
     load_historical_cards,
     synthesize_design_directions,
     validate_design_direction_plan,
 )
-from .design_implementation.presentation import render
-from .design_implementation.synthesis import synthesize_design_implementation
+from .atelier.design_implementation.presentation import render
+from .atelier.design_implementation.synthesis import synthesize_design_implementation
 from .design_support.canvas import resolve_canvas
 from .design_support.rendering import normalize_canvas
 from .design_support.validation import validate, validate_candidate_count, validate_image_spec, validate_proposal
-from .image_prompt import compile_generation_prompt, synthesize_image_spec
-from .intake import compile_intake_prompt
+from .atelier.image_prompt import compile_generation_prompt, synthesize_image_spec
+from .atelier.intake import compile_intake_prompt
 from .language import bind_brief_language
 from .providers.image import ImageProvider
 from .providers.text import TextProvider

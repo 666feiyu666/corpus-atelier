@@ -2,9 +2,9 @@
 
 import json
 
-from ..design_support.validation import load_schema
-from ..language import compile_language_policy
-from ..skill_loader import load_skill
+from ...design_support.validation import load_schema
+from ...language import compile_language_policy
+from ...skill_loader import load_skill
 
 
 def compile_intake_prompt(profile, user_request: str, *,

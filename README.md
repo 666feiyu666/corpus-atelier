@@ -1,24 +1,19 @@
 # Corpus Atelier
 
-Corpus Atelier is a local AI-assisted tool for creating graphic designs from natural-language requests.
+Corpus Atelier is a local, AI-assisted graphic-design studio built from two cooperating layers:
 
-Use it when you have a subject, message, or communication goal but want help turning it into a concrete visual direction and a finished graphic. Corpus Atelier interprets the request, develops one or more design proposals, lets you review them before image generation, and produces downloadable images.
+- **corpus** — a local-first archive of traceable prompt↔image records, with a closed visual taxonomy and SQLite full-text retrieval.
+- **atelier** — the generation pipeline that turns a natural-language request into visual directions, design proposals, and finished images (generation, reference-image editing, mask inpainting, and reverse prompt extraction).
 
-It is suitable for posters, article covers, social-media graphics, invitations, labels, album covers, and other graphic-design tasks. The design process can be guided by rhetorical strategies or art and design movements.
+Natural-language interaction runs through the whole flow: describe a goal, review and approve proposals, generate and select images, then optionally archive the results you like back into the corpus. It is suitable for posters, article covers, social-media graphics, invitations, labels, album covers, and other graphic-design tasks, guided by rhetorical strategies or art and design movements.
 
 ![Corpus Atelier interface](assets/corpus-atelier-interface.png)
 
 ## Install
 
-Corpus Atelier runs locally on your computer. You will need:
-
-- Git
-- Python 3.10 or later
-- An OpenAI API key
+Corpus Atelier runs locally. You will need Git, Python 3.10 or later, and an OpenAI API key.
 
 ### Windows
-
-Open PowerShell and run:
 
 ```powershell
 git clone https://github.com/666feiyu666/corpus-atelier.git
@@ -33,8 +28,6 @@ python -m streamlit run src/corpus_atelier/streamlit_app.py
 
 ### macOS
 
-Open Terminal and run:
-
 ```bash
 git clone https://github.com/666feiyu666/corpus-atelier.git
 cd corpus-atelier
@@ -46,4 +39,12 @@ python -m pip install -r requirements.txt
 python -m streamlit run src/corpus_atelier/streamlit_app.py
 ```
 
-Corpus Atelier will open in your browser. On first use, open **Settings** and enter your OpenAI API key.
+Corpus Atelier opens in your browser. On first use, open **Settings** and enter your OpenAI API key. Finished designs can be archived into the **Corpus** view; archived prompts and reference images become searchable references for future work.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+Architecture diagrams live under `docs/diagrams/`.

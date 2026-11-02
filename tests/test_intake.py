@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.intake import compile_intake_prompt
+from corpus_atelier.atelier.intake import compile_intake_prompt
 from corpus_atelier.registry import get_profile
 from corpus_atelier.state import NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider, FakeTextProvider

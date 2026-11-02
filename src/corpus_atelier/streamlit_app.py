@@ -42,6 +42,9 @@ from corpus_atelier.model_catalog import (
     validate_reasoning_effort,
 )
 from corpus_atelier.providers import OpenAIImageProvider, OpenAITextProvider
+from corpus_atelier.corpus import FACETS, resolve, tags_of
+from corpus_atelier.corpus.index import CorpusStore
+from corpus_atelier.corpus.ingest import ingest_run
 from corpus_atelier.settings import (
     ApiCredential,
     load_preferences,
@@ -85,6 +88,18 @@ PREFERENCES_PATH = Path(
     os.environ.get(
         "CORPUS_ATELIER_PREFERENCES_PATH",
         ROOT / ".atelier" / "settings.json",
+    )
+).resolve()
+CORPUS_DB_PATH = Path(
+    os.environ.get(
+        "CORPUS_ATELIER_CORPUS_DB",
+        ROOT / ".atelier" / "corpus.sqlite3",
+    )
+).resolve()
+CORPUS_MEDIA_ROOT = Path(
+    os.environ.get(
+        "CORPUS_ATELIER_CORPUS_MEDIA",
+        ROOT / ".atelier" / "corpus-media",
     )
 ).resolve()
 PRODUCT_CASE_ID = "natural-language"
@@ -733,7 +748,7 @@ def _render_product_tabs() -> str:
     """Top-level product navigation shared by the studio, gallery and favorites."""
     view = st.segmented_control(
         _t("view_switch"),
-        ["home", "gallery", "favorites"],
+        ["home", "gallery", "corpus", "favorites"],
         format_func=lambda value: _t(f"view_{value}"),
         key="product_view_tabs",
         persist_state="session",
@@ -868,6 +883,99 @@ def _render_showcase_gallery() -> None:
                     width="stretch",
                     output_format="PNG",
                 )
+
+
+def _corpus_store() -> CorpusStore:
+    CORPUS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return CorpusStore(CORPUS_DB_PATH)
+
+
+def _render_corpus_record(record: dict[str, Any]) -> None:
+    image = record.get("image")
+    left, right = st.columns([1, 3], vertical_alignment="top")
+    with left:
+        if image and image.get("path"):
+            path = CORPUS_MEDIA_ROOT / image["path"]
+            if path.is_file():
+                st.image(str(path), width="stretch", output_format="PNG")
+            else:
+                st.caption(_t("corpus_no_media"))
+        else:
+            st.caption(_t("corpus_no_media"))
+    with right:
+        st.markdown(f"**{record['prompt']}**")
+        negative = record.get("negative_prompt")
+        if negative:
+            st.caption(f"**{_t('corpus_negative')}:** {negative}")
+        tags = record.get("tags", [])
+        if tags:
+            labels = []
+            for tag_id in tags:
+                try:
+                    labels.append(resolve(tag_id).zh)
+                except ValueError:
+                    labels.append(tag_id)
+            st.markdown(" · ".join(labels))
+        source = record.get("source", {})
+        st.caption(f"{_t('corpus_source')}: {source.get('kind', '')}")
+
+
+def _render_corpus() -> None:
+    st.title(_t("corpus_title"))
+    st.caption(_t("corpus_tagline"))
+    query = st.text_input(_t("corpus_search_placeholder"), key="corpus_query")
+    tag_options = [tag.id for facet in FACETS for tag in tags_of(facet)]
+    selected_tags = st.multiselect(
+        _t("corpus_tags_label"),
+        tag_options,
+        key="corpus_tags",
+        format_func=lambda tag_id: resolve(tag_id).zh,
+    )
+    store = _corpus_store()
+    try:
+        results = store.search(query or None, tags=selected_tags, limit=20)
+    finally:
+        store.close()
+    if not results:
+        st.caption(_t("corpus_empty"))
+        return
+    for record in results:
+        _render_corpus_record(record)
+
+
+def _archive_to_corpus(summary: RunSummary, tags: list[str]) -> None:
+    store = _corpus_store()
+    try:
+        ingest_run(
+            store,
+            summary.run_dir,
+            tags=tags,
+            media_root=CORPUS_MEDIA_ROOT,
+        )
+    finally:
+        store.close()
+
+
+def _render_archive_control(summary: RunSummary) -> None:
+    with st.popover(_t("archive_to_corpus"), icon=":material/bookmark_add:"):
+        tag_options = [tag.id for facet in FACETS for tag in tags_of(facet)]
+        tags = st.multiselect(
+            _t("corpus_tags_label"),
+            tag_options,
+            key=f"archive_tags_{summary.run_id}",
+            format_func=lambda tag_id: resolve(tag_id).zh,
+        )
+        if st.button(
+            _t("archive_confirm"),
+            key=f"archive_confirm_{summary.run_id}",
+            disabled=not tags,
+        ):
+            try:
+                _archive_to_corpus(summary, tags)
+            except Exception:
+                st.error(_t("archive_failed"), icon=":material/error:")
+            else:
+                st.toast(_t("corpus_archived"), icon=":material/check_circle:")
 
 
 def _start_task(
@@ -1994,6 +2102,7 @@ def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed
             if _selected_candidate_id(result) is None:
                 st.info(_t("completed_without_selection"))
             _render_image_gallery(summary, result, selectable=False)
+            _render_archive_control(summary)
         elif result.status == "rejected":
             st.warning(_t("generation_canceled"))
         elif result.status == "failed":
@@ -2048,6 +2157,8 @@ def main() -> None:
         view = _render_product_tabs()
         if view == "gallery":
             _render_showcase_gallery()
+        elif view == "corpus":
+            _render_corpus()
         elif view == "favorites":
             _render_favorites()
         else:

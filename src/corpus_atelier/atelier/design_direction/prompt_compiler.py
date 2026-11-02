@@ -2,8 +2,8 @@
 
 import json
 
-from ..language import compile_language_policy
-from ..skill_loader import load_skill, load_skill_reference
+from ...language import compile_language_policy
+from ...skill_loader import load_skill, load_skill_reference
 from .validation import (
     historical_index_reference,
     historical_reference_catalog,

@@ -63,6 +63,15 @@ class FakeTextProvider:
                 "art_direction": "A restrained editorial direction.",
             }
             return value, {"status": "completed", "provider": "fake"}
+        if schema_name == "reverse-prompt.schema.json":
+            value = {
+                "positive_prompt": (
+                    "A painterly snowy urban alley with a large blue-gray wolfdog "
+                    "and a hooded woman facing each other."
+                ),
+                "negative_prompt": "photorealistic, flat vector, readable text, watermark",
+            }
+            return value, {"status": "completed", "provider": "fake"}
         if schema_name == "image-spec.schema.json":
             target = prompt.split("# Compilation target\n\n", 1)[1].split(
                 "\n\n# Completed design proposal", 1,

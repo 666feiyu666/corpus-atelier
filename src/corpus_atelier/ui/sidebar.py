@@ -31,8 +31,8 @@ from corpus_atelier.ui.task_view import _render_task
 LOGGER = logging.getLogger(__name__)
 
 
-def _delete_conversation(task: RunSummary) -> None:
-    """Permanently delete one task and its rounds, then leave its workspace."""
+def _delete_task(task: RunSummary) -> None:
+    """Permanently delete one task, then leave its workspace."""
     app = CorpusAtelierApplication(runs_root=resolve_paths().tasks_root)
     try:
         app.delete_task(task.run_id)
@@ -44,12 +44,11 @@ def _delete_conversation(task: RunSummary) -> None:
         app.close()
     if st.session_state.selected_task_id == task.run_id:
         _select_task(None)
-    st.toast(_t("conversation_deleted"), icon=":material/delete:")
+    st.toast(_t("task_deleted"), icon=":material/delete:")
     st.rerun(scope="app")
 
 
 def _render_task_buttons(tasks: list[RunSummary]) -> None:
-    tasks = [task for task in tasks if not task.manifest.get("conversation_parent_id")]
     st.caption(_t("tasks_count", count=len(tasks)))
     if not tasks:
         st.caption(_t("no_saved_tasks"))
@@ -107,15 +106,15 @@ def _render_task_buttons(tasks: list[RunSummary]) -> None:
                     st.rerun(scope="app")
             with columns[1]:
                 with st.popover("⋯", key=f"task_menu_{task.run_id}"):
-                    st.caption(_t("delete_conversation_confirm"))
+                    st.caption(_t("delete_task_confirm"))
                     if st.button(
-                        _t("delete_conversation_yes"),
+                        _t("delete_task_yes"),
                         icon=":material/delete:",
                         key=f"delete_{task.run_id}",
                         width="stretch",
                         disabled=_task_supervisor().is_running(task.run_id),
                     ):
-                        _delete_conversation(task)
+                        _delete_task(task)
 
 
 @st.fragment(run_every="1s")
@@ -205,5 +204,5 @@ def _render_live_task(run_id: str) -> None:
         return
     _ensure_recoverable_tasks(tasks)
     _render_task(summary)
-    if not _task_is_live(summary) and not summary.manifest.get("is_conversation"):
+    if not _task_is_live(summary):
         st.rerun(scope="app")

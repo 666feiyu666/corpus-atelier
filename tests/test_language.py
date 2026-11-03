@@ -9,21 +9,17 @@ from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.artifacts.records import read_json, write_json
 from corpus_atelier.language import validate_content_language
 from corpus_atelier.app.state import HumanDecision, NaturalLanguageDesignJob
-from tests.fakes import FakeImageProvider
-from tests.test_conversation import ConversationTextProvider, seed_brief
+from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
 COPY = ["欢度国庆", "1949-2026", "Happy National Day"]
-REQUIREMENT = "Use a dark-brown woven basket with an arched handle."
-
-
 def prompt_language(prompt):
     policy = prompt.split("# Task content language\n\n", 1)[1]
     start = policy.index('{\n  "content_language"')
     return json.JSONDecoder().raw_decode(policy[start:])[0]
 
 
-class LanguageTextProvider(ConversationTextProvider):
+class LanguageTextProvider(FakeTextProvider):
     """Bilingual fixtures isolate language propagation from model nondeterminism."""
 
     def __init__(self, initial_language="zh-CN"):
@@ -36,9 +32,7 @@ class LanguageTextProvider(ConversationTextProvider):
         language = self.change_language or prompt_language(prompt)["content_language"] or self.initial_language
         value, response = super().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
         chinese = language.startswith("zh")
-        if schema_name == "design-assistant.schema.json":
-            value.update(content_language=self.change_language or language, language_change_quote=self.change_quote)
-        elif schema_name.endswith("-brief.schema.json"):
+        if schema_name.endswith("-brief.schema.json"):
             value.update(
                 content_language=language, exact_copy=list(COPY),
                 purpose="以写实广式插花传递国庆祝福。" if chinese else "Convey a National Day greeting through photorealistic Guang-style floral arranging.",
@@ -81,43 +75,6 @@ class LanguageTests(unittest.TestCase):
     def job(self, request="设计一张国庆花篮海报，文案包含 Happy National Day。", **kwargs):
         return NaturalLanguageDesignJob("language-test", "rhetoric-graphic", request, **kwargs)
 
-    def test_chinese_and_english_tasks_keep_mixed_source_copy_through_generation(self):
-        for language, request in (
-            ("zh-CN", "设计一张国庆花篮海报，文案包含 Happy National Day。"),
-            ("en", 'Design a flower basket poster with exact copy "欢度国庆" and "1949-2026".'),
-        ):
-            with self.subTest(language=language), TemporaryDirectory() as directory:
-                text = LanguageTextProvider(language)
-                with self.app(directory, text) as app:
-                    parent = app.create_conversation(self.job(request))
-                    app.continue_task(parent.run_id)
-                    seed_brief(app, parent.run_id)
-                    initial = app.conversation(parent.run_id)
-                    app.save_conversation_brief(parent.run_id, {**initial["design_brief"], "user_requirements": [REQUIREMENT]}, expected_revision=initial["revision"])
-                    saved = app.conversation(parent.run_id)
-                    self.assertEqual(saved["content_language"], language)
-                    self.assertEqual(saved["design_brief"]["content_language"], language)
-                    self.assertEqual(saved["design_brief"]["exact_copy"], COPY)
-                    child = app.create_conversation_round(parent.run_id)
-                    result = app.run_request(child.run_id)
-                    self.assertEqual(result.status, "awaiting_approval")
-                    self.assertEqual(read_json(Path(result.artifacts["brief"])), saved["design_brief"])
-                    candidates = read_json(Path(result.artifacts["candidate_index"]))
-                    self.assertEqual(candidates[0]["image_prompt"]["exact_copy"], COPY)
-                    self.assertNotIn(REQUIREMENT, candidates[0]["generation_prompt"])
-                    if language == "zh-CN":
-                        self.assertEqual(candidates[0]["direction_seed"]["label"], "花篮国庆祝福")
-                        self.assertEqual(candidates[0]["proposal"]["design_description"], "写实藤编花篮，花材错落有致，右下角留白。")
-                        self.assertEqual(
-                            candidates[0]["image_prompt"]["canvas_statement"],
-                            "竖版国庆海报，花篮居中，右下角留白。",
-                        )
-                    for call in text.chat_calls + text.design_calls:
-                        self.assertEqual(prompt_language(call["prompt"])["content_language"], language if call != text.chat_calls[0] else None)
-                    result = app.resume(child.run_id, HumanDecision(True))
-                    self.assertEqual(result.status, "awaiting_selection")
-                    self.assertEqual(app.runtime.image_provider.calls, 1)
-
     def test_single_round_infers_and_persists_language_before_downstream_calls(self):
         with TemporaryDirectory() as directory:
             text = LanguageTextProvider()
@@ -128,36 +85,7 @@ class LanguageTests(unittest.TestCase):
                 for call in text.design_calls[1:]:
                     self.assertEqual(prompt_language(call["prompt"])["content_language"], "zh-CN")
 
-    def test_explicit_initial_language_and_restart_remain_stable_with_other_language_feedback(self):
-        with TemporaryDirectory() as directory:
-            text = LanguageTextProvider()
-            with self.app(directory, text) as app:
-                parent = app.create_conversation(self.job(content_language="en"))
-                app.continue_task(parent.run_id)
-            with self.app(directory, text) as reopened:
-                reopened.queue_conversation_message(parent.run_id, "让花篮更突出一点。")
-                reopened.continue_task(parent.run_id)
-                self.assertEqual(reopened.conversation(parent.run_id)["content_language"], "en")
-                self.assertEqual(prompt_language(text.chat_calls[-1]["prompt"])["content_language"], "en")
-
-    def test_reply_language_changes_do_not_change_the_brief_language(self):
-        with TemporaryDirectory() as directory:
-            text = LanguageTextProvider()
-            with self.app(directory, text) as app:
-                task = app.create_conversation(self.job(content_language="zh-CN"))
-                app.continue_task(task.run_id)
-                seed_brief(app, task.run_id)
-                original = app.conversation(task.run_id)["design_brief"]
-                text.change_language = "en"
-                text.change_quote = "Please reply in English."
-                app.queue_conversation_message(task.run_id, text.change_quote)
-                app.continue_task(task.run_id)
-                saved = app.conversation(task.run_id)
-                self.assertEqual(saved["discussion_language"], "en")
-                self.assertEqual(saved["content_language"], "zh-CN")
-                self.assertEqual(saved["design_brief"], original)
-
     def test_invalid_initial_language_tag_is_rejected(self):
         with TemporaryDirectory() as directory, self.app(directory, LanguageTextProvider()) as app:
             with self.assertRaises(ValueError):
-                app.create_conversation(self.job(content_language="English"))
+                app.start_request(self.job(content_language="English"))

@@ -1,1 +1,1 @@
-"""Streamlit presentation layer: the studio app, brief editor, viewport, and i18n."""
+"""Streamlit presentation layer: the prompt studio, the task view, and i18n."""

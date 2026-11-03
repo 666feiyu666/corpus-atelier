@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PromptAssistantReply",
+  "description": "One conversational turn about the current image-generation prompt.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reply": {"type": "string", "minLength": 1, "maxLength": 8000},
+    "proposed_prompt": {"type": ["string", "null"], "minLength": 1, "maxLength": 8000},
+    "edit_instruction": {"type": ["string", "null"], "minLength": 1, "maxLength": 2000}
+  },
+  "required": ["reply", "proposed_prompt", "edit_instruction"]
+}

@@ -9,8 +9,6 @@ from corpus_atelier.app.service import (
     RECOVERABLE_TASK_STATUSES,
     CorpusAtelierApplication,
 )
-from corpus_atelier.conversation.records import load_conversation
-
 from corpus_atelier.artifacts.store import ArtifactStore
 from corpus_atelier.ui.i18n import translate
 from corpus_atelier.config.languages import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
@@ -264,17 +262,6 @@ def _ensure_recoverable_tasks(tasks: list[RunSummary]) -> None:
 
 
 def _task_is_live(task: RunSummary) -> bool:
-    if task.manifest.get("is_conversation"):
-        conversation = load_conversation(task.run_dir)
-        if conversation["rounds"]:
-            child_id = conversation["rounds"][-1]["run_id"]
-            child_root = _task_store().find_run(child_id)
-            child_manifest = _task_store().manifest(child_root)
-            if _task_supervisor().is_running(child_id) or (
-                child_manifest["status"] in RECOVERABLE_TASK_STATUSES
-                and _current_credential() is not None
-            ):
-                return True
     if _task_supervisor().is_running(task.run_id):
         return True
     return (
@@ -298,6 +285,7 @@ def _initialize_state() -> None:
     st.session_state.setdefault("new_task_image_model", _default_image_model())
     st.session_state.setdefault("new_task_reasoning", "medium")
     st.session_state.setdefault("new_task_quality", "medium")
+    st.session_state.setdefault("new_task_ratio", (16, 9))
 
 
 def _saved_tasks() -> list[RunSummary]:

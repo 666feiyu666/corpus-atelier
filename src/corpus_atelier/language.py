@@ -15,8 +15,7 @@ def validate_content_language(language: str | None) -> str | None:
 
 
 def compile_language_policy(content_language: str | None, *,
-                            source_request: str | None = None,
-                            conversation: bool = False) -> str:
+                            source_request: str | None = None) -> str:
     """Keep generated prose consistent without translating authoritative sources."""
     validate_content_language(content_language)
     rules = (
@@ -41,21 +40,11 @@ def compile_language_policy(content_language: str | None, *,
         "source wording. Return the resolved tag in content_language when the output schema has "
         "that field.\n\n"
     )
-    if conversation:
-        rules += (
-            "Once set, retain the task language across turns, including brief refreshes and feedback "
-            "written in another language. Change it only when the latest discussion message "
-            "explicitly requests a different language for discussion or design explanations. "
-            "Return language_change_quote as the exact supporting substring of that message only "
-            "when changing an established language; otherwise return null. Requirements updates "
-            "and brief refresh operations never implicitly change the task language.\n\n"
-        )
-    else:
-        rules += (
-            "When a tag is supplied, use it exactly; do not infer a new language from downstream "
-            "context. Preserve existing brief meaning while rephrasing authored descriptions into "
-            "this language; preserving a field does not require preserving an old output language.\n\n"
-        )
+    rules += (
+        "When a tag is supplied, use it exactly; do not infer a new language from downstream "
+        "context. Preserve existing brief meaning while rephrasing authored descriptions into "
+        "this language; preserving a field does not require preserving an old output language.\n\n"
+    )
     return rules + json.dumps({
         "content_language": content_language,
         "initial_design_request": source_request,

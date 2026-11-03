@@ -1,4 +1,5 @@
 import gc
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ from streamlit.testing.v1 import AppTest
 
 from corpus_atelier import __version__
 from corpus_atelier.app.service import CorpusAtelierApplication
+from corpus_atelier.app.state import NaturalLanguageDesignJob
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import write_json, write_text
 from corpus_atelier.providers import OpenAIImageProvider, OpenAITextProvider
@@ -27,40 +29,9 @@ APP = ROOT / "src/corpus_atelier/ui/studio.py"
 class StreamlitAppTests(unittest.TestCase):
     @staticmethod
     def _offline_propose(provider, prompt, *, schema_name, reference_paths=None):
-        if schema_name == "design-assistant.schema.json":
-            context = json.loads(prompt[prompt.index('{"effective_request"'):])
-            latest = context["conversation"][-1]["text"]
-            reply = ("深色藤编花篮，篮身圆鼓，口沿外扩，两侧竖直提把以低弧度横向连接。"
-                     if "弧度" in latest else "圆润的鼓形篮身搭配拱形提手，呈现传统中式提篮轮廓。")
-            return {"content_language": context["content_language"] or "zh-CN", "language_change_quote": None,
-                    "reply": reply}, {"status": "completed"}
-        return FakeTextProvider().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
-
-    @staticmethod
-    def _direct_route_propose(provider, prompt, *, schema_name, reference_paths=None):
-        """Declare a precise request so the fast path may render it unattended."""
-        value, response = StreamlitAppTests._offline_propose(
-            provider, prompt, schema_name=schema_name, reference_paths=reference_paths,
+        return FakeTextProvider().propose(
+            prompt, schema_name=schema_name, reference_paths=reference_paths,
         )
-        if schema_name.endswith("-brief.schema.json"):
-            value = {**value, "execution_route": "direct", "content_language": "zh-CN",
-                     "route_reason": "The request fixes the subject, copy, and ratio."}
-        return value, response
-
-    @staticmethod
-    def _fake_generate(provider, prompt, *, size, output, reference_paths=None, mask_path=None):
-        return FakeImageProvider().generate(
-            prompt, size=size, output=output,
-            reference_paths=reference_paths, mask_path=mask_path,
-        )
-
-    @staticmethod
-    def _save_initial_brief(app, run_id):
-        for field, text in {"deliverable": "国庆花艺海报", "purpose": "传递国庆祝福。",
-                            "audience": "海报观看者。", "use_context": "节日宣传海报。"}.items():
-            app.text_area(key=f"brief_edit_{run_id}_{field}").set_value(text)
-        app.selectbox(key=f"brief_edit_{run_id}_content_language").set_value("zh-CN")
-        app.button(key=f"save_brief_{run_id}").click().run()
 
     @staticmethod
     def _wait_for_status(app, root, run_id, status):
@@ -73,238 +44,25 @@ class StreamlitAppTests(unittest.TestCase):
             time.sleep(0.05)
         raise AssertionError(f"Task {run_id} did not reach {status}")
 
-    def test_discussion_rounds_and_saved_history_in_the_interface(self):
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch.dict(os.environ, {
-                "CORPUS_ATELIER_TASKS_ROOT": directory,
-                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                "OPENAI_API_KEY": "sk-test",
-            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
-                app = AppTest.from_file(str(APP), default_timeout=10).run()
-                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
-                parent_id = app.session_state["selected_task_id"]
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self.assertFalse(app.exception)
-                conversation_path = root / "natural-language" / parent_id / "conversation.json"
-                conversation = json.loads(conversation_path.read_text(encoding="utf-8"))
-                self.assertEqual(conversation["rounds"], [])
-                self.assertIsNone(conversation["design_brief"])
-                self._save_initial_brief(app, parent_id)
-                conversation = json.loads(conversation_path.read_text(encoding="utf-8"))
-                displayed = [item.value for item in app.markdown]
-                self.assertIn(f"**目的:** {conversation['design_brief']['purpose']}", displayed)
-                self.assertIn("**画面比例:** 16:9", displayed)
-                self.assertIn("**已有约束:**", displayed)
-                self.assertIn("**设计偏好:**", displayed)
-                self.assertFalse(app.button(key=f"prepare_round_{parent_id}").disabled)
-                app.button(key=f"prepare_round_{parent_id}").click().run()
-                conversation = json.loads(conversation_path.read_text(encoding="utf-8"))
-                child_id = conversation["rounds"][-1]["run_id"]
-                self._wait_for_status(app, root, child_id, "awaiting_approval")
-                self.assertFalse(app.exception)
-                self.assertFalse(app.button(key=f"approve_{child_id}").disabled)
-                self.assertNotIn(f"task_{child_id}", [button.key for button in app.button])
-                app.chat_input(key=f"conversation_input_{parent_id}").set_value("标题更突出一点。").run()
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self.assertFalse(app.button(key=f"approve_{child_id}").disabled)
-                self.assertTrue(app.button(key=f"prepare_round_{parent_id}").disabled)
-                reopened = AppTest.from_file(str(APP), default_timeout=10).run()
-                reopened.button(key=f"task_{parent_id}").click().run()
-                self.assertFalse(reopened.exception)
-                self.assertIn("标题更突出一点。", [item.value for item in reopened.markdown])
-                self.assertIsNotNone(reopened.chat_input(key=f"conversation_input_{parent_id}"))
+    def _create_extracting_session(self, directory):
+        """A prompt session whose entry extraction has not run yet."""
+        buffer = BytesIO()
+        Image.new("RGB", (64, 48), (12, 34, 56)).save(buffer, format="PNG")
+        with CorpusAtelierApplication(
+            runs_root=directory,
+            text_provider=OpenAITextProvider(),
+            image_provider=OpenAIImageProvider(),
+        ) as application:
+            result = application.start_from_image(
+                ("source.png", buffer.getvalue()), case_id="natural-language",
+                settings={"image_quality": "medium", "aspect_ratio": [1, 1]},
+            )
+        return result.run_id
 
-    def test_new_task_is_seeded_with_an_agent_brief_draft(self):
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch.dict(os.environ, {
-                "CORPUS_ATELIER_TASKS_ROOT": directory,
-                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                "OPENAI_API_KEY": "sk-test",
-            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
-                app = AppTest.from_file(str(APP), default_timeout=10).run()
-                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
-                parent_id = app.session_state["selected_task_id"]
-                self._wait_for_status(app, root, parent_id, "discussing")
-                task_root = root / "natural-language" / parent_id
-                manifest = json.loads((task_root / "manifest.json").read_text(encoding="utf-8"))
-                self.assertIn("brief_draft", manifest["artifacts"])
-                draft = json.loads(
-                    (task_root / manifest["artifacts"]["brief_draft"]).read_text(encoding="utf-8")
-                )
-                self.assertEqual(
-                    app.text_area(key=f"brief_edit_{parent_id}_purpose").value,
-                    draft["purpose"],
-                )
-                conversation = json.loads(
-                    (task_root / "conversation.json").read_text(encoding="utf-8")
-                )
-                self.assertIsNone(conversation["design_brief"])
-                self.assertEqual(conversation["revision"], 0)
-                self.assertEqual(conversation["profile"], "general-graphic")
-                self.assertEqual(manifest["candidate_limit"], 3)
-
-    def test_fast_path_renders_a_precise_request_without_a_review_stop(self):
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch.dict(os.environ, {
-                "CORPUS_ATELIER_TASKS_ROOT": directory,
-                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                "OPENAI_API_KEY": "sk-test",
-            }), patch.object(
-                OpenAITextProvider, "propose", self._direct_route_propose,
-            ), patch.object(
-                OpenAIImageProvider, "generate", self._fake_generate,
-            ):
-                app = AppTest.from_file(str(APP), default_timeout=15).run()
-                # Direct rendering is the default, so the toggle is not touched here.
-                app.chat_input(key="new_task_prompt").set_value(
-                    "设计一张读书会海报，标题「读书会」，竖版 3:4。"
-                ).run()
-                round_id = app.session_state["selected_task_id"]
-                tasks_root = root / "natural-language"
-                manifest = json.loads(
-                    (tasks_root / round_id / "manifest.json").read_text(encoding="utf-8")
-                )
-                self.assertEqual(manifest["approval_policy"], "auto")
-                parent_id = manifest["conversation_parent_id"]
-                conversation = json.loads(
-                    (tasks_root / parent_id / "conversation.json").read_text(encoding="utf-8")
-                )
-                self.assertEqual(conversation["brief_history"][-1]["origin"], "fast-path")
-                self.assertEqual(conversation["design_brief"]["execution_route"], "direct")
-                self.assertEqual(len(conversation["rounds"]), 1)
-                self._wait_for_status(app, root, round_id, "awaiting_selection")
-                decision = json.loads(
-                    (tasks_root / round_id / "approval/decision.json").read_text(encoding="utf-8")
-                )
-                self.assertTrue(decision["approved"])
-                self.assertTrue(decision["auto"])
-                self.assertEqual(decision["reviewer"], "fast-path")
-                self.assertTrue(any(
-                    "prompt.md" in code.value for code in app.code
-                ), [code.value for code in app.code])
-
-    def test_approval_page_offers_an_editable_prompt(self):
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch.dict(os.environ, {
-                "CORPUS_ATELIER_TASKS_ROOT": directory,
-                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                "OPENAI_API_KEY": "sk-test",
-            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
-                app = AppTest.from_file(str(APP), default_timeout=10).run()
-                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
-                parent_id = app.session_state["selected_task_id"]
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self._save_initial_brief(app, parent_id)
-                app.button(key=f"prepare_round_{parent_id}").click().run()
-                conversation = json.loads(
-                    (root / "natural-language" / parent_id / "conversation.json")
-                    .read_text(encoding="utf-8")
-                )
-                child_id = conversation["rounds"][-1]["run_id"]
-                self._wait_for_status(app, root, child_id, "awaiting_approval")
-                key = f"generation_prompt_{child_id}_c01"
-                self.assertIn(key, [area.key for area in app.text_area])
-                original = app.text_area(key=key).value
-                self.assertTrue(original)
-                edited = "Edited prompt from the approval page."
-                app.text_area(key=key).set_value(edited).run()
-                self.assertEqual(app.text_area(key=key).value, edited)
-                app.button(key=f"restore_prompt_{child_id}_c01").click().run()
-                self.assertEqual(app.text_area(key=key).value, original)
-
-    def test_approval_page_shows_the_corpus_references_it_used(self):
-        from corpus_atelier.corpus.index import CorpusStore
-        from corpus_atelier.corpus.records import new_record
-
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            media = root / "media"
-            image_path = media / "case" / "tea-poster.png"
-            image_path.parent.mkdir(parents=True)
-            Image.new("RGB", (32, 48), (90, 60, 30)).save(image_path, format="PNG")
-            db = root / "corpus.sqlite3"
-            store = CorpusStore(db)
-            try:
-                store.add(new_record(
-                    prompt="国庆花艺海报，暖红与金色，密集中文文案。",
-                    tags=["poster", "warm"],
-                    source_kind="import",
-                    image={"path": "case/tea-poster.png"},
-                    source_note="No. 48 · Tea poster",
-                ))
-            finally:
-                store.close()
-            with patch.dict(os.environ, {
-                "CORPUS_ATELIER_TASKS_ROOT": directory,
-                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                "CORPUS_ATELIER_CORPUS_DB": str(db),
-                "CORPUS_ATELIER_CORPUS_MEDIA": str(media),
-                "OPENAI_API_KEY": "sk-test",
-            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
-                app = AppTest.from_file(str(APP), default_timeout=10).run()
-                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
-                parent_id = app.session_state["selected_task_id"]
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self._save_initial_brief(app, parent_id)
-                app.button(key=f"prepare_round_{parent_id}").click().run()
-                conversation = json.loads(
-                    (root / "natural-language" / parent_id / "conversation.json")
-                    .read_text(encoding="utf-8")
-                )
-                child_id = conversation["rounds"][-1]["run_id"]
-                self._wait_for_status(app, root, child_id, "awaiting_approval")
-
-        self.assertFalse(app.exception)
-        labels = [expander.label for expander in app.expander]
-        self.assertTrue(
-            any("参考语料" in label for label in labels),
-            f"no reference block rendered: {labels}",
-        )
-        self.assertIn("No. 48 · Tea poster", json.dumps(
-            [markdown.value for markdown in app.markdown], ensure_ascii=False,
-        ))
-
-    def test_single_brief_editor_persists_changes_and_invalidates_old_designs(self):
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch.dict(os.environ, {
-                "CORPUS_ATELIER_TASKS_ROOT": directory,
-                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
-                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"), "OPENAI_API_KEY": "sk-test",
-            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
-                app = AppTest.from_file(str(APP), default_timeout=10).run()
-                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
-                parent_id = app.session_state["selected_task_id"]
-                self._wait_for_status(app, root, parent_id, "discussing")
-                self._save_initial_brief(app, parent_id)
-                path = root / "natural-language" / parent_id / "conversation.json"
-                field = f"brief_edit_{parent_id}_user_requirements"
-                app.text_area(key=field).set_value("必须有一只猫。\n标题放在顶部。").run()
-                app.button(key=f"save_brief_{parent_id}").click().run()
-                saved = json.loads(path.read_text(encoding="utf-8"))
-                self.assertEqual(saved["user_requirements"], ["必须有一只猫。", "标题放在顶部。"])
-                app.button(key=f"prepare_round_{parent_id}").click().run()
-                child_id = json.loads(path.read_text(encoding="utf-8"))["rounds"][-1]["run_id"]
-                self._wait_for_status(app, root, child_id, "awaiting_approval")
-                app.text_area(key=field).set_value("必须有一只狗。").run()
-                app.button(key=f"save_brief_{parent_id}").click().run()
-                self.assertTrue(app.button(key=f"approve_{child_id}").disabled)
-                reopened = AppTest.from_file(str(APP), default_timeout=10).run()
-                reopened.button(key=f"task_{parent_id}").click().run()
-                self.assertEqual(reopened.text_area(key=field).value, "必须有一只狗。")
-                reopened.text_area(key=field).set_value("").run()
-                reopened.button(key=f"save_brief_{parent_id}").click().run()
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["user_requirements"], [])
-                self.assertFalse(reopened.exception)
+    @staticmethod
+    def _open_task(app, run_id):
+        app.session_state["selected_task_id"] = run_id
+        return app.run()
 
     @staticmethod
     def _completed_task(root: str) -> str:
@@ -412,12 +170,15 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertNotIn("new_task_method", control_keys)
         self.assertNotIn("new_task_candidates", control_keys)
         self.assertNotIn("new_task_mode", control_keys)
-        self.assertIn("new_task_fast_path", control_keys)
-        self.assertTrue(app.toggle(key="new_task_fast_path").value)
+        self.assertNotIn("new_task_fast_path", control_keys)
         self.assertEqual(
-            app.chat_input(key="new_task_prompt").placeholder,
-            "描述你的设计需求……",
+            app.text_area(key="new_session_prompt").placeholder,
+            "描述你想要的画面。这段文字会原样发送给图像模型。",
         )
+        self.assertEqual(app.selectbox(key="new_task_ratio").value, (16, 9))
+        self.assertEqual(app.segmented_control(key="prompt_start_mode").value, "prompt")
+        self.assertEqual(app.button(key="start_prompt_action").label, "生成图像")
+        self.assertEqual(app.button(key="start_prompt_only").label, "只保存提示词，暂不生成")
         self.assertFalse(app.get("pills"))
         captions = [caption.value for caption in app.caption]
         self.assertIn("描述你想完成的平面设计。", captions)
@@ -430,71 +191,16 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(app.button(key="open_settings").label, "设置")
         self.assertTrue(app.button(key="new_task").disabled)
 
-    def test_submission_selects_the_created_task_even_when_execution_fails(self):
-        def fail_after_creation(application, run_id):
-            run_dir = application.store.find_run(run_id)
-            application.store.update(
-                run_dir,
-                "failed",
-                error_type="RuntimeError",
-                error="deliberate test failure",
-            )
-            raise RuntimeError("deliberate test failure")
-
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            with (
-                patch.dict(os.environ, {
-                    "CORPUS_ATELIER_TASKS_ROOT": directory,
-                    "CORPUS_ATELIER_PREFERENCES_PATH": str(
-                        root / "settings.json"
-                    ),
-                    "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
-                    "OPENAI_API_KEY": "sk-test",
-                }),
-                patch.object(
-                    CorpusAtelierApplication,
-                    "run_conversation",
-                    fail_after_creation,
-                ),
-            ):
-                app = AppTest.from_file(str(APP), default_timeout=10).run()
-                app.chat_input(key="new_task_prompt").set_value(
-                    "设计一张读书会公告。"
-                ).run()
-                run_id = app.session_state["selected_task_id"]
-                self._wait_for_status(app, root, run_id, "failed")
-                deadline = time.monotonic() + 5
-                while f"conversation_input_{run_id}" not in [item.key for item in app.chat_input]:
-                    if time.monotonic() >= deadline:
-                        self.fail("The failed task did not expose its conversation input")
-                    time.sleep(0.05)
-                    app.run()
-
-            self.assertFalse(app.exception)
-            run_id = app.session_state["selected_task_id"]
-            self.assertIsNotNone(run_id)
-            self.assertIsNotNone(app.chat_input(key=f"conversation_input_{run_id}"))
-            self.assertFalse(app.button(key="new_task").disabled)
-            self.assertIn(
-                "设计师暂时未能回复。消息和参考图已保留，可以重试。",
-                [error.value for error in app.error],
-            )
-            manifest_path = next(root.glob("*/*/manifest.json"))
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["run_id"], run_id)
-            self.assertEqual(manifest["status"], "failed")
-
     def test_switching_tasks_does_not_interrupt_background_execution(self):
         started = Event()
         release = Event()
 
         def delayed_run(application, run_id):
             run_dir = application.store.find_run(run_id)
-            application.store.update(run_dir, "interpreting_request")
+            application.store.update(run_dir, "extracting")
             started.set()
             release.wait(timeout=5)
-            application.store.update(run_dir, "awaiting_approval")
+            application.store.update(run_dir, "prompt_ready")
             return application.open_task(run_id)
 
         with TemporaryDirectory() as directory:
@@ -512,20 +218,15 @@ class StreamlitAppTests(unittest.TestCase):
                     }),
                     patch.object(
                         CorpusAtelierApplication,
-                        "run_conversation",
+                        "run_prompt_extraction",
                         delayed_run,
                     ),
                 ):
-                    app = AppTest.from_file(
-                        str(APP), default_timeout=10
-                    ).run()
-                    app.chat_input(key="new_task_prompt").set_value(
-                        "设计一张读书会公告。"
-                    ).run()
+                    running_id = self._create_extracting_session(root)
+                    app = AppTest.from_file(str(APP), default_timeout=10)
+                    self._open_task(app, running_id)
                     self.assertTrue(started.wait(timeout=2))
                     app.run()
-
-                    running_id = app.session_state["selected_task_id"]
                     self.assertNotEqual(running_id, completed_id)
                     running_button = app.button(key=f"task_{running_id}")
                     self.assertEqual(
@@ -560,7 +261,7 @@ class StreamlitAppTests(unittest.TestCase):
                         if status == "awaiting_approval":
                             break
                         time.sleep(0.01)
-                    self.assertEqual(status, "awaiting_approval")
+                    self.assertEqual(status, "prompt_ready")
                     self.assertEqual(
                         app.session_state["selected_task_id"],
                         completed_id,
@@ -594,8 +295,8 @@ class StreamlitAppTests(unittest.TestCase):
             self.assertEqual(app.button(key="new_task").label, "New task")
             self.assertEqual(app.button(key="open_settings").label, "Settings")
             self.assertEqual(
-                app.chat_input(key="new_task_prompt").placeholder,
-                "Describe your design request…",
+                app.text_area(key="new_session_prompt").placeholder,
+                "Describe the image you want. This text is sent to the image model exactly as written.",
             )
             subheaders = [subheader.value for subheader in app.subheader]
             self.assertIn("What would you like to design?", subheaders)

@@ -69,6 +69,22 @@ class FakeTextProvider:
                 "art_direction": "A restrained editorial direction.",
             }
             return value, {"status": "completed", "provider": "fake"}
+        if schema_name == "prompt-extraction.schema.json":
+            value = {
+                "prompt_text": (
+                    "A painterly snowy urban alley with a large blue-gray wolfdog and a "
+                    "hooded woman facing each other, cold blue palette, soft side light."
+                ),
+                "observations": None,
+            }
+            return value, {"status": "completed", "provider": "fake"}
+        if schema_name == "prompt-assistant.schema.json":
+            value = {
+                "reply": "Here is the prompt you asked for.",
+                "proposed_prompt": None,
+                "edit_instruction": None,
+            }
+            return value, {"status": "completed", "provider": "fake"}
         if schema_name == "reverse-prompt.schema.json":
             value = {
                 "positive_prompt": (

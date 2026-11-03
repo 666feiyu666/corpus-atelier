@@ -13,7 +13,8 @@ ExecutionRoute = Literal["direct", "staged"]
 ApprovalPolicy = Literal["manual", "auto"]
 
 RunStatus = Literal[
-    "discussing", "discussing_request",
+    "discussing_request",
+    "prompt_ready", "extracting", "generating_image", "outcome_unknown",
     "created", "interpreting_request", "designing",
     "designing_directions", "implementing_designs", "compiling_candidates",
     "awaiting_approval", "rejected", "generating_candidates",

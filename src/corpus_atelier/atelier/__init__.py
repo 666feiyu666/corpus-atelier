@@ -2,7 +2,7 @@
 
 Compiles briefs into visual directions, finished design proposals, image-model
 prompts, and generated/edited images. The corpus layer feeds it
-references; the interaction layer drives it through conversation.
+references; the studio drives it through the prompt workflow.
 """
 
 from .design_direction import (

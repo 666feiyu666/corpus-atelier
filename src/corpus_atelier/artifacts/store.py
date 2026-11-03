@@ -54,20 +54,6 @@ def read_manifest(path: Path) -> dict:
     return manifest
 
 
-def _listed_conversation(manifest: dict, path: Path) -> dict:
-    """Reflect pending work while isolating an unreadable conversation record."""
-    try:
-        conversation = read_json(path)
-        if not isinstance(conversation, dict):
-            raise ValueError("The conversation record must be an object.")
-    except (OSError, ValueError) as exc:
-        LOGGER.warning("Could not read conversation %s: %s", path, exc)
-        return {**manifest, "status": "failed", "error_type": type(exc).__name__, "error": str(exc)}
-    if conversation.get("pending") and manifest["status"] != "failed":
-        return {**manifest, "status": "discussing_request"}
-    return manifest
-
-
 class ArtifactStore:
     def __init__(
         self,
@@ -84,15 +70,8 @@ class ArtifactStore:
                title: str | None = None,
                models: dict | None = None,
                candidate_limit: int | None = None,
-               content_language: str | None = None,
-               is_conversation: bool = False,
-               conversation_parent_id: str | None = None,
-               conversation_revision: int | None = None,
-               conversation_state: dict | None = None,
-               conversation_snapshot: dict | None = None) -> tuple[str, Path]:
+               content_language: str | None = None) -> tuple[str, Path]:
         case_id = validate_case_id(case_id)
-        if is_conversation and not isinstance(conversation_state, dict):
-            raise ValueError("A conversation requires an initial conversation state.")
         if (brief is None) == (request is None):
             raise ValueError(
                 "A run requires exactly one structured brief or natural-language request."
@@ -137,19 +116,6 @@ class ArtifactStore:
             manifest["candidate_limit"] = candidate_limit
         if content_language is not None:
             manifest["content_language"] = content_language
-        if is_conversation:
-            manifest.update(is_conversation=True, status="discussing")
-            write_json(run_dir / "conversation.json", conversation_state)
-            manifest["artifacts"]["conversation"] = "conversation.json"
-        if conversation_parent_id is not None:
-            manifest.update(conversation_parent_id=conversation_parent_id,
-                            conversation_revision=conversation_revision)
-        if conversation_snapshot is not None:
-            write_json(run_dir / "conversation/snapshot.json", conversation_snapshot)
-            manifest["artifacts"]["conversation_snapshot"] = "conversation/snapshot.json"
-            if conversation_snapshot.get("design_brief") is not None:
-                write_json(run_dir / "brief.json", conversation_snapshot["design_brief"])
-                manifest["artifacts"]["brief"] = "brief.json"
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 
@@ -220,8 +186,6 @@ class ArtifactStore:
             except (OSError, ValueError) as exc:
                 LOGGER.warning("Skipping unreadable manifest %s: %s", path, exc)
                 continue
-            if manifest.get("is_conversation"):
-                manifest = _listed_conversation(manifest, path.parent / "conversation.json")
             tasks.append((path.parent.resolve(), manifest))
         tasks.sort(
             key=lambda item: item[1].get(

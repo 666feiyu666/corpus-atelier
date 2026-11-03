@@ -11,14 +11,14 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from ..artifacts.hashing import digest_file
-from ..artifacts.paths import task_path, verified_image
+from ..artifacts.paths import task_path
 from ..artifacts.records import read_json
 from ..artifacts.store import ArtifactStore, validate_case_id, validate_run_id
-from ..atelier.intake import compile_intake_prompt
-from ..conversation.service import BUSY_ROUND_STATUSES, ConversationMixin, serialized_conversation
+from ..prompt_session.service import PromptSessionMixin
 from ..design_support.inputs import validate_mask, validate_reference_images
 from ..design_support.validation import validate, validate_candidate_count
 from .graph import build_graph
+from .locking import serialized_run
 from ..language import bind_brief_language, validate_content_language
 from ..providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
@@ -34,6 +34,7 @@ from .workflow import WorkflowRuntime
 
 RECOVERABLE_TASK_STATUSES = frozenset({
     "discussing_request",
+    "extracting",
     "created",
     "interpreting_request",
     "designing_directions",
@@ -43,19 +44,7 @@ RECOVERABLE_TASK_STATUSES = frozenset({
 })
 
 
-class FastPathUnavailable(ValueError):
-    """A conversation cannot render unattended; the caller keeps the review flow.
-
-    The reason is a stable code the interface translates, so the fallback can say
-    exactly which condition was missing instead of silently doing nothing.
-    """
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
-class CorpusAtelierApplication(ConversationMixin):
+class CorpusAtelierApplication(PromptSessionMixin):
     def __init__(
         self,
         *,
@@ -240,18 +229,11 @@ class CorpusAtelierApplication(ConversationMixin):
         return self._invoke_graph(run_id, run_dir, state)
 
     def create_request(self, job: NaturalLanguageDesignJob, *,
-                       is_conversation: bool = False,
-                       conversation_parent_id: str | None = None,
-                       conversation_revision: int | None = None,
-                       conversation_state: dict | None = None,
-                       conversation_snapshot: dict | None = None,
                        approval_policy: str = "manual") -> RunResult:
         self._validate_request(job.request)
         mode = self._validate_generation_mode(job.generation_mode)
         policy = self._validate_approval_policy(approval_policy)
         content_language = validate_content_language(job.content_language)
-        if conversation_state is not None:
-            content_language = validate_content_language(conversation_state.get("content_language"))
         candidate_count = validate_candidate_count(job.candidate_count)
         profile = get_profile(job.profile)
         run_id, run_dir = self.store.create(
@@ -261,11 +243,6 @@ class CorpusAtelierApplication(ConversationMixin):
             title=self._task_title(job.request),
             models=self._models(),
             candidate_limit=candidate_count,
-            is_conversation=is_conversation,
-            conversation_parent_id=conversation_parent_id,
-            conversation_revision=conversation_revision,
-            conversation_state=conversation_state,
-            conversation_snapshot=conversation_snapshot,
             content_language=content_language,
         )
         inputs = self._attach_generation_inputs(
@@ -277,146 +254,6 @@ class CorpusAtelierApplication(ConversationMixin):
         if details:
             self.store.update(run_dir, "created", **details)
         return self._result(run_id)
-
-    def draft_brief(self, run_id: str) -> dict:
-        """Ask the text model for a first-pass brief the user can edit and confirm.
-
-        The draft is advisory: it never creates a brief revision and never replaces the saved
-        brief until the user saves the editor.
-        """
-        run_dir = self.store.find_run(run_id)
-        manifest = self.store.manifest(run_dir)
-        if not manifest.get("is_conversation"):
-            raise ValueError("Only a design conversation can draft a brief.")
-        self._assert_model_binding(run_dir)
-        value = self.conversation(run_id)
-        profile = get_profile(value["profile"])
-        references = []
-        for message in value["messages"]:
-            for record in message.get("attachments", []):
-                try:
-                    references.append(verified_image(
-                        run_dir, record["path"], record["sha256"],
-                    ))
-                except Exception:
-                    continue
-        prompt = compile_intake_prompt(
-            profile,
-            value["effective_request"] or "",
-            user_requirements=value["user_requirements"] or None,
-            content_language=value["content_language"],
-        )
-        prompt += (
-            "\n\n# Conversation context\n\n"
-            "Draft one brief from these user messages. The user will review and edit it before it "
-            "becomes authoritative; do not treat the draft as confirmed."
-            "\n\n"
-            + json.dumps([
-                {"role": message["role"], "text": message["text"],
-                 "attachments": [item["name"] for item in message.get("attachments", [])]}
-                for message in value["messages"]
-                if message.get("kind", "discussion") == "discussion"
-            ], ensure_ascii=False, indent=2)
-        )
-        if value["design_brief"] is not None:
-            prompt += (
-                "\n\n# Previous brief\n\n"
-                "Revise this brief to match the conversation; keep wording the user has not asked "
-                "to change."
-                "\n\n"
-                + json.dumps(value["design_brief"], ensure_ascii=False, indent=2, allow_nan=False)
-            )
-        self.store.text(run_dir, "brief-draft/prompt.md", prompt)
-        try:
-            brief, response = self.runtime.text_provider.propose(
-                prompt,
-                schema_name=profile.brief_schema,
-                reference_paths=references[:3] or None,
-            )
-            brief = validate(
-                bind_brief_language(brief, value["content_language"]),
-                profile.brief_schema,
-            )
-            self.store.json(run_dir, "brief-draft/response.json", response)
-            self.store.json(run_dir, "brief-draft/brief.json", brief)
-            self.store.register(
-                run_dir,
-                brief_draft_prompt="brief-draft/prompt.md",
-                brief_draft_response="brief-draft/response.json",
-                brief_draft="brief-draft/brief.json",
-            )
-            return brief
-        except Exception as exc:
-            self.store.json(run_dir, "brief-draft/error.json", {
-                "status": "failed",
-                "error_type": type(exc).__name__,
-                "message": str(exc),
-            })
-            raise
-
-    @staticmethod
-    def _brief_draft(root: Path) -> dict | None:
-        path = root / "brief-draft/brief.json"
-        if not path.is_file():
-            return None
-        try:
-            value = read_json(path)
-        except (OSError, ValueError):
-            return None
-        return value if isinstance(value, dict) else None
-
-    def _fast_path_blocker(self, value: dict, draft: dict | None) -> str | None:
-        """Return the first condition that keeps a conversation on the review flow.
-
-        The route itself is not a blocker: a staged brief also starts its round straight
-        away, and only the generation-preview approval pauses a staged round.
-        """
-        if value.get("pending"):
-            return "conversation_busy"
-        for record in value["rounds"]:
-            if self.inspect_task(record["run_id"]).status in BUSY_ROUND_STATUSES:
-                return "conversation_busy"
-        if draft is None:
-            return "no_draft"
-        if value["open_questions"]:
-            return "open_questions"
-        if not draft.get("content_language"):
-            return "language_missing"
-        if value["rounds"] and value["rounds"][-1]["revision"] == value["revision"]:
-            return "round_exists"
-        return None
-
-    def fast_path_status(self, run_id: str) -> dict:
-        """Report whether this conversation can render without a brief review."""
-        root = self.store.find_run(run_id)
-        if not self.store.manifest(root).get("is_conversation"):
-            return {"eligible": False, "reason": "not_conversation"}
-        reason = self._fast_path_blocker(self.conversation(run_id), self._brief_draft(root))
-        return {"eligible": reason is None, "reason": reason}
-
-    @serialized_conversation
-    def start_fast_round(self, run_id: str, *, redraft: bool = False) -> RunResult:
-        """Confirm the drafted brief and start a round without a brief review.
-
-        This is the default studio flow: the draft becomes the confirmed brief and the
-        round starts immediately. A direct brief also renders without an approval stop; a
-        staged one still pauses for its generation preview. Any real gap raises
-        FastPathUnavailable so the caller keeps the ordinary review flow.
-        """
-        root = self.store.find_run(run_id)
-        if not self.store.manifest(root).get("is_conversation"):
-            raise FastPathUnavailable("not_conversation")
-        draft = None if redraft else self._brief_draft(root)
-        if draft is None:
-            draft = self.draft_brief(run_id)
-        value = self.conversation(run_id)
-        reason = self._fast_path_blocker(value, draft)
-        if reason is not None:
-            raise FastPathUnavailable(reason)
-        self.save_conversation_brief(
-            run_id, draft, expected_revision=value["revision"], origin="fast-path",
-        )
-        return self.create_conversation_round(run_id, approval_policy="auto")
 
     def run_request(self, run_id: str) -> RunResult:
         run_dir = self.store.find_run(run_id)
@@ -464,39 +301,7 @@ class CorpusAtelierApplication(ConversationMixin):
         mask = manifest.get("mask")
         if mask:
             state["mask_path"] = str(task_path(run_dir, mask["file"]))
-        snapshot_relative = manifest.get("artifacts", {}).get("conversation_snapshot")
-        if snapshot_relative:
-            snapshot = read_json(task_path(run_dir, snapshot_relative))
-            self._bind_conversation_snapshot(state, snapshot, manifest)
         return state
-
-    def _bind_conversation_snapshot(self, state: AtelierState, snapshot: dict, manifest: dict) -> None:
-        """Use the reviewed brief as graph input and verify its revision and language."""
-        if not isinstance(snapshot, dict):
-            raise ValueError("The conversation snapshot must be an object.")
-        language = state["content_language"]
-        snapshot_language = validate_content_language(snapshot.get("content_language"))
-        if snapshot_language and language and snapshot_language != language:
-            raise ValueError("The saved task language differs from the conversation snapshot.")
-        language = language or snapshot_language
-        if "user_requirements" in snapshot:
-            state["user_requirements"] = snapshot["user_requirements"]
-            state["superseded_user_requirements"] = snapshot.get("superseded_user_requirements", [])
-        if snapshot.get("design_brief") is not None:
-            if snapshot.get("brief_revision") != manifest.get("conversation_revision"):
-                raise ValueError("The saved design brief belongs to a different conversation revision.")
-            brief = validate(snapshot["design_brief"], get_profile(state["profile"]).brief_schema)
-            if brief.get("content_language") and language and brief["content_language"] != language:
-                raise ValueError("The saved brief differs from the task content language.")
-            language = language or brief.get("content_language")
-            if brief.get("user_requirements", []) != snapshot.get("user_requirements", []):
-                raise ValueError("The saved design brief changed the confirmed user requirements.")
-            state.pop("user_request")
-            state["brief"] = brief
-            run_dir = Path(state["run_dir"])
-            self.store.json(run_dir, "brief.json", brief)
-            self.store.register(run_dir, brief="brief.json")
-        state["content_language"] = language
 
     def start_request(self, job: NaturalLanguageDesignJob) -> RunResult:
         created = self.create_request(job)
@@ -506,8 +311,8 @@ class CorpusAtelierApplication(ConversationMixin):
         """Continue a saved task from its latest durable graph checkpoint."""
         run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
-        if manifest.get("is_conversation"):
-            return self.run_conversation(run_id)
+        if manifest.get("is_prompt_session"):
+            return self.continue_prompt_session(run_id)
         if manifest["status"] == "created":
             return self.run_request(run_id)
         if manifest["status"] not in RECOVERABLE_TASK_STATUSES:
@@ -532,19 +337,12 @@ class CorpusAtelierApplication(ConversationMixin):
                 "Configured models changed after this task was created."
             )
 
-    @serialized_conversation
+    @serialized_run
     def resume(self, run_id: str, decision: object) -> RunResult:
         run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
         if manifest["status"] not in {"awaiting_approval", "awaiting_selection"}:
             raise ValueError("This task is not waiting for a user decision.")
-        parent_id = manifest.get("conversation_parent_id")
-        if parent_id and manifest["status"] == "awaiting_approval":
-            conversation = self.conversation(parent_id)
-            latest = conversation["rounds"][-1]
-            if (conversation.get("pending") or latest["run_id"] != run_id
-                    or latest["revision"] != conversation["revision"]):
-                raise ValueError("This design round is superseded by newer conversation requirements.")
         self._assert_model_binding(run_dir)
         if not hasattr(decision, "to_dict"):
             raise TypeError("A resumable decision must provide to_dict().")
@@ -562,28 +360,11 @@ class CorpusAtelierApplication(ConversationMixin):
         ]
 
     def delete_task(self, run_id: str) -> list[str]:
-        """Permanently delete one task; a conversation also drops all of its rounds."""
+        """Permanently delete one task and its checkpoints."""
         run_dir = self.store.find_run(run_id)
-        manifest = self.store.manifest(run_dir)
-        deleted: list[str] = []
-        if manifest.get("is_conversation"):
-            try:
-                conversation = self.conversation(run_id)
-                round_ids = [record["run_id"] for record in conversation["rounds"]]
-            except Exception:
-                round_ids = []
-            for round_id in round_ids:
-                try:
-                    round_dir = self.store.find_run(round_id)
-                except FileNotFoundError:
-                    continue
-                self.store.delete(round_dir)
-                self._delete_checkpoints(round_id)
-                deleted.append(round_id)
         self.store.delete(run_dir)
         self._delete_checkpoints(run_id)
-        deleted.append(run_id)
-        return deleted
+        return [run_id]
 
     def _delete_checkpoints(self, run_id: str) -> None:
         connection = self._checkpoint_connection
@@ -664,6 +445,13 @@ class CorpusAtelierApplication(ConversationMixin):
             "rejected": "Image generation was cancelled; the task remains saved.",
             "completed": "The task completed and its artifacts were saved.",
             "failed": "The task failed; inspect its saved attempts and error record.",
+            "prompt_ready": "The current prompt is ready for an explicit image action.",
+            "extracting": "Estimating a prompt from the source image.",
+            "generating_image": "The frozen image request is running.",
+            "outcome_unknown": (
+                "The image request was interrupted before its outcome was known; "
+                "prepare a new explicit request to try again."
+            ),
         }
         return RunResult(
             run_id=run_id,

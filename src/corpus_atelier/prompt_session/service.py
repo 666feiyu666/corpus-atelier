@@ -1,0 +1,754 @@
+"""Application operations for the prompt-centered image workflow.
+
+Every durable state transition lives here: the Streamlit layer renders state and
+sends user actions, and never decides prompt versions, image roles, or provider
+payloads. The image provider executes only an explicitly prepared, frozen
+request whose digest the user was shown.
+"""
+
+from __future__ import annotations
+
+from io import BytesIO
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from PIL import Image
+
+from ..artifacts.hashing import digest_file
+from ..artifacts.paths import task_path, verified_image
+from ..artifacts.records import read_json
+from ..config.models import IMAGE_QUALITIES
+from ..design_support.canvas import reduce_ratio, resolve_image_size
+from ..app.registry import get_profile
+from ..app.locking import serialized_run as serialized_session
+from .assistant import (
+    ASSISTANT_SCHEMA,
+    EXTRACTION_SCHEMA,
+    build_extraction_prompt,
+    build_turn_prompt,
+    label_images,
+    validate_extraction,
+    validate_turn_answer,
+)
+from .records import (
+    FORMAT_VERSION,
+    MAX_INSTRUCTION_LENGTH,
+    MAX_PROMPT_LENGTH,
+    SESSION_FILE,
+    WORKFLOW_KIND,
+    PromptSessionRecord,
+    canonical_digest,
+    current_revision,
+    find_attempt,
+    find_result,
+    find_revision,
+    find_upload,
+    image_record,
+    load_session,
+    new_id,
+    new_revision,
+    new_session,
+    now,
+    save_session,
+)
+
+if TYPE_CHECKING:
+    from ..app.state import RunResult
+
+
+LOGGER = logging.getLogger(__name__)
+
+UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024
+UPLOAD_MAX_PIXELS = 20_000_000
+UPLOAD_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
+MAX_REFERENCES = 3
+ACTIVE_STATUSES = frozenset({"extracting", "discussing_request", "generating_image"})
+
+_UNKNOWN_OUTCOME_TOKENS = ("timeout", "connection", "interrupt")
+
+
+def validate_prompt_text(prompt_text: object) -> str:
+    """Keep the user's prompt byte-for-byte; only emptiness and length are checked."""
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        raise ValueError("Write a prompt before continuing.")
+    if len(prompt_text) > MAX_PROMPT_LENGTH:
+        raise ValueError(f"A prompt must be at most {MAX_PROMPT_LENGTH} characters.")
+    return prompt_text
+
+
+def validate_upload(name: str, data: bytes) -> str:
+    """Validate one upload and return the archived file suffix."""
+    if not isinstance(data, (bytes, bytearray)) or not data:
+        raise ValueError("The uploaded image is empty.")
+    if len(data) > UPLOAD_LIMIT_BYTES:
+        raise ValueError("Each image must be at most 10 MB.")
+    try:
+        with Image.open(BytesIO(data)) as image:
+            suffix = UPLOAD_FORMATS.get(image.format or "")
+            if suffix is None:
+                raise ValueError("Images must be PNG, JPEG, or WebP.")
+            if image.width * image.height > UPLOAD_MAX_PIXELS:
+                raise ValueError("Images must be at most 20 megapixels.")
+            image.load()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("The uploaded file is not a readable image.") from exc
+    return suffix
+
+
+def validate_session_settings(value: dict | None) -> dict[str, Any]:
+    """Resolve the explicit image settings a session freezes for every attempt."""
+    value = dict(value or {})
+    quality = value.get("image_quality") or "medium"
+    if quality not in IMAGE_QUALITIES:
+        raise ValueError(f"Unsupported image quality: {quality!r}.")
+    ratio = value.get("aspect_ratio") or (1, 1)
+    if not isinstance(ratio, (list, tuple)) or len(ratio) != 2:
+        raise ValueError("An aspect ratio requires exactly two integers.")
+    try:
+        width, height = int(ratio[0]), int(ratio[1])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("An aspect ratio requires exactly two integers.") from exc
+    if isinstance(ratio[0], bool) or isinstance(ratio[1], bool):
+        raise ValueError("An aspect ratio requires exactly two integers.")
+    size, ratio = resolve_image_size(reduce_ratio(width, height))
+    return {"image_quality": quality, "aspect_ratio": list(ratio), "size": size}
+
+
+def outcome_unknown(exc: BaseException) -> bool:
+    """A timeout or interruption may have reached the provider: never auto-retry."""
+    if isinstance(exc, (KeyboardInterrupt, TimeoutError, ConnectionError)):
+        return True
+    name = type(exc).__name__.lower()
+    return any(token in name for token in _UNKNOWN_OUTCOME_TOKENS)
+
+
+class PromptSessionMixin:
+    """Prompt-session operations kept separate from the brief-based round graph."""
+
+    # --- reading -----------------------------------------------------------
+
+    def prompt_session(self, run_id: str) -> PromptSessionRecord:
+        root = self.store.find_run(run_id)
+        return load_session(root)
+
+    def _prompt_session(self, run_id: str) -> tuple[Path, PromptSessionRecord, dict]:
+        root = self.store.find_run(run_id)
+        manifest = self.store.manifest(root)
+        if not manifest.get("is_prompt_session"):
+            raise ValueError("This task does not use the prompt-centered workflow.")
+        return root, load_session(root), manifest
+
+    def _save(self, root: Path, session: PromptSessionRecord) -> None:
+        save_session(root, session)
+
+    def _require_idle(self, session: PromptSessionRecord) -> None:
+        """A pending chat turn does not block an edit; a running image call does."""
+        for attempt in session["image_attempts"]:
+            if attempt["status"] == "submitting":
+                raise ValueError("An image request is still running for this session.")
+
+    @staticmethod
+    def _attempt_dir(root: Path, attempt_id: str) -> Path:
+        return root / "image-attempts" / attempt_id
+
+    # --- creation ----------------------------------------------------------
+
+    def _create_session(
+        self, *, request_text: str, entry_mode: str, case_id: str, profile: str,
+        settings: dict | None,
+    ) -> tuple[str, Path, PromptSessionRecord]:
+        resolved = validate_session_settings(settings)
+        provider_quality = getattr(self.runtime.image_provider, "quality", None)
+        if provider_quality is not None:
+            resolved["image_quality"] = provider_quality
+        result = self.create_request(
+            _prompt_job(case_id=case_id, profile=profile, request=request_text),
+        )
+        root = result.run_dir
+        session = new_session(entry_mode, resolved)
+        self._save(root, session)
+        self.store.register(root, prompt_session=SESSION_FILE)
+        self.store.update(
+            root, "prompt_ready", is_prompt_session=True, workflow_kind=WORKFLOW_KIND,
+            prompt_session_settings=resolved, error=None,
+        )
+        return result.run_id, root, session
+
+    def start_from_prompt(
+        self, prompt_text: str, *, case_id: str, profile: str = "general-graphic",
+        settings: dict | None = None,
+        references: list[tuple[str, bytes]] | None = None,
+    ) -> RunResult:
+        """Create a session whose revision 1 is the prompt the user just typed."""
+        text = validate_prompt_text(prompt_text)
+        for name, data in list(references or []):
+            validate_upload(name, data)
+        run_id, root, session = self._create_session(
+            request_text=text, entry_mode="prompt", case_id=case_id,
+            profile=profile, settings=settings,
+        )
+        new_revision(session, text, "user_input")
+        for name, data in list(references or []):
+            self._archive_upload(root, session, name, data, role="reference")
+        self._save(root, session)
+        return self._result(run_id)
+
+    @serialized_session
+    def attach_session_upload(
+        self, run_id: str, image: tuple[str, bytes], *, role: str = "reference",
+    ) -> RunResult:
+        """Archive one explicitly uploaded image for a later explicit selection."""
+        root, session, _ = self._prompt_session(run_id)
+        if role not in {"reference", "mask", "discussion", "source_image"}:
+            raise ValueError("An upload role must be reference, mask, discussion, or source_image.")
+        self._archive_upload(root, session, image[0], image[1], role=role)
+        self._save(root, session)
+        return self._result(run_id)
+
+    def start_from_image(
+        self, image: tuple[str, bytes], *, case_id: str, profile: str = "general-graphic",
+        settings: dict | None = None,
+    ) -> RunResult:
+        """Archive one source image and queue a vision extraction; no image call."""
+        name, data = image
+        validate_upload(name, data)
+        run_id, root, session = self._create_session(
+            request_text=f"Extract an estimated prompt from the uploaded image {Path(name).name}",
+            entry_mode="image", case_id=case_id, profile=profile, settings=settings,
+        )
+        upload = self._archive_upload(root, session, name, data, role="source_image")
+        session["pending_turn"] = {
+            "kind": "extraction", "turn_id": new_id("turn"), "upload_id": upload["id"],
+            "created_at": now(),
+        }
+        self._save(root, session)
+        self.store.update(root, "extracting", error=None)
+        return self._result(run_id)
+
+    def _archive_upload(
+        self, root: Path, session: PromptSessionRecord, name: str, data: bytes, *, role: str,
+    ) -> dict[str, Any]:
+        suffix = validate_upload(name, data)
+        image_id = new_id("img")
+        relative = f"sources/{image_id}.{suffix}"
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(bytes(data))
+        record = {
+            "id": image_id,
+            "name": Path(name).name or "image",
+            "path": relative,
+            "sha256": digest_file(target),
+            "role": role,
+            "created_at": now(),
+        }
+        session["uploads"].append(record)
+        return record
+
+    # --- prompt revisions --------------------------------------------------
+
+    @serialized_session
+    def edit_session_prompt(
+        self, run_id: str, prompt_text: str, *, expected_revision: str,
+    ) -> RunResult:
+        """Make a user-edited prompt authoritative as a new revision."""
+        root, session, _ = self._prompt_session(run_id)
+        self._require_idle(session)
+        current = session.get("current_prompt_revision_id")
+        if expected_revision != current:
+            raise ValueError("The prompt changed. Review the current prompt before saving.")
+        text = validate_prompt_text(prompt_text)
+        if current is not None and text == find_revision(session, current)["prompt_text"]:
+            return self._result(run_id)
+        new_revision(session, text, "manual_edit", parent_revision_id=current)
+        self._save(root, session)
+        self.store.update(root, "prompt_ready", error=None)
+        return self._result(run_id)
+
+    @serialized_session
+    def restore_session_revision(
+        self, run_id: str, revision_id: str, *, expected_revision: str,
+    ) -> RunResult:
+        """Restore an earlier revision as a new revision, keeping history intact."""
+        root, session, _ = self._prompt_session(run_id)
+        self._require_idle(session)
+        current = session.get("current_prompt_revision_id")
+        if expected_revision != current:
+            raise ValueError("The prompt changed. Review the current prompt before restoring.")
+        target = find_revision(session, revision_id)
+        if target["id"] == current:
+            return self._result(run_id)
+        new_revision(
+            session, target["prompt_text"], "manual_edit",
+            parent_revision_id=current, restored_from=target["id"],
+        )
+        self._save(root, session)
+        self.store.update(root, "prompt_ready", error=None)
+        return self._result(run_id)
+
+    # --- conversation ------------------------------------------------------
+
+    @serialized_session
+    def queue_session_message(
+        self, run_id: str, text: str, *, attachments: list[tuple[str, bytes]] | None = None,
+    ) -> RunResult:
+        """Save the user message and its base revision before any model call."""
+        root, session, _ = self._prompt_session(run_id)
+        self._assert_model_binding(root)
+        if session.get("pending_turn"):
+            raise ValueError("Wait for the current response, or retry it.")
+        if len(attachments or []) > MAX_REFERENCES:
+            raise ValueError(f"Attach at most {MAX_REFERENCES} images per message.")
+        if not isinstance(text, str) or (not text.strip() and not attachments):
+            raise ValueError("Send a message or attach an image.")
+        uploads = [
+            self._archive_upload(root, session, name, data, role="discussion")
+            for name, data in list(attachments or [])
+        ]
+        message_id = new_id("msg")
+        session["messages"].append({
+            "id": message_id, "role": "user", "text": text,
+            "attachment_ids": [upload["id"] for upload in uploads],
+            "attachment_names": [upload["name"] for upload in uploads],
+            "created_at": now(),
+        })
+        session["pending_turn"] = {
+            "kind": "chat", "turn_id": new_id("turn"), "message_id": message_id,
+            "base_revision_id": session["current_prompt_revision_id"], "created_at": now(),
+        }
+        self._save(root, session)
+        self.store.update(root, "discussing_request", error=None)
+        return self._result(run_id)
+
+    def _turn_images(
+        self, root: Path, session: PromptSessionRecord, message: dict,
+    ) -> tuple[list[Path], list[dict[str, Any]]]:
+        """Only explicitly attached or active images reach the text model."""
+        image_ids = list(message.get("attachment_ids") or [])
+        active = session.get("active_image_id")
+        if active and active not in image_ids:
+            image_ids.append(active)
+        image_ids = image_ids[:MAX_REFERENCES]
+        paths, names = [], {}
+        for image_id in image_ids:
+            record = image_record(session, image_id)
+            paths.append(verified_image(root, record["path"], record["sha256"]))
+            names[image_id] = record.get("name") or record.get("label") or image_id
+        return paths, label_images(session, image_ids, names)
+
+    @serialized_session
+    def run_session_turn(self, run_id: str) -> RunResult:
+        """Commit one assistant reply and, when appropriate, one prompt revision."""
+        root, session, _ = self._prompt_session(run_id)
+        pending = session.get("pending_turn") or {}
+        if pending.get("kind") != "chat":
+            raise ValueError("There is no pending conversation turn to answer.")
+        self._assert_model_binding(root)
+        turn_id = pending["turn_id"]
+        message = next(
+            (item for item in session["messages"] if item.get("id") == pending.get("message_id")),
+            None,
+        )
+        if message is None:
+            raise ValueError("The pending turn has no matching user message.")
+        base_revision_id = pending.get("base_revision_id")
+        base_revision = find_revision(session, base_revision_id) if base_revision_id else None
+        turn_dir = root / "turns" / turn_id
+        self.store.update(root, "discussing_request", error=None)
+        try:
+            self.store.text(turn_dir, "message.txt", message["text"])
+            answer = self._turn_answer(root, session, turn_dir, message, base_revision)
+            revision = self._commit_turn(session, answer, turn_id, message)
+            self.store.json(turn_dir, "answer.json", answer)
+            self._save(root, session)
+            self.store.update(
+                root, "prompt_ready", error=None,
+                current_prompt_revision_id=session["current_prompt_revision_id"],
+            )
+        except Exception as exc:
+            self.store.json(turn_dir, "error.json", {
+                "status": "failed", "error_type": type(exc).__name__, "message": str(exc),
+            })
+            self.store.fail(root, exc)
+            raise
+        return self._result(run_id)
+
+    def _turn_answer(
+        self, root: Path, session: PromptSessionRecord, turn_dir: Path, message: dict,
+        base_revision: dict | None,
+    ) -> dict[str, Any]:
+        cached = turn_dir / "answer.json"
+        if cached.is_file():
+            try:
+                return validate_turn_answer(read_json(cached))
+            except (OSError, ValueError):
+                LOGGER.warning("Ignoring an invalid cached turn answer at %s.", cached)
+        reference_paths, labels = self._turn_images(root, session, message)
+        prompt = build_turn_prompt(
+            session, message=message, base_revision=base_revision, labels=labels,
+        )
+        self.store.text(turn_dir, "prompt.md", prompt)
+        answer, response = self.runtime.text_provider.propose(
+            prompt, schema_name=ASSISTANT_SCHEMA, reference_paths=reference_paths or None,
+        )
+        answer = validate_turn_answer(answer)
+        self.store.json(turn_dir, "response.json", response)
+        return answer
+
+    def _commit_turn(
+        self, session: PromptSessionRecord, answer: dict[str, Any], turn_id: str, message: dict,
+    ) -> dict[str, Any] | None:
+        """Commit a proposal only against the revision it was written for."""
+        pending = session["pending_turn"]
+        base_revision_id = pending.get("base_revision_id")
+        proposal = answer["proposed_prompt"]
+        revision = None
+        conflict = False
+        if proposal is not None:
+            if session.get("current_prompt_revision_id") != base_revision_id:
+                conflict = True
+            else:
+                revision = new_revision(
+                    session, proposal, "assistant_revision",
+                    parent_revision_id=base_revision_id, source_message_id=message["id"],
+                    source_turn_id=turn_id,
+                )
+        session["text_turns"].append({
+            "id": turn_id, "kind": "chat", "message_id": message["id"],
+            "base_revision_id": base_revision_id, "status": "completed",
+            "reply": answer["reply"], "proposed_prompt": proposal,
+            "edit_instruction": answer["edit_instruction"],
+            "proposed_revision_id": revision["id"] if revision else None,
+            "conflict": conflict,
+            "model_input": f"turns/{turn_id}/prompt.md",
+            "raw_response": f"turns/{turn_id}/response.json",
+            "created_at": now(),
+        })
+        session["messages"].append({
+            "id": new_id("msg"), "role": "assistant", "text": answer["reply"],
+            "attachment_ids": [], "attachment_names": [],
+            "in_reply_to": message["id"], "turn_id": turn_id,
+            "proposed_prompt": proposal, "edit_instruction": answer["edit_instruction"],
+            "proposed_revision_id": revision["id"] if revision else None,
+            "conflict": conflict, "created_at": now(),
+        })
+        session["pending_turn"] = None
+        session["format_version"] = max(FORMAT_VERSION, session["format_version"])
+        return revision
+
+    @serialized_session
+    def run_prompt_extraction(self, run_id: str) -> RunResult:
+        """Derive revision 1 from one source image with a vision text model."""
+        root, session, _ = self._prompt_session(run_id)
+        pending = session.get("pending_turn") or {}
+        if pending.get("kind") != "extraction":
+            raise ValueError("There is no pending image extraction to run.")
+        self._assert_model_binding(root)
+        turn_id = pending["turn_id"]
+        upload = find_upload(session, pending["upload_id"])
+        turn_dir = root / "turns" / turn_id
+        self.store.update(root, "extracting", error=None)
+        try:
+            source = verified_image(root, upload["path"], upload["sha256"])
+            answer = self._extraction_answer(turn_dir, source, upload)
+            existing = next(
+                (item for item in session["prompt_revisions"]
+                 if item.get("source_turn_id") == turn_id),
+                None,
+            )
+            if existing is None:
+                new_revision(
+                    session, answer["prompt_text"], "vision_extraction",
+                    source_image_id=upload["id"], note=answer["observations"],
+                    source_turn_id=turn_id,
+                )
+            session["text_turns"].append({
+                "id": turn_id, "kind": "extraction", "status": "completed",
+                "source_image_id": upload["id"],
+                "model_input": f"turns/{turn_id}/prompt.md",
+                "raw_response": f"turns/{turn_id}/response.json",
+                "created_at": now(),
+            })
+            session["pending_turn"] = None
+            self._save(root, session)
+            self.store.update(
+                root, "prompt_ready", error=None,
+                current_prompt_revision_id=session["current_prompt_revision_id"],
+            )
+        except Exception as exc:
+            self.store.json(turn_dir, "error.json", {
+                "status": "failed", "error_type": type(exc).__name__, "message": str(exc),
+            })
+            self.store.fail(root, exc)
+            raise
+        return self._result(run_id)
+
+    def _extraction_answer(
+        self, turn_dir: Path, source: Path, upload: dict[str, Any],
+    ) -> dict[str, Any]:
+        cached = turn_dir / "answer.json"
+        if cached.is_file():
+            try:
+                return validate_extraction(read_json(cached))
+            except (OSError, ValueError):
+                LOGGER.warning("Ignoring an invalid cached extraction at %s.", cached)
+        prompt = build_extraction_prompt(source_name=upload["name"])
+        self.store.text(turn_dir, "prompt.md", prompt)
+        answer, response = self.runtime.text_provider.propose(
+            prompt, schema_name=EXTRACTION_SCHEMA, reference_paths=[source],
+        )
+        answer = validate_extraction(answer)
+        self.store.json(turn_dir, "response.json", response)
+        self.store.json(turn_dir, "answer.json", answer)
+        return answer
+
+    def continue_prompt_session(self, run_id: str) -> RunResult:
+        """Resume the one pending text step, if any; never repeat an image call."""
+        root, session, manifest = self._prompt_session(run_id)
+        pending = session.get("pending_turn")
+        if not pending:
+            if manifest["status"] != "prompt_ready":
+                self.store.update(root, "prompt_ready", error=None)
+            return self._result(run_id)
+        if pending.get("kind") == "extraction":
+            return self.run_prompt_extraction(run_id)
+        return self.run_session_turn(run_id)
+
+    @serialized_session
+    def reconcile_prompt_session(self, run_id: str) -> RunResult:
+        """Mark an interrupted submission as an unknown remote outcome."""
+        root = self.store.find_run(run_id)
+        manifest = self.store.manifest(root)
+        if not manifest.get("is_prompt_session"):
+            return self._result(run_id)
+        session = load_session(root)
+        if manifest["status"] != "generating_image":
+            return self._result(run_id)
+        if all(attempt["status"] != "outcome_unknown" for attempt in session["image_attempts"]):
+            return self._result(run_id)
+        self._save(root, session)
+        for attempt in session["image_attempts"]:
+            self._write_attempt(root, attempt)
+        self.store.update(
+            root, "outcome_unknown",
+            error="The image request was interrupted before its outcome was known.",
+        )
+        return self._result(run_id)
+
+    # --- image actions -----------------------------------------------------
+
+    @serialized_session
+    def prepare_image_action(
+        self, run_id: str, *, action: str, edit_instruction: str | None = None,
+        source_image_id: str | None = None, reference_image_ids: list[str] | None = None,
+        mask_image_id: str | None = None, expected_revision: str | None = None,
+    ) -> dict[str, Any]:
+        """Freeze one exact, reviewable image request and return its attempt record."""
+        root, session, _ = self._prompt_session(run_id)
+        if action not in {"generate", "edit"}:
+            raise ValueError("An image action must be generate or edit.")
+        revision = current_revision(session)
+        if revision is None:
+            raise ValueError("Write the prompt before preparing an image request.")
+        if expected_revision is not None and expected_revision != revision["id"]:
+            raise ValueError(
+                "The prompt changed after this request was prepared. Review the current prompt."
+            )
+        reference_ids = [item for item in (reference_image_ids or []) if item]
+        instruction = None
+        if action == "generate":
+            if source_image_id is not None:
+                raise ValueError("Generating a new image never sends an implicit source image.")
+            request_text = revision["prompt_text"]
+        else:
+            if not source_image_id:
+                raise ValueError("Choose the image to edit.")
+            if not isinstance(edit_instruction, str) or not edit_instruction.strip():
+                raise ValueError("Write the edit instruction you want the image model to receive.")
+            if len(edit_instruction) > MAX_INSTRUCTION_LENGTH:
+                raise ValueError(
+                    f"An edit instruction must be at most {MAX_INSTRUCTION_LENGTH} characters."
+                )
+            instruction = edit_instruction
+            request_text = edit_instruction
+            reference_ids = [source_image_id, *[i for i in reference_ids if i != source_image_id]]
+        if len(reference_ids) > MAX_REFERENCES:
+            raise ValueError(f"An image request accepts at most {MAX_REFERENCES} reference images.")
+        references = []
+        for image_id in reference_ids:
+            record = image_record(session, image_id)
+            path = verified_image(root, record["path"], record["sha256"])
+            references.append({
+                "id": image_id, "path": record["path"],
+                "sha256": record["sha256"], "file": path.name,
+            })
+        mask = None
+        if mask_image_id is not None:
+            record = image_record(session, mask_image_id)
+            verified_image(root, record["path"], record["sha256"])
+            mask = {"id": mask_image_id, "path": record["path"], "sha256": record["sha256"]}
+        if mask is not None and len(references) != 1:
+            raise ValueError("Mask inpainting requires exactly one reference image.")
+        settings = session["settings"]
+        size = settings.get("size") or validate_session_settings(settings)["size"]
+        request = self.runtime.image_provider.describe_request(
+            request_text, size=size,
+            reference_paths=[root / item["path"] for item in references] or None,
+            mask_path=root / mask["path"] if mask else None,
+        )
+        attempt_id = new_id("att")
+        digest = canonical_digest({
+            "action": action, "request": request, "prompt_revision_id": revision["id"],
+            "source_image_id": source_image_id, "reference_image_ids": reference_ids,
+            "mask_image_id": mask_image_id,
+        })
+        attempt = {
+            "id": attempt_id,
+            "action": action,
+            "prompt_revision_id": revision["id"],
+            "request_text": request_text,
+            "edit_instruction": instruction,
+            "source_image_id": source_image_id,
+            "reference_image_ids": reference_ids,
+            "mask_image_id": mask_image_id,
+            "references": references,
+            "mask": mask,
+            "settings": {
+                "model": request.get("model"), "quality": request.get("quality"),
+                "size": request.get("size"), "output_format": request.get("output_format"),
+            },
+            "request_digest": digest,
+            "request_path": f"image-attempts/{attempt_id}/request.json",
+            "status": "prepared",
+            "created_at": now(),
+        }
+        attempt_dir = self._attempt_dir(root, attempt_id)
+        attempt_dir.mkdir(parents=True, exist_ok=False)
+        self.store.json(attempt_dir, "request.json", request)
+        self.store.text(attempt_dir, "prompt.md", request_text)
+        self._write_attempt(root, attempt)
+        session["image_attempts"].append(attempt)
+        self._save(root, session)
+        self.store.update(root, "prompt_ready", error=None)
+        return attempt
+
+    def _write_attempt(self, root: Path, attempt: dict[str, Any]) -> None:
+        attempt_dir = self._attempt_dir(root, attempt["id"])
+        self.store.json(attempt_dir, "record.json", attempt)
+
+    @serialized_session
+    def discard_image_action(self, run_id: str, attempt_id: str) -> RunResult:
+        """Abandon one prepared request without calling the provider."""
+        root, session, _ = self._prompt_session(run_id)
+        attempt = find_attempt(session, attempt_id)
+        if attempt["status"] != "prepared":
+            raise ValueError("Only an unsubmitted image request can be discarded.")
+        attempt["status"] = "discarded"
+        self._write_attempt(root, attempt)
+        self._save(root, session)
+        return self._result(run_id)
+
+    @serialized_session
+    def submit_image_action(
+        self, run_id: str, attempt_id: str, *, expected_digest: str,
+    ) -> RunResult:
+        """Execute one frozen request exactly once; stale or repeated submits fail."""
+        root, session, _ = self._prompt_session(run_id)
+        attempt = find_attempt(session, attempt_id)
+        if attempt["status"] != "prepared":
+            raise ValueError(
+                "This image request was already submitted. Prepare a new request to try again."
+            )
+        if attempt["request_digest"] != expected_digest:
+            raise ValueError(
+                "This image request changed. Review the exact request before submitting."
+            )
+        if attempt["prompt_revision_id"] != session.get("current_prompt_revision_id"):
+            raise ValueError(
+                "The prompt changed after this request was prepared. Prepare the image action again."
+            )
+        self._assert_model_binding(root)
+        attempt["status"] = "submitting"
+        attempt["submitted_at"] = now()
+        self._write_attempt(root, attempt)
+        self._save(root, session)
+        self.store.update(root, "generating_image", error=None)
+        reference_paths = [
+            verified_image(root, item["path"], item["sha256"]) for item in attempt["references"]
+        ]
+        mask_path = None
+        if attempt.get("mask"):
+            mask_path = verified_image(
+                root, attempt["mask"]["path"], attempt["mask"]["sha256"],
+            )
+        attempt_dir = self._attempt_dir(root, attempt["id"])
+        try:
+            response = self.runtime.image_provider.generate(
+                attempt["request_text"], size=attempt["settings"]["size"],
+                output=attempt_dir, reference_paths=reference_paths or None,
+                mask_path=mask_path,
+            )
+        except BaseException as exc:  # noqa: BLE001 - every outcome must be recorded
+            unknown = outcome_unknown(exc)
+            attempt["status"] = "outcome_unknown" if unknown else "failed"
+            attempt["error"] = {"type": type(exc).__name__, "message": str(exc)}
+            attempt["response_path"] = f"image-attempts/{attempt['id']}/response.json"
+            self._write_attempt(root, attempt)
+            self._save(root, session)
+            self.store.update(
+                root, "outcome_unknown" if unknown else "failed",
+                error_type=type(exc).__name__, error=str(exc),
+            )
+            raise
+        image_path = (attempt_dir / response["file"]).resolve()
+        if digest_file(image_path) != response.get("sha256"):
+            attempt["status"] = "failed"
+            attempt["error"] = {"type": "ImageIntegrityError", "message": "The result image changed."}
+            self._write_attempt(root, attempt)
+            self._save(root, session)
+            self.store.update(root, "failed", error="The generated image did not match its digest.")
+            raise ValueError("The generated image did not match its digest.")
+        result = {
+            "id": new_id("img"),
+            "image_path": image_path.relative_to(root).as_posix(),
+            "sha256": response["sha256"],
+            "attempt_id": attempt["id"],
+            "parent_image_id": attempt["source_image_id"] if attempt["action"] == "edit" else None,
+            "prompt_revision_id": attempt["prompt_revision_id"],
+            "request_text": attempt["request_text"],
+            "action": attempt["action"],
+            "label": f"{attempt['action']} {len(session['image_results']) + 1}",
+            "created_at": now(),
+        }
+        attempt["status"] = "succeeded"
+        attempt["result_image_id"] = result["id"]
+        attempt["response_path"] = f"image-attempts/{attempt['id']}/response.json"
+        self._write_attempt(root, attempt)
+        session["image_results"].append(result)
+        session["active_image_id"] = result["id"]
+        self._save(root, session)
+        self.store.update(
+            root, "prompt_ready", error=None,
+            latest_image=str(image_path), image_sha256=result["sha256"],
+            current_prompt_revision_id=session["current_prompt_revision_id"],
+        )
+        return self._result(run_id)
+
+    @serialized_session
+    def select_prompt_result(self, run_id: str, image_id: str) -> RunResult:
+        """Mark one result active without changing any earlier request or prompt."""
+        root, session, _ = self._prompt_session(run_id)
+        find_result(session, image_id)
+        session["active_image_id"] = image_id
+        self._save(root, session)
+        return self._result(run_id)
+
+
+def _prompt_job(*, case_id: str, profile: str, request: str):
+    """Build the minimal request record a prompt session needs at creation time."""
+    from ..app.state import NaturalLanguageDesignJob
+
+    return NaturalLanguageDesignJob(case_id=case_id, profile=profile, request=request)

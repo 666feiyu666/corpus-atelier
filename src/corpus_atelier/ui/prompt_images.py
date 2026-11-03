@@ -103,7 +103,7 @@ def _render_image_actions(summary: RunSummary, session: dict, *, busy: bool) -> 
     revision = current_revision(session)
     prepared = st.session_state.get(f"prepared_{summary.run_id}")
     labels = _image_labels(session)
-    with st.container(border=True, key=f"image_actions_{summary.run_id}"):
+    with st.container(key=f"image_actions_{summary.run_id}"):
         st.subheader(_t("prompt_image_actions"))
         st.caption(_t("prompt_image_actions_hint"))
         options = list(labels)
@@ -188,12 +188,12 @@ def _render_image_actions(summary: RunSummary, session: dict, *, busy: bool) -> 
 
 def _render_results(summary: RunSummary, session: dict, *, busy: bool) -> None:
     results = session["image_results"]
-    with st.container(border=True, key=f"prompt_results_{summary.run_id}"):
+    with st.container(key=f"prompt_results_{summary.run_id}"):
         st.subheader(_t("result_history", count=len(results)))
         if not results:
             st.caption(_t("no_results_yet"))
             return
-        columns = st.columns(min(3, len(results)))
+        columns = st.columns(min(2, len(results)))
         for index, image in enumerate(results):
             path = _image_path(summary, session, image["id"])
             with columns[index % len(columns)]:

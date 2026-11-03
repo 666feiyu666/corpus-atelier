@@ -26,6 +26,8 @@ def _render_prompt_conversation(summary: RunSummary, session: dict, *, busy: boo
         st.caption(_t("prompt_assistant_hint"))
         labels = _image_labels(session)
         with st.container(height=420, key=f"prompt_messages_{summary.run_id}", autoscroll=False):
+            if not session["messages"]:
+                st.caption(_t("prompt_chat_empty"))
             for message in session["messages"]:
                 with st.chat_message(message["role"]):
                     if message["text"]:

@@ -69,7 +69,7 @@ def _display_title(value: str, *, limit: int) -> str:
 
 
 def _task_row_title(task: RunSummary) -> str:
-    limit = 11 if _language() == "zh-CN" else 22
+    limit = 13 if _language() == "zh-CN" else 26
     return _display_title(task.manifest.get("title", task.run_id), limit=limit)
 
 

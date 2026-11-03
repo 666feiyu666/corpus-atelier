@@ -10,6 +10,7 @@ import streamlit as st
 
 from corpus_atelier.app.state import RunSummary
 from corpus_atelier.ui.prompt_chat import _render_prompt_conversation
+from corpus_atelier.ui.prompt_common import _prompt_error
 from corpus_atelier.ui.prompt_editor import (
     _render_prompt_editor,
     _render_revision_history,
@@ -73,19 +74,21 @@ def _render_prompt_session(summary: RunSummary, *, embedded: bool = False) -> No
     busy = running or pending is not None or summary.status in BUSY_STATUSES
     with st.container(horizontal=True, vertical_alignment="center"):
         if not embedded:
-            st.header(_display_title(summary.manifest.get("title", summary.run_id), limit=52))
+            st.header(_display_title(summary.manifest.get("title", summary.run_id), limit=48))
         _status_badge(summary.status)
     st.caption(_t("prompt_session_hint"))
     if summary.status == "outcome_unknown":
         st.warning(_t("outcome_unknown_notice"), icon=":material/help:")
-    prompt_column, chat_column = st.columns([1.5, 1], gap="large", vertical_alignment="top")
+    prompt_column, chat_column = st.columns([1.55, 1], gap="large", vertical_alignment="top")
     with prompt_column:
-        _render_prompt_editor(summary, session, busy=busy)
-        _render_session_images(summary, session)
-        _render_revision_history(summary, session, busy=busy)
-        _render_image_actions(summary, session, busy=busy)
-        _render_results(summary, session, busy=busy)
-        _render_archive_control(summary, session)
+        with st.container(border=True, key=f"prompt_section_{summary.run_id}"):
+            _render_prompt_editor(summary, session, busy=busy)
+            _render_session_images(summary, session)
+            _render_revision_history(summary, session, busy=busy)
+        with st.container(border=True, key=f"image_section_{summary.run_id}"):
+            _render_image_actions(summary, session, busy=busy)
+            _render_results(summary, session, busy=busy)
+            _render_archive_control(summary, session)
     with chat_column:
         _render_prompt_conversation(summary, session, busy=busy)
 

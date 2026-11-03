@@ -31,6 +31,17 @@ def _render_task_buttons(tasks: list[RunSummary]) -> None:
         st.caption(_t("tasks_empty_hint"))
         return
 
+    selected_id = st.session_state.get("selected_task_id")
+    if selected_id:
+        st.html(f"""
+            <style>
+            .st-key-task_{selected_id} button {{
+                border-left: 2px solid var(--atelier-indigo);
+                background: var(--atelier-paper-sunk);
+            }}
+            </style>
+        """)
+
     active_ids = sorted(_task_supervisor().running_ids())
     if active_ids:
         selectors = ",\n".join(
@@ -49,7 +60,7 @@ def _render_task_buttons(tasks: list[RunSummary]) -> None:
             </style>
         """)
 
-    with st.container(height=520, gap="small"):
+    with st.container(height=520, gap="small", key="task_list"):
         current_day: str | None = None
         for task in tasks:
             title = task.manifest.get("title", task.run_id)
@@ -134,10 +145,8 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
             }
             </style>
         """)
-        st.title(_t("product_name"))
         if st.button(
             _t("new_task"),
-            type="primary",
             icon=":material/add:",
             width="stretch",
             key="new_task",

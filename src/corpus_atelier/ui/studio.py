@@ -1,4 +1,4 @@
-"""Streamlit entry point: state bootstrap, product tabs, and the studio page."""
+"""Streamlit entry point: state bootstrap, product navigation, and both views."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from corpus_atelier.ui.i18n import translate
 from corpus_atelier.config.settings import load_preferences
 
 from corpus_atelier.config.paths import resolve_paths
+from corpus_atelier.ui.nav import _render_nav
 from corpus_atelier.ui.session import (
     _delete_task,
     _display_title,
@@ -35,32 +36,16 @@ LOGGER = logging.getLogger(__name__)
 LIVE_IMAGE_STATUSES = frozenset({"generating_image", "extracting"})
 
 
-def _render_product_tabs() -> str:
-    """Top-level product navigation: chat studio and corpus gallery."""
-    view = st.segmented_control(
-        _t("view_switch"),
-        ["studio", "gallery"],
-        format_func=lambda value: _t(f"view_{value}"),
-        key="product_view_tabs",
-        persist_state="session",
-        required=True,
-        label_visibility="collapsed",
-        width="stretch",
-    ) or "studio"
-    st.session_state.product_view = view
-    return view
-
-
 def _render_studio() -> None:
     """The start screen: one prompt entry and one image-to-prompt entry."""
-    st.title(_t("product_name"))
+    st.title(_t("studio_title"))
     st.caption(_t("product_tagline"))
     _render_prompt_start()
 
 
 def _render_retired_task(summary) -> None:
     """A task saved by the retired staged workflow stays readable, never resumable."""
-    st.header(_display_title(summary.manifest.get("title", summary.run_id), limit=52))
+    st.header(_display_title(summary.manifest.get("title", summary.run_id), limit=48))
     st.badge(_status_label(summary.status), icon=":material/history:", color="gray")
     st.info(_t("retired_task_notice"), icon=":material/history_toggle_off:")
     st.caption(_t("retired_task_delete_hint"))
@@ -72,13 +57,23 @@ def _render_retired_task(summary) -> None:
         _delete_task(summary)
 
 
+def _render_selected_task(summary) -> None:
+    if not summary.manifest.get("is_prompt_session"):
+        _render_retired_task(summary)
+    elif _task_is_live(summary) or summary.status in LIVE_IMAGE_STATUSES:
+        _render_live_prompt_session(summary.run_id)
+    else:
+        _render_prompt_session(summary)
+
+
 def main() -> None:
     preferred_language = load_preferences(resolve_paths().preferences_path)["language"]
     st.set_page_config(
         page_title=translate(preferred_language, "product_name"),
         page_icon=":material/palette:",
         layout="wide",
-        initial_sidebar_state="expanded",
+        # "auto" keeps the task list expanded on desktop and collapsed on phones.
+        initial_sidebar_state="auto",
     )
     _initialize_state()
     _sync_product_view_tabs()
@@ -94,21 +89,14 @@ def main() -> None:
         selected = None
 
     _render_sidebar(tasks)
-    if selected is None:
-        view = _render_product_tabs()
-        if view == "gallery":
-            _render_gallery()
-        else:
-            _render_studio()
+    view = _render_nav()
+    if view == "gallery":
+        _render_gallery()
         return
-
-    summary = next(task for task in tasks if task.run_id == selected)
-    if not summary.manifest.get("is_prompt_session"):
-        _render_retired_task(summary)
-    elif _task_is_live(summary) or summary.status in LIVE_IMAGE_STATUSES:
-        _render_live_prompt_session(summary.run_id)
-    else:
-        _render_prompt_session(summary)
+    if selected is None:
+        _render_studio()
+        return
+    _render_selected_task(next(task for task in tasks if task.run_id == selected))
 
 
 main()

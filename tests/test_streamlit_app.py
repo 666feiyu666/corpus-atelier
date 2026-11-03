@@ -11,7 +11,7 @@ from streamlit.testing.v1 import AppTest
 
 from corpus_atelier import __version__
 from corpus_atelier.app.service import CorpusAtelierApplication
-from tests.fakes import FakeImageProvider
+from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +36,10 @@ class StreamlitAppTests(unittest.TestCase):
                 app = AppTest.from_file(str(APP), default_timeout=10).run()
 
         self.assertFalse(app.exception)
-        self.assertTrue(any(title.value == "语聊画廊" for title in app.title))
+        # The wordmark lives in the nav bar; the page itself carries the view title.
+        self.assertTrue(any("atelier-wordmark" in item.value for item in app.markdown))
+        self.assertTrue(any("语聊画廊" in item.value for item in app.markdown))
+        self.assertTrue(any(title.value == "设计一版" for title in app.title))
         self.assertEqual(app.selectbox(key="new_task_model").value, "gpt-5.6-luna")
         self.assertEqual(app.selectbox(key="new_task_image_model").value, "gpt-image-2")
         self.assertEqual(app.segmented_control(key="new_task_reasoning").value, "medium")
@@ -64,8 +67,9 @@ class StreamlitAppTests(unittest.TestCase):
                 app.selectbox(key="settings_language").select("en").run()
 
             self.assertFalse(app.exception)
-            self.assertTrue(any(title.value == "Corpus Atelier" for title in app.title))
-            self.assertFalse(any(title.value == "语聊画廊" for title in app.title))
+            self.assertTrue(any("Corpus Atelier" in item.value for item in app.markdown))
+            self.assertFalse(any("语聊画廊" in item.value for item in app.markdown))
+            self.assertTrue(any(title.value == "New design" for title in app.title))
             self.assertEqual(app.button(key="new_task").label, "New task")
             self.assertEqual(app.button(key="open_settings").label, "Settings")
             self.assertEqual(
@@ -166,6 +170,50 @@ class StreamlitAppTests(unittest.TestCase):
                 page.button(key=f"delete_{created.run_id}").click().run()
                 self.assertFalse(page.exception)
             self.assertFalse(created.run_dir.exists())
+
+    def test_the_product_tabs_stay_visible_inside_a_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            text_provider = FakeTextProvider()
+            text_provider.model = "gpt-5.6-luna"
+            image_provider = FakeImageProvider()
+            image_provider.model = "gpt-image-2"
+            image_provider.quality = "medium"
+            app = CorpusAtelierApplication(
+                runs_root=directory,
+                text_provider=text_provider,
+                image_provider=image_provider,
+            )
+            try:
+                created = app.start_from_prompt(
+                    "A quiet poster of a paper lantern.",
+                    case_id="natural-language",
+                    settings={"image_quality": "medium", "aspect_ratio": [1, 1]},
+                )
+            finally:
+                app.close()
+            with patch.dict(os.environ, _environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10)
+                page.session_state["selected_task_id"] = created.run_id
+                page.run()
+                self.assertFalse(page.exception)
+                # The tabs never disappear, and the open task stays selected.
+                self.assertEqual(
+                    page.segmented_control(key="product_view_tabs").value, "studio",
+                )
+                page.segmented_control(key="product_view_tabs").set_value("gallery").run()
+                self.assertFalse(page.exception)
+                self.assertIn(
+                    "gallery_collection", [box.key for box in page.selectbox],
+                )
+                self.assertEqual(
+                    page.session_state["selected_task_id"], created.run_id,
+                )
+                page.segmented_control(key="product_view_tabs").set_value("studio").run()
+                self.assertFalse(page.exception)
+                self.assertTrue(any(
+                    area.key and area.key.startswith(f"prompt_text_{created.run_id}_")
+                    for area in page.text_area
+                ))
 
     def test_a_task_from_the_retired_workflow_is_read_only(self):
         run_id = "20260926T150000Z_abcdef12"

@@ -152,23 +152,23 @@ def _render_prompt_start() -> None:
             accept_multiple_files=True, key="new_session_references",
         )
         st.caption(_t("prompt_send_exact_hint"))
-        if st.button(
-            _t("generate_image_action"), type="primary", icon=":material/image:",
-            key="start_prompt_action", width="stretch",
-        ):
-            references = [(item.name, item.getvalue()) for item in uploads or []]
-            _create_prompt_session(
-                prompt or "", model=model, reasoning=reasoning, image_model=image_model,
-                quality=quality, ratio=ratio, references=references, generate_now=True,
+        actions = st.columns([1, 1], vertical_alignment="center")
+        with actions[0]:
+            generate_now = st.button(
+                _t("generate_image_action"), type="primary", icon=":material/image:",
+                key="start_prompt_action", width="stretch",
             )
-        if st.button(
-            _t("save_prompt_without_image"), key="start_prompt_only",
-            help=_t("save_prompt_without_image_hint"), width="stretch",
-        ):
+        with actions[1]:
+            save_only = st.button(
+                _t("save_prompt_without_image"), key="start_prompt_only",
+                help=_t("save_prompt_without_image_hint"), width="stretch",
+            )
+        if generate_now or save_only:
             references = [(item.name, item.getvalue()) for item in uploads or []]
             _create_prompt_session(
                 prompt or "", model=model, reasoning=reasoning, image_model=image_model,
-                quality=quality, ratio=ratio, references=references, generate_now=False,
+                quality=quality, ratio=ratio, references=references,
+                generate_now=generate_now,
             )
     else:
         st.caption(_t("extract_prompt_hint"))

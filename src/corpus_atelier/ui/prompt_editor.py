@@ -39,7 +39,7 @@ def _render_prompt_editor(summary: RunSummary, session: dict, *, busy: bool) -> 
             draft = {"base": revision["id"] if revision else None, "version": draft["version"] + 1}
             st.session_state[key] = draft
             stale = False
-    with st.container(border=True, key=f"prompt_workspace_{summary.run_id}"):
+    with st.container(key=f"prompt_workspace_{summary.run_id}"):
         st.subheader(_t("current_prompt"))
         if stale:
             st.warning(_t("prompt_stale_draft"), icon=":material/sync_problem:")

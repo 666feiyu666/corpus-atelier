@@ -1,4 +1,4 @@
-"""The corpus gallery: search and browse archived prompts and reference images."""
+"""The corpus gallery: browse archived prompts and reference images as a grid."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from corpus_atelier.ui.session import _corpus_store, _t
 
 
 PAGE_SIZE = 12
+GRID_COLUMNS = 3
 MAX_RESULTS = 500
 
 
@@ -30,33 +31,36 @@ def _collection_label(tag_id: str | None) -> str:
     return _tag_label(tag_id)
 
 
-def _render_corpus_record(record: dict[str, Any]) -> None:
-    image = record.get("image")
-    left, right = st.columns([1, 2], vertical_alignment="top")
-    with left:
-        path = resolve_paths().corpus_media_root / image["path"] if image else None
-        if path is not None and path.is_file():
-            st.image(str(path), width="stretch", output_format="PNG")
-        else:
-            st.caption(_t("corpus_no_media"))
-    with right:
-        source = record.get("source") or {}
-        note = (source.get("note") or "").strip()
-        if note:
-            st.markdown(f"**{note}**")
-        prompt = record["prompt"]
-        st.caption(prompt if len(prompt) <= 240 else prompt[:240].rstrip() + "…")
-        negative = record.get("negative_prompt")
-        if negative:
-            st.caption(f"**{_t('corpus_negative')}:** {negative}")
-        with st.expander(_t("gallery_prompt_show")):
-            st.code(prompt, language=None, wrap_lines=True)
-        tags = record.get("tags") or []
-        if tags:
-            st.caption(" · ".join(_tag_label(tag_id) for tag_id in tags))
-        label = f"{_t('corpus_source')}: {source.get('kind', '')}"
-        url = source.get("url")
-        st.caption(f"{label} · {url}" if url else label)
+def _prompt_excerpt(prompt: str, *, limit: int = 160) -> str:
+    text = " ".join(str(prompt).split())
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _render_record_card(column, record: dict[str, Any]) -> None:
+    with column:
+        with st.container(border=True, key=f"gallery_card_{record['id']}"):
+            image = record.get("image")
+            path = resolve_paths().corpus_media_root / image["path"] if image else None
+            if path is not None and path.is_file():
+                st.image(str(path), width="stretch", output_format="PNG")
+            else:
+                st.caption(_t("corpus_no_media"))
+            source = record.get("source") or {}
+            note = (source.get("note") or "").strip()
+            st.markdown(f"**{note or record['id']}**")
+            st.caption(_prompt_excerpt(record["prompt"]))
+            tags = record.get("tags") or []
+            if tags:
+                st.caption("  ".join(_tag_label(tag_id) for tag_id in tags))
+            with st.expander(_t("gallery_prompt_show")):
+                st.code(record["prompt"], language=None, wrap_lines=True)
+                negative = record.get("negative_prompt")
+                if negative:
+                    st.caption(_t("corpus_negative"))
+                    st.code(negative, language=None, wrap_lines=True)
+                label = f"{_t('corpus_source')}: {source.get('kind', '')}"
+                url = source.get("url")
+                st.caption(f"{label}  {url}" if url else label)
 
 
 def _render_page_controls(page: int, pages: int) -> None:
@@ -75,16 +79,28 @@ def _render_page_controls(page: int, pages: int) -> None:
             st.rerun()
 
 
+def _render_filters() -> tuple[str | None, str]:
+    collection_column, search_column = st.columns([1, 2], vertical_alignment="bottom")
+    with collection_column:
+        collection = st.selectbox(
+            _t("gallery_collection_label"),
+            [None, *[tag.id for tag in tags_of("collection")]],
+            format_func=_collection_label,
+            key="gallery_collection",
+        )
+    with search_column:
+        query = st.text_input(
+            _t("search_label"),
+            key="corpus_query",
+            placeholder=_t("corpus_search_placeholder"),
+        )
+    return collection, query or ""
+
+
 def _render_gallery() -> None:
     st.title(_t("gallery_title"))
     st.caption(_t("gallery_tagline"))
-    collection = st.selectbox(
-        _t("gallery_collection_label"),
-        [None, *[tag.id for tag in tags_of("collection")]],
-        format_func=_collection_label,
-        key="gallery_collection",
-    )
-    query = st.text_input(_t("corpus_search_placeholder"), key="corpus_query")
+    collection, query = _render_filters()
     signature = (collection or "", query.strip())
     if st.session_state.get("gallery_signature") != signature:
         st.session_state.gallery_signature = signature
@@ -101,7 +117,7 @@ def _render_gallery() -> None:
     finally:
         store.close()
     if not results:
-        st.caption(_t("corpus_empty"))
+        st.info(_t("corpus_empty"), icon=":material/search_off:")
         return
 
     st.caption(_t("gallery_result_count", count=len(results)))
@@ -109,7 +125,13 @@ def _render_gallery() -> None:
     page = min(int(st.session_state.get("gallery_page") or 0), pages - 1)
     st.session_state.gallery_page = page
     start = page * PAGE_SIZE
-    for record in results[start:start + PAGE_SIZE]:
-        _render_corpus_record(record)
+    batch = results[start:start + PAGE_SIZE]
+    with st.container(key="gallery_grid"):
+        for offset in range(0, len(batch), GRID_COLUMNS):
+            columns = st.columns(GRID_COLUMNS, gap="medium")
+            for column, record in zip(
+                columns, batch[offset:offset + GRID_COLUMNS], strict=False,
+            ):
+                _render_record_card(column, record)
     if pages > 1:
         _render_page_controls(page, pages)

@@ -366,7 +366,11 @@ class CorpusAtelierApplication(ConversationMixin):
         return value if isinstance(value, dict) else None
 
     def _fast_path_blocker(self, value: dict, draft: dict | None) -> str | None:
-        """Return the first condition that keeps a conversation on the review flow."""
+        """Return the first condition that keeps a conversation on the review flow.
+
+        The route itself is not a blocker: a staged brief also starts its round straight
+        away, and only the generation-preview approval pauses a staged round.
+        """
         if value.get("pending"):
             return "conversation_busy"
         for record in value["rounds"]:
@@ -374,10 +378,6 @@ class CorpusAtelierApplication(ConversationMixin):
                 return "conversation_busy"
         if draft is None:
             return "no_draft"
-        if draft.get("execution_route") != "direct":
-            # Only a request that already fixes subject, visual language, copy and
-            # canvas may render unattended; anything else still needs exploration.
-            return "needs_directions"
         if value["open_questions"]:
             return "open_questions"
         if not draft.get("content_language"):
@@ -396,11 +396,11 @@ class CorpusAtelierApplication(ConversationMixin):
 
     @serialized_conversation
     def start_fast_round(self, run_id: str, *, redraft: bool = False) -> RunResult:
-        """Confirm the drafted brief and render one image without a review stop.
+        """Confirm the drafted brief and start a round without a brief review.
 
-        This is the fast path the gpt-image skill describes: when the request already
-        fixes everything a brief review would settle, the draft becomes the confirmed
-        brief and one direct round starts with auto approval. Any gap raises
+        This is the default studio flow: the draft becomes the confirmed brief and the
+        round starts immediately. A direct brief also renders without an approval stop; a
+        staged one still pauses for its generation preview. Any real gap raises
         FastPathUnavailable so the caller keeps the ordinary review flow.
         """
         root = self.store.find_run(run_id)
@@ -421,7 +421,8 @@ class CorpusAtelierApplication(ConversationMixin):
     def run_request(self, run_id: str) -> RunResult:
         run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
-        if manifest["status"] != "created":            raise ValueError("This natural-language task has already started.")
+        if manifest["status"] != "created":
+            raise ValueError("This natural-language task has already started.")
         try:
             state = self._load_request_state(run_dir, manifest)
         except Exception as exc:

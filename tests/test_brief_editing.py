@@ -49,7 +49,13 @@ class BriefEditingTests(unittest.TestCase):
                     self.assertEqual(read_json(child.run_dir / "brief.json"), brief)
                     prompt = Path(app.open_task(child.run_id).artifacts["generation_prompt"]).read_text(encoding="utf-8")
                     self.assertIn("1949–2026", prompt)
-                    self.assertIn("花篮必须有拱形提手。", prompt)
+                    # The confirmed requirement reaches the prompt writer, which turns it
+                    # into visible instructions; it is not pasted into the renderer prompt.
+                    self.assertNotIn("花篮必须有拱形提手。", prompt)
+                    writer_prompt = (
+                        child.run_dir / "candidates/c01/image-prompt/prompt.md"
+                    ).read_text(encoding="utf-8")
+                    self.assertIn("花篮必须有拱形提手。", writer_prompt)
 
     def test_unrelated_discussion_cannot_restore_manually_deleted_or_changed_fields(self):
         with TemporaryDirectory() as directory:

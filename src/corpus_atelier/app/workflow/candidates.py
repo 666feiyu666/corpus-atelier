@@ -129,7 +129,6 @@ class CandidatesMixin:
             generation_prompt = compile_generation_prompt(
                 image_prompt,
                 exact_copy=state["brief"].get("exact_copy", []),
-                user_requirements=state["brief"].get("user_requirements", []),
             )
             self.store.text(root, "generation/prompt.md", generation_prompt)
             prepared = {

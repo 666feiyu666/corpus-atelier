@@ -44,9 +44,10 @@ brief sentence into `prompt` when a shorter visual statement carries the same re
 
 Length is a constraint on the prompt, not a style. Keep `canvas_statement` to one sentence of at
 most 240 characters. Write `prompt` between 550 and 900 characters — about 90 to 150 English
-words — and never above 1000. The assembled prompt the image model receives must stay under 1400
-characters once the exact-copy instruction, the confirmed requirements, the preserve list, and the
-exclusions are appended.
+words — and never above 1000. The assembled prompt the image model receives must stay under 1800
+characters once the exact-copy instruction, the preserve list, and the exclusions are appended.
+Confirmed requirements are not pasted into that prompt; express them as visible instructions in
+`prompt` instead.
 
 Spend that budget on scene content: identity, count, ownership, spatial relations, medium and
 light, copy placement, and focal hierarchy. When a draft runs long, cut in this order — stacked

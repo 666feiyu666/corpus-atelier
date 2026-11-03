@@ -28,8 +28,9 @@ PROMPT_BUDGET_MAX = 900
 PROMPT_HARD_MAX = 1000
 CANVAS_STATEMENT_BUDGET_MAX = 240
 # Ceiling for the assembled prompt the image model receives, after the canvas
-# statement, the exact-copy instruction, confirmed requirements, and exclusions.
-MAX_GENERATION_PROMPT_CHARS = 1400
+# statement, the exact-copy instruction, and the exclusions. Confirmed requirements
+# stay in the brief; the writer turns them into visible instructions instead.
+MAX_GENERATION_PROMPT_CHARS = 1800
 
 
 def _length_budget_section() -> str:
@@ -40,7 +41,8 @@ def _length_budget_section() -> str:
         f"characters (roughly 90 to 150 English words) and never exceed {PROMPT_HARD_MAX} "
         f"characters. The assembled image prompt must stay under "
         f"{MAX_GENERATION_PROMPT_CHARS} characters once the canvas statement, the "
-        "exact-copy instruction, the confirmed requirements, and the exclusions are added.\n\n"
+        "exact-copy instruction, and the exclusions are added. Confirmed requirements are not "
+        "pasted into that prompt: express them as visible instructions here.\n\n"
         "Density is carried by concrete scene content, not by length. When a draft runs long, "
         "cut in this order: stacked adjectives, repeated composition or placement wording, then "
         "generic quality words. Keep entity identity, count, ownership, relationships, the "
@@ -156,14 +158,16 @@ def compile_image_prompt_prompt(
 def compile_generation_prompt(
     image_prompt: dict, *,
     exact_copy: list[str] | None = None,
-    user_requirements: list[str] | None = None,
 ) -> str:
     """Assemble the one prompt the image model receives.
 
-    Canvas first, then the resolved scene, then the literal wording, then the confirmed
-    requirements, then the edit invariants and targeted exclusions. Settings such as model, size,
-    and quality stay outside the prompt. The result is capped at
-    ``MAX_GENERATION_PROMPT_CHARS`` so optional sections cannot silently double the prompt.
+    Canvas first, then the resolved scene, then the literal wording, then the edit
+    invariants and targeted exclusions. Settings such as model, size, and quality stay
+    outside the prompt.
+
+    Confirmed user requirements are deliberately not pasted in: they are the human-facing
+    contract, and the prompt writer has already turned them into visible instructions. The
+    result is capped at ``MAX_GENERATION_PROMPT_CHARS``.
     """
     parts: list[str] = []
     for field in ("canvas_statement", "prompt"):
@@ -180,13 +184,6 @@ def compile_generation_prompt(
         parts.append(
             "Render no text, lettering, symbols made from letters, or pseudo-text anywhere in the "
             "image."
-        )
-    requirements = [
-        str(item).strip() for item in user_requirements or [] if str(item).strip()
-    ]
-    if requirements:
-        parts.append(
-            "The finished image must also satisfy: " + " ".join(requirements)
         )
     preserve = [str(item).strip() for item in image_prompt.get("preserve") or [] if str(item).strip()]
     if preserve:

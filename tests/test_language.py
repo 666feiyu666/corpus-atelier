@@ -104,7 +104,7 @@ class LanguageTests(unittest.TestCase):
                     self.assertEqual(read_json(Path(result.artifacts["brief"])), saved["design_brief"])
                     candidates = read_json(Path(result.artifacts["candidate_index"]))
                     self.assertEqual(candidates[0]["image_prompt"]["exact_copy"], COPY)
-                    self.assertIn(REQUIREMENT, candidates[0]["generation_prompt"])
+                    self.assertNotIn(REQUIREMENT, candidates[0]["generation_prompt"])
                     if language == "zh-CN":
                         self.assertEqual(candidates[0]["direction_seed"]["label"], "花篮国庆祝福")
                         self.assertEqual(candidates[0]["proposal"]["design_description"], "写实藤编花篮，花材错落有致，右下角留白。")

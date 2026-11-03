@@ -97,7 +97,7 @@ def _render_new_task_settings() -> tuple[str, str, str, str, bool]:
     )
     fast_path = st.toggle(
         _t("fast_path_toggle"),
-        value=False,
+        value=True,
         key="new_task_fast_path",
         help=_t("fast_path_help"),
     )

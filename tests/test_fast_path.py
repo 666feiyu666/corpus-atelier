@@ -78,17 +78,24 @@ class FastPathTests(unittest.TestCase):
             self.assertEqual(manifest["approval_policy"], "auto")
             self.assertEqual(manifest["conversation_parent_id"], parent.run_id)
 
-    def test_staged_request_keeps_the_review_flow(self):
+    def test_staged_request_starts_a_round_and_pauses_at_its_preview(self):
         with TemporaryDirectory() as directory:
             with self.app(directory, text=DirectRouteTextProvider(route="staged")) as app:
                 parent = app.create_conversation(self.job())
                 app.continue_task(parent.run_id)
-                with self.assertRaises(FastPathUnavailable) as caught:
-                    app.start_fast_round(parent.run_id)
-                self.assertEqual(caught.exception.reason, "needs_directions")
+                app.draft_brief(parent.run_id)
                 self.assertEqual(app.fast_path_status(parent.run_id),
-                                 {"eligible": False, "reason": "needs_directions"})
-                self.assertIsNone(app.conversation(parent.run_id)["design_brief"])
+                                 {"eligible": True, "reason": None})
+                round_ = app.start_fast_round(parent.run_id)
+                # The brief is confirmed without review, but a staged round still asks
+                # for its generation preview before rendering.
+                app.continue_task(round_.run_id)
+                self.assertEqual(app.open_task(round_.run_id).status, "awaiting_approval")
+                conversation = app.conversation(parent.run_id)
+                self.assertEqual(conversation["brief_history"][-1]["origin"], "fast-path")
+                self.assertEqual(
+                    conversation["design_brief"]["execution_route"], "staged",
+                )
 
     def test_open_questions_block_the_fast_path(self):
         brief = {

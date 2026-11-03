@@ -240,7 +240,7 @@ class ImagePromptCompilerTests(unittest.TestCase):
 class GenerationPromptTests(unittest.TestCase):
     def test_prompt_is_canvas_then_scene_then_copy(self):
         prompt = compile_generation_prompt(
-            IMAGE_PROMPT, exact_copy=["CORPUS ATELIER"], user_requirements=[],
+            IMAGE_PROMPT, exact_copy=["CORPUS ATELIER"],
         )
         canvas_position = prompt.index(IMAGE_PROMPT["canvas_statement"])
         scene_position = prompt.index(IMAGE_PROMPT["prompt"])
@@ -256,15 +256,21 @@ class GenerationPromptTests(unittest.TestCase):
         self.assertNotIn("Approved image specification", prompt)
         self.assertNotIn("communication_objective", prompt)
 
-    def test_prompt_quotes_copy_and_confirmed_requirements(self):
+    def test_prompt_quotes_copy_and_leaves_requirements_in_the_brief(self):
         prompt = compile_generation_prompt(
             IMAGE_PROMPT,
             exact_copy=["CORPUS ATELIER", "VOL. 2"],
-            user_requirements=["Keep the lower-right area clear."],
         )
         self.assertIn('"CORPUS ATELIER" / "VOL. 2"', prompt)
-        self.assertIn("Keep the lower-right area clear.", prompt)
-        self.assertNotIn("must also satisfy", compile_generation_prompt(IMAGE_PROMPT))
+        # Confirmed requirements are the human-facing contract; the writer already
+        # turned them into visible instructions, so they are not pasted in again.
+        self.assertNotIn("must also satisfy", prompt)
+
+    def test_confirmed_requirements_stay_out_of_the_renderer_prompt(self):
+        # A verbose brief is expected: requirements reach the prompt writer, which turns
+        # them into visible instructions, so this function takes no requirements input.
+        with self.assertRaises(TypeError):
+            compile_generation_prompt(IMAGE_PROMPT, user_requirements=["Keep it clear."])
 
     def test_prompt_without_copy_forbids_lettering(self):
         prompt = compile_generation_prompt({**IMAGE_PROMPT, "exact_copy": []})
@@ -333,16 +339,18 @@ class PromptBudgetTests(unittest.TestCase):
         prompt = compile_generation_prompt(
             {**IMAGE_PROMPT, "prompt": self._scene_prompt(PROMPT_BUDGET_MAX)},
             exact_copy=["CORPUS ATELIER"],
-            user_requirements=["Keep the lower-right area clear."],
         )
         self.assertLessEqual(len(prompt), MAX_GENERATION_PROMPT_CHARS)
 
     def test_assembled_prompt_rejects_excess_sections(self):
         with self.assertRaisesRegex(ValueError, "keep it under"):
             compile_generation_prompt(
-                {**IMAGE_PROMPT, "prompt": self._scene_prompt(PROMPT_HARD_MAX)},
+                {
+                    **IMAGE_PROMPT,
+                    "prompt": self._scene_prompt(PROMPT_HARD_MAX),
+                    "avoid": ["A long exclusion clause " * 30],
+                },
                 exact_copy=["A long approved line " * 6],
-                user_requirements=["Keep the lower-right area clear. " * 8],
             )
 
 

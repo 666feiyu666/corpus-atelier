@@ -161,7 +161,7 @@ class StreamlitAppTests(unittest.TestCase):
                 OpenAIImageProvider, "generate", self._fake_generate,
             ):
                 app = AppTest.from_file(str(APP), default_timeout=15).run()
-                app.toggle(key="new_task_fast_path").set_value(True).run()
+                # Direct rendering is the default, so the toggle is not touched here.
                 app.chat_input(key="new_task_prompt").set_value(
                     "设计一张读书会海报，标题「读书会」，竖版 3:4。"
                 ).run()
@@ -413,6 +413,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertNotIn("new_task_candidates", control_keys)
         self.assertNotIn("new_task_mode", control_keys)
         self.assertIn("new_task_fast_path", control_keys)
+        self.assertTrue(app.toggle(key="new_task_fast_path").value)
         self.assertEqual(
             app.chat_input(key="new_task_prompt").placeholder,
             "描述你的设计需求……",

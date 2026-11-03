@@ -38,11 +38,10 @@ class TaxonomyTests(unittest.TestCase):
             "psychedelic", "postmodern-memphis",
         })
 
-    def test_objectives_cover_both_modes(self):
-        self.assertEqual(
-            {tag.id for tag in tags_of("objective")},
-            {"art-led", "rhetoric-led"},
-        )
+    def test_objective_facet_is_retired(self):
+        self.assertNotIn("objective", FACETS)
+        self.assertNotIn("rhetoric-led", TAGS)
+        self.assertNotIn("art-led", TAGS)
 
     def test_tag_ids_filter_by_facet(self):
         self.assertEqual(len(tag_ids()), len(TAGS))

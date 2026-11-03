@@ -1,14 +1,14 @@
-"""Art-led WeChat article-cover profile."""
+"""WeChat article-cover profile."""
 
 from .models import DesignProfile
-from .objectives import ART_LED
+from .objectives import GENERAL_DESIGN
 
 PROFILE = DesignProfile(
-    name="art-article-cover", objective="art-led.v1",
+    name="article-cover", objective="general-design.v1",
     brief_schema="article-cover-brief.schema.json",
     proposal_schema="article-cover-proposal.schema.json",
-    description="Art-direction-first WeChat article cover.",
-    objective_reference=ART_LED,
+    description="WeChat article-cover design.",
+    objective_reference=GENERAL_DESIGN,
     canvas_mode="fixed",
     default_size="1536x1024",
     output_ratio=(47, 20),

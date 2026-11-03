@@ -25,11 +25,12 @@ sets the requirements; the direction decides how to meet them.
 
 ## Make the design objective visible
 
-- For a rhetoric-led objective, let communication strategy govern sign relations, likely
-  readings, ambiguity control, hierarchy, and the visual means that make the intended rhetoric
-  work.
-- For an art-led objective, let the intended perceptual experience govern form, color, rhythm,
-  texture, imagery, atmosphere, and material treatment.
+The profile supplies one design objective and the style space that carries it. Read both before
+choosing a visual language, and let the stated objective decide how much weight the artifact gives
+to what it must communicate and to what it should make a viewer perceive.
+
+A general objective assumes neither side: the brief sets that balance, the direction states which
+way it was decided, and no doctrine is imported from a previous task.
 
 The supplied style space is a set of dimensions to decide in, not a menu to pick from. Work through
 it to reach materially different languages instead of defaulting to one familiar look. Style is

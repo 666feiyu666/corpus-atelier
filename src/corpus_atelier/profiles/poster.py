@@ -1,13 +1,13 @@
-"""Rhetoric-led poster profile."""
+"""Portrait poster profile."""
 
 from .models import DesignProfile
-from .objectives import RHETORIC_LED
+from .objectives import GENERAL_DESIGN
 
 PROFILE = DesignProfile(
-    name="rhetoric-poster", objective="rhetoric-led.v1",
+    name="poster", objective="general-design.v1",
     brief_schema="poster-brief.schema.json", proposal_schema="poster-proposal.schema.json",
-    description="Rhetoric-first portrait poster.",
-    objective_reference=RHETORIC_LED,
+    description="Portrait poster design.",
+    objective_reference=GENERAL_DESIGN,
     canvas_mode="fixed",
     default_size="1024x1536",
     output_ratio=(2, 3),

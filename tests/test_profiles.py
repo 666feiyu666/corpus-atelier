@@ -48,13 +48,17 @@ class ProfileTests(unittest.TestCase):
             check_node(_schema_for_openai(schema_name), schema_name)
 
     def test_expected_profiles_are_registered(self):
-        self.assertEqual(set(PROFILES), {
-            "rhetoric-poster", "art-article-cover", "rhetoric-graphic", "art-graphic",
-        })
-        self.assertNotEqual(
-            get_profile("rhetoric-poster").objective,
-            get_profile("art-article-cover").objective,
-        )
+        self.assertEqual(set(PROFILES), {"general-graphic", "poster", "article-cover"})
+        for name, profile in PROFILES.items():
+            self.assertEqual(profile.objective, "general-design.v1", name)
+
+    def test_retired_profile_names_still_resolve(self):
+        self.assertIs(get_profile("rhetoric-graphic"), get_profile("general-graphic"))
+        self.assertIs(get_profile("art-graphic"), get_profile("general-graphic"))
+        self.assertIs(get_profile("rhetoric-poster"), get_profile("poster"))
+        self.assertIs(get_profile("art-article-cover"), get_profile("article-cover"))
+        with self.assertRaisesRegex(ValueError, "Unknown profile"):
+            get_profile("no-such-profile")
 
     def test_brief_contract_is_optional_locally_and_required_in_provider_outputs(self):
         for schema_name in {profile.brief_schema for profile in PROFILES.values()}:
@@ -95,7 +99,7 @@ class ProfileTests(unittest.TestCase):
             "design_rationale": "A concise rationale.",
             "review_criteria": [],
             "source_requirements": [
-                "Provide references/objectives/rhetoric-led.md.",
+                "Provide references/objectives/general.md.",
             ],
             "clarification_questions": [],
         }

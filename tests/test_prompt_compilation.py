@@ -51,20 +51,21 @@ IMAGE_PROMPT = {
 
 
 class PromptTests(unittest.TestCase):
-    def test_direction_prompt_receives_complete_rhetoric_objective(self):
+    def test_direction_prompt_receives_the_general_objective_for_a_poster(self):
         prompt = compile_design_direction_prompt(
-            get_profile("rhetoric-poster"), {"task": "x"},
+            get_profile("poster"), {"task": "x"},
             canvas=CANVAS, candidate_limit=3,
         )
         self.assertIn("# Design objective", prompt)
-        self.assertIn("Communication purpose precedes sign selection", prompt)
+        self.assertIn("set the balance between the two", prompt)
         self.assertIn("between one and 3 direction(s)", prompt)
         self.assertIn("Choose the visual language along the six dimensions below", prompt)
         self.assertIn("# Style-space rules", prompt)
         self.assertIn("One primary language, at most two supporting techniques", prompt)
-        self.assertIn("# Visual-language dimensions for rhetoric-led.v1", prompt)
-        self.assertIn("Sign carrier and warrant", prompt)
-        self.assertNotIn("Medium and rendering logic", prompt)
+        self.assertIn("# Visual-language dimensions for general-design.v1", prompt)
+        self.assertIn("Composition and hierarchy", prompt)
+        self.assertNotIn("Sign carrier and warrant", prompt)
+        self.assertNotIn("Start with a coherent art direction", prompt)
         self.assertIn("# Deliverable categories", prompt)
         self.assertIn("# Design craft checklist", prompt)
         self.assertNotIn("# Legacy", prompt)
@@ -74,23 +75,20 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("Supplied deliverable", prompt)
         self.assertNotIn("profile policy bundle", prompt)
 
-    def test_direction_prompt_receives_complete_art_objective(self):
-        prompt = compile_design_direction_prompt(
-            get_profile("art-graphic"), {"purpose": "x"},
-            canvas=CANVAS, candidate_limit=2,
-        )
-        self.assertIn("Start with a coherent art direction", prompt)
-        self.assertIn("Choose the visual language along the six dimensions below", prompt)
-        self.assertIn("# Style-space rules", prompt)
-        self.assertIn("# Visual-language dimensions for art-led.v1", prompt)
-        self.assertIn("Medium and rendering logic", prompt)
-        self.assertNotIn("Sign carrier and warrant", prompt)
-        self.assertIn("# Deliverable categories", prompt)
-        self.assertNotIn("Use a rigorous modular grid", prompt)
-        self.assertNotIn("# Swiss Style", prompt)
-        self.assertNotIn("# Bauhaus and New Typography", prompt)
-        self.assertNotIn("Communication purpose precedes sign selection", prompt)
 
+    def test_direction_prompt_receives_the_general_objective(self):
+        prompt = compile_design_direction_prompt(
+            get_profile("general-graphic"), {"purpose": "x"},
+            canvas=CANVAS, candidate_limit=3,
+        )
+        self.assertIn("set the balance between the two", prompt)
+        self.assertIn("# Visual-language dimensions for general-design.v1", prompt)
+        self.assertIn("Composition and hierarchy", prompt)
+        self.assertIn("Type and copy placement", prompt)
+        self.assertIn("# Style-space rules", prompt)
+        self.assertNotIn("Sign carrier and warrant", prompt)
+        self.assertNotIn("Communication purpose precedes sign selection", prompt)
+        self.assertNotIn("Start with a coherent art direction", prompt)
 
     def test_direction_prompt_uses_the_brief_category_guide(self):
         prompt = compile_design_direction_prompt(

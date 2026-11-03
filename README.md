@@ -5,7 +5,7 @@ Corpus Atelier is a local, AI-assisted graphic-design studio built from two coop
 - **corpus** — a local-first archive of traceable prompt↔image records, with a closed visual taxonomy and SQLite full-text retrieval.
 - **atelier** — the generation pipeline that turns a natural-language request into visual directions, design proposals, and one renderer-ready image prompt for GPT Image 2 / 2.5, with reference-image editing, mask inpainting, and a post-generation checklist.
 
-Natural-language interaction runs through the whole flow: describe a goal, review and approve the prompt that will be sent, generate and select images, then optionally archive the results you like back into the corpus. A precise request can skip direction exploration and go straight to one reviewed prompt, and writing that prompt may draw on similar archived corpus entries as advisory references. It is suitable for posters, article covers, social-media graphics, invitations, labels, album covers, and other graphic-design tasks, guided by rhetorical strategies or art and design movements.
+Natural-language interaction runs through the whole flow: describe a goal, review and approve the prompt that will be sent, generate and select images, then optionally archive the results you like back into the corpus. A precise request can skip direction exploration and go straight to one reviewed prompt, and writing that prompt may draw on similar archived corpus entries as advisory references. It is suitable for posters, article covers, social-media graphics, invitations, labels, album covers, and other graphic-design tasks, under one general design objective: the brief decides how much weight the design gives to communication and to visual quality.
 
 ## Install
 

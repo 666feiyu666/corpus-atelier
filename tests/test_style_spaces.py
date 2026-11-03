@@ -11,21 +11,13 @@ from corpus_atelier.atelier.design_direction.validation import (
 from corpus_atelier.config.skill_loader import load_skill_reference
 
 
-ART_DIMENSIONS = (
+GENERAL_DIMENSIONS = (
     "## 1. Medium and rendering logic",
-    "## 2. Line, shape, and contour",
-    "## 3. Value and light",
-    "## 4. Color",
-    "## 5. Texture and detail distribution",
-    "## 6. Space and composition logic",
-)
-RHETORIC_DIMENSIONS = (
-    "## 1. Sign carrier and warrant",
-    "## 2. Evidence and credibility signals",
-    "## 3. Hierarchy and reading path",
-    "## 4. Semantic distance and ambiguity control",
-    "## 5. Material and surface as signal",
-    "## 6. Density, rhythm, and tone",
+    "## 2. Composition and hierarchy",
+    "## 3. Palette and contrast",
+    "## 4. Type and copy placement",
+    "## 5. Material, light, and surface",
+    "## 6. Density, rhythm, and address",
 )
 INDEX_SECTIONS = (
     "## Choose by dimension, not by family",
@@ -63,23 +55,20 @@ class StyleSpaceStructureTests(unittest.TestCase):
         for section in INDEX_SECTIONS:
             self.assertIn(section, body)
 
-    def test_art_space_is_organized_as_observable_dimensions(self):
-        body = load_style_space_body("art-led.v1")
-        for dimension in ART_DIMENSIONS:
+    def test_general_space_is_organized_as_observable_dimensions(self):
+        body = load_style_space_body("general-design.v1")
+        for dimension in GENERAL_DIMENSIONS:
             self.assertIn(dimension, body)
+        self.assertIn("## Reading the dimensions as a whole", body)
+        # The retired doctrines are gone rather than renamed.
         self.assertNotIn("Sign carrier and warrant", body)
-
-    def test_rhetoric_space_is_organized_as_observable_dimensions(self):
-        body = load_style_space_body("rhetoric-led.v1")
-        for dimension in RHETORIC_DIMENSIONS:
-            self.assertIn(dimension, body)
-        self.assertNotIn("Medium and rendering logic", body)
+        self.assertNotIn("Art-led", body)
+        self.assertNotIn("Rhetoric-led", body)
 
     def test_spaces_no_longer_ship_a_family_catalog(self):
-        for objective in ("art-led.v1", "rhetoric-led.v1"):
-            body = _space_text(objective).casefold()
-            for label in RETIRED_FAMILY_LABELS:
-                self.assertNotIn(label, body, f"{objective} still lists {label!r}")
+        body = _space_text("general-design.v1").casefold()
+        for label in RETIRED_FAMILY_LABELS:
+            self.assertNotIn(label, body, f"the general space still lists {label!r}")
 
     def test_spaces_map_choices_onto_the_schema_axes(self):
         body = load_style_space_index_body()
@@ -87,7 +76,7 @@ class StyleSpaceStructureTests(unittest.TestCase):
             self.assertIn(f"`{axis}`", body)
 
     def test_space_bodies_drop_their_leading_heading(self):
-        for body in (load_style_space_index_body(), load_style_space_body("art-led.v1")):
+        for body in (load_style_space_index_body(), load_style_space_body("general-design.v1")):
             self.assertFalse(body.startswith("# "))
 
     def test_unknown_objective_is_rejected(self):

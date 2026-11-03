@@ -144,6 +144,8 @@ class StreamlitAppTests(unittest.TestCase):
                 )
                 self.assertIsNone(conversation["design_brief"])
                 self.assertEqual(conversation["revision"], 0)
+                self.assertEqual(conversation["profile"], "general-graphic")
+                self.assertEqual(manifest["candidate_limit"], 3)
 
     def test_fast_path_renders_a_precise_request_without_a_review_stop(self):
         with TemporaryDirectory() as directory:
@@ -401,10 +403,16 @@ class StreamlitAppTests(unittest.TestCase):
             app.segmented_control(key="new_task_reasoning").value,
             "medium",
         )
-        self.assertEqual(
-            app.segmented_control(key="new_task_candidates").value,
-            3,
-        )
+        # The studio no longer asks for a design method, a proposal count, or a route;
+        # the one general profile and the brief decide both.
+        control_keys = {
+            widget.key for kind in ("segmented_control", "toggle")
+            for widget in app.get(kind) if getattr(widget, "key", None)
+        }
+        self.assertNotIn("new_task_method", control_keys)
+        self.assertNotIn("new_task_candidates", control_keys)
+        self.assertNotIn("new_task_mode", control_keys)
+        self.assertIn("new_task_fast_path", control_keys)
         self.assertEqual(
             app.chat_input(key="new_task_prompt").placeholder,
             "描述你的设计需求……",

@@ -26,8 +26,7 @@ CATEGORY_REFERENCES = {
 STYLE_SPACE_INDEX_REFERENCE = "style-spaces/index.md"
 
 STYLE_SPACE_REFERENCES = {
-    "rhetoric-led.v1": "style-spaces/rhetoric-led.md",
-    "art-led.v1": "style-spaces/art-led.md",
+    "general-design.v1": "style-spaces/general.md",
 }
 
 

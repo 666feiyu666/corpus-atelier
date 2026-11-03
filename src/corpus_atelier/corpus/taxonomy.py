@@ -4,9 +4,9 @@ A *closed* taxonomy means corpus records may only carry labels declared here.
 Adding, renaming, or removing a label is an explicit, versioned change to this
 module — it is not something an ingest path may do implicitly.
 
-The movement and objective facets label archived records for retrieval. They are
-corpus annotations only: the generation stages no longer ship a movement catalog,
-so these labels never select or justify a design direction.
+The movement facets label archived records for retrieval. They are corpus
+annotations only: the generation stages no longer ship a movement catalog, so
+these labels never select or justify a design direction.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-TAXONOMY_VERSION = "ca-visual-v2"
+TAXONOMY_VERSION = "ca-visual-v3"
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,6 @@ FACETS: tuple[str, ...] = (
     "medium",
     "art_movement",
     "design_movement",
-    "objective",
     "composition",
     "mood",
     "collection",
@@ -44,7 +43,6 @@ _FACET_LABELS: dict[str, tuple[str, str]] = {
     "medium": ("Medium", "媒介"),
     "art_movement": ("Art movement", "艺术运动"),
     "design_movement": ("Design movement", "设计运动"),
-    "objective": ("Objective", "目标导向"),
     "composition": ("Composition", "构图"),
     "mood": ("Mood & color", "情绪与色彩"),
     "collection": ("Gallery collection", "图库合集"),
@@ -105,11 +103,6 @@ _declare("design_movement", [
     ("art-deco", "Art Deco", "装饰艺术"),
     ("psychedelic", "Psychedelic", "迷幻风格"),
     ("postmodern-memphis", "Postmodern Memphis", "后现代孟菲斯"),
-])
-
-_declare("objective", [
-    ("art-led", "Art-led", "艺术主导"),
-    ("rhetoric-led", "Rhetoric-led", "修辞主导"),
 ])
 
 _declare("composition", [

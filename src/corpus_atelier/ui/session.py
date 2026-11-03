@@ -42,10 +42,11 @@ PRODUCT_CASE_ID = "natural-language"
 TERMINAL_STATUSES = {"completed", "rejected", "failed"}
 
 
-DESIGN_METHODS = {
-    "rhetoric-graphic": "method_rhetoric",
-    "art-graphic": "method_art",
-}
+# The studio runs one general design profile with one route policy: the brief decides
+# whether a round explores directions, and the direct route renders a single image.
+DEFAULT_PROFILE = "general-graphic"
+DEFAULT_CANDIDATE_LIMIT = 3
+DEFAULT_GENERATION_MODE = "auto"
 
 
 STATUS_ICONS = {
@@ -297,9 +298,6 @@ def _initialize_state() -> None:
     st.session_state.setdefault("new_task_image_model", _default_image_model())
     st.session_state.setdefault("new_task_reasoning", "medium")
     st.session_state.setdefault("new_task_quality", "medium")
-    st.session_state.setdefault("new_task_method", next(iter(DESIGN_METHODS)))
-    st.session_state.setdefault("new_task_candidates", 3)
-    st.session_state.setdefault("new_task_mode", "auto")
 
 
 def _saved_tasks() -> list[RunSummary]:

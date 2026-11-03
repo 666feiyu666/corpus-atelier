@@ -15,7 +15,7 @@ from .config.paths import resolve_paths
 from .corpus.gallery import import_seed, load_seed, packaged_seed_path
 from .corpus.index import CorpusStore
 from .design_support.validation import validate
-from .app.registry import PROFILES, get_profile
+from .app.registry import PROFILE_NAMES, PROFILES, get_profile
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -26,7 +26,7 @@ def _parser() -> argparse.ArgumentParser:
     validate_cmd = commands.add_parser(
         "validate", help="Validate inputs without model calls.",
     )
-    validate_cmd.add_argument("--profile", required=True, choices=PROFILES)
+    validate_cmd.add_argument("--profile", required=True, choices=PROFILE_NAMES)
     validate_cmd.add_argument("--brief", required=True, type=Path)
 
     inspect = commands.add_parser("inspect", help="Inspect a saved task.")

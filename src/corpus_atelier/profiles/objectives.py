@@ -1,4 +1,5 @@
 """Reference identifiers for objective policies shared by both design stages."""
 
-RHETORIC_LED = "objectives/rhetoric-led.md"
-ART_LED = "objectives/art-led.md"
+# One objective serves every profile: the brief decides how communication goals
+# and perceptual quality are weighed, so no rhetoric-led or art-led doctrine ships.
+GENERAL_DESIGN = "objectives/general.md"

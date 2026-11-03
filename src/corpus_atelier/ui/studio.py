@@ -19,7 +19,9 @@ from corpus_atelier.app.state import NaturalLanguageDesignJob, RunSummary
 from corpus_atelier.config.paths import resolve_paths
 from corpus_atelier.ui.viewport import register_viewport
 from corpus_atelier.ui.session import (
-    DESIGN_METHODS,
+    DEFAULT_CANDIDATE_LIMIT,
+    DEFAULT_GENERATION_MODE,
+    DEFAULT_PROFILE,
     PRODUCT_CASE_ID,
     _application,
     _current_credential,
@@ -59,7 +61,7 @@ def _render_product_tabs() -> str:
     return view
 
 
-def _render_new_task_settings() -> tuple[str, str, str, str, str, int, str, bool]:
+def _render_new_task_settings() -> tuple[str, str, str, str, bool]:
     model_ids = [profile.model for profile in TEXT_MODEL_PROFILES]
     model = st.selectbox(
         _t("text_model"),
@@ -93,31 +95,13 @@ def _render_new_task_settings() -> tuple[str, str, str, str, str, int, str, bool
         qualities,
         key="new_task_quality",
     )
-    method = st.segmented_control(
-        _t("design_method"),
-        list(DESIGN_METHODS),
-        format_func=lambda value: _t(DESIGN_METHODS[value]),
-        key="new_task_method",
-    )
-    candidates = st.segmented_control(
-        _t("candidate_limit"),
-        [1, 2, 3],
-        key="new_task_candidates",
-    )
-    generation_mode = st.segmented_control(
-        _t("generation_mode"),
-        ["auto", "direct", "staged"],
-        format_func=lambda value: _t(f"mode_{value}"),
-        key="new_task_mode",
-    )
     fast_path = st.toggle(
         _t("fast_path_toggle"),
         value=False,
         key="new_task_fast_path",
         help=_t("fast_path_help"),
     )
-    return (model, reasoning, image_model, image_quality, method, candidates,
-            generation_mode, fast_path)
+    return model, reasoning, image_model, image_quality, fast_path
 
 
 def _start_task(
@@ -127,9 +111,6 @@ def _start_task(
     reasoning_effort: str,
     image_model: str,
     image_quality: str,
-    profile: str,
-    candidate_count: int,
-    generation_mode: str = "auto",
     fast_path: bool = False,
     attachments: list[tuple[str, bytes]] | None = None,
     reference_images: list[tuple[str, bytes]] | None = None,
@@ -153,10 +134,10 @@ def _start_task(
     try:
         job = NaturalLanguageDesignJob(
             case_id=PRODUCT_CASE_ID,
-            profile=profile,
+            profile=DEFAULT_PROFILE,
             request=request,
-            candidate_count=candidate_count,
-            generation_mode=generation_mode,
+            candidate_count=DEFAULT_CANDIDATE_LIMIT,
+            generation_mode=DEFAULT_GENERATION_MODE,
             reference_images=tuple(reference_images or ()),
             mask=mask,
         )
@@ -215,8 +196,7 @@ def _render_studio() -> None:
     st.caption(_t("reference_upload_hint"))
     with st.popover(_t("task_settings"), icon=":material/tune:"):
         (
-            model, reasoning, image_model, image_quality, profile,
-            candidate_count, generation_mode, fast_path,
+            model, reasoning, image_model, image_quality, fast_path,
         ) = _render_new_task_settings()
         st.divider()
         st.caption(_t("generation_inputs_hint"))
@@ -253,9 +233,6 @@ def _render_studio() -> None:
                 reasoning_effort=reasoning,
                 image_model=image_model,
                 image_quality=image_quality,
-                profile=profile,
-                candidate_count=candidate_count,
-                generation_mode=generation_mode,
                 fast_path=fast_path,
                 attachments=_submission_attachments(submission),
                 reference_images=references,

@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-TAXONOMY_VERSION = "ca-visual-v1"
+TAXONOMY_VERSION = "ca-visual-v2"
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,7 @@ FACETS: tuple[str, ...] = (
     "objective",
     "composition",
     "mood",
+    "collection",
 )
 
 _FACET_LABELS: dict[str, tuple[str, str]] = {
@@ -46,6 +47,7 @@ _FACET_LABELS: dict[str, tuple[str, str]] = {
     "objective": ("Objective", "目标导向"),
     "composition": ("Composition", "构图"),
     "mood": ("Mood & color", "情绪与色彩"),
+    "collection": ("Gallery collection", "图库合集"),
 }
 
 TAGS: dict[str, Tag] = {}
@@ -129,6 +131,41 @@ _declare("mood", [
     ("vibrant", "Vibrant", "高饱和鲜艳"),
     ("dark", "Dark", "暗调"),
     ("airy", "Airy", "明亮通透"),
+])
+
+
+_declare("collection", [
+    ("gallery-anime-and-manga", "Anime & Manga", "动漫"),
+    ("gallery-gaming", "Gaming", "游戏"),
+    ("gallery-retro-and-cyberpunk", "Retro & Cyberpunk", "复古赛博"),
+    ("gallery-cinematic-and-animation", "Cinematic & Animation", "电影动画"),
+    ("gallery-character-design", "Character Design", "角色设计"),
+    ("gallery-typography-and-posters", "Typography & Posters", "字体与海报"),
+    ("gallery-illustration", "Illustration", "插画"),
+    ("gallery-watercolor", "Watercolor", "水彩"),
+    ("gallery-ink-and-chinese", "Ink & Chinese", "水墨国风"),
+    ("gallery-pixel-art", "Pixel Art", "像素画"),
+    ("gallery-isometric", "Isometric", "等轴测"),
+    ("gallery-product-and-food", "Product & Food", "产品与美食"),
+    ("gallery-brand-systems-and-identity", "Brand Systems & Identity", "品牌识别"),
+    ("gallery-photography", "Photography", "摄影"),
+    ("gallery-infographics-and-field-guides", "Infographics & Field Guides", "信息图与图鉴"),
+    ("gallery-research-paper-figures", "Research Paper Figures", "论文配图"),
+    ("gallery-official-openai-cookbook-examples", "Official OpenAI Cookbook Examples", "OpenAI 官方示例"),
+    ("gallery-edit-endpoint-showcase", "Edit Endpoint Showcase", "编辑接口示例"),
+    ("gallery-ui-ux-mockups", "UI/UX Mockups", "界面原型"),
+    ("gallery-data-visualization", "Data Visualization", "数据可视化"),
+    ("gallery-technical-illustration", "Technical Illustration", "技术插画"),
+    ("gallery-architecture-and-interior", "Architecture & Interior", "建筑与室内"),
+    ("gallery-scientific-and-educational", "Scientific & Educational", "科学与教育"),
+    ("gallery-fashion-editorial", "Fashion Editorial", "时尚大片"),
+    ("gallery-fine-art-painting", "Fine Art Painting", "纯艺绘画"),
+    ("gallery-more-illustration-styles", "More Illustration Styles", "更多插画风格"),
+    ("gallery-cinematic-film-references", "Cinematic Film References", "电影参考"),
+    ("gallery-beauty-and-lifestyle", "Beauty & Lifestyle", "美妆生活"),
+    ("gallery-events-and-experience", "Events & Experience", "活动体验"),
+    ("gallery-tattoo-design", "Tattoo Design", "纹身设计"),
+    ("gallery-screen-photography", "Screen Photography", "屏幕摄影"),
 ])
 
 

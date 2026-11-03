@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -23,7 +22,6 @@ def _resolved(name: str, default: Path) -> Path:
 class ProductPaths:
     """Every local directory and file the product reads or writes."""
 
-    showcase_root: Path
     tasks_root: Path
     env_path: Path
     preferences_path: Path
@@ -34,9 +32,6 @@ class ProductPaths:
 def resolve_paths() -> ProductPaths:
     """Resolve the product paths against the environment as it is right now."""
     return ProductPaths(
-        showcase_root=_resolved(
-            "CORPUS_ATELIER_SHOWCASE_ROOT", PACKAGE_ROOT / "assets" / "showcase",
-        ),
         tasks_root=_resolved(
             "CORPUS_ATELIER_TASKS_ROOT", PROJECT_ROOT / ".atelier" / "tasks",
         ),

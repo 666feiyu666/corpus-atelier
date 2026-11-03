@@ -1,140 +1,115 @@
-"""The showcase gallery and archived corpus records."""
+"""The corpus gallery: search and browse archived prompts and reference images."""
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
-from pathlib import Path
+from math import ceil
 from typing import Any
+
 import streamlit as st
-from corpus_atelier.artifacts.records import read_json
-from corpus_atelier.corpus import FACETS, resolve, tags_of
 
 from corpus_atelier.config.paths import resolve_paths
-from corpus_atelier.ui.session import _corpus_store, _language, _t
+from corpus_atelier.corpus import resolve, tags_of
+from corpus_atelier.corpus.gallery import ensure_gallery_seed
+from corpus_atelier.ui.session import _corpus_store, _t
 
 
-SHOWCASE_PAGE_SIZE = 4
+PAGE_SIZE = 12
+MAX_RESULTS = 500
 
 
-@dataclass(frozen=True)
-class ShowcaseItem:
-    image_path: Path
-    title: str
-    featured: bool
-    featured_order: int | None
-
-
-def _showcase_items() -> list[ShowcaseItem]:
-    showcase_root = resolve_paths().showcase_root
-    manifest_path = showcase_root / "manifest.json"
-    if not manifest_path.is_file():
-        return []
+def _tag_label(tag_id: str) -> str:
     try:
-        manifest = read_json(manifest_path)
-    except (OSError, json.JSONDecodeError):
-        return []
-    if (
-        not isinstance(manifest, dict)
-        or manifest.get("format_version") != 1
-        or not isinstance(manifest.get("items"), list)
-    ):
-        return []
+        return resolve(tag_id).zh
+    except ValueError:
+        return tag_id
 
-    items: list[ShowcaseItem] = []
-    for entry in manifest["items"]:
-        if not isinstance(entry, dict):
-            continue
-        relative = entry.get("image")
-        titles = entry.get("title")
-        if not isinstance(relative, str) or not isinstance(titles, dict):
-            continue
-        image_path = (showcase_root / relative).resolve()
-        if showcase_root not in image_path.parents or not image_path.is_file():
-            continue
-        title = titles.get(_language()) or titles.get("en")
-        if not isinstance(title, str) or not title.strip():
-            continue
-        featured_order = entry.get("featured_order")
-        if isinstance(featured_order, bool) or not isinstance(
-            featured_order, int
-        ):
-            featured_order = None
-        items.append(ShowcaseItem(
-            image_path=image_path,
-            title=title.strip(),
-            featured=entry.get("featured") is True,
-            featured_order=featured_order,
-        ))
-    return items
+
+def _collection_label(tag_id: str | None) -> str:
+    if tag_id is None:
+        return _t("gallery_all_collections")
+    return _tag_label(tag_id)
 
 
 def _render_corpus_record(record: dict[str, Any]) -> None:
     image = record.get("image")
-    left, right = st.columns([1, 3], vertical_alignment="top")
+    left, right = st.columns([1, 2], vertical_alignment="top")
     with left:
-        if image and image.get("path"):
-            path = resolve_paths().corpus_media_root / image["path"]
-            if path.is_file():
-                st.image(str(path), width="stretch", output_format="PNG")
-            else:
-                st.caption(_t("corpus_no_media"))
+        path = resolve_paths().corpus_media_root / image["path"] if image else None
+        if path is not None and path.is_file():
+            st.image(str(path), width="stretch", output_format="PNG")
         else:
             st.caption(_t("corpus_no_media"))
     with right:
-        st.markdown(f"**{record['prompt']}**")
+        source = record.get("source") or {}
+        note = (source.get("note") or "").strip()
+        if note:
+            st.markdown(f"**{note}**")
+        prompt = record["prompt"]
+        st.caption(prompt if len(prompt) <= 240 else prompt[:240].rstrip() + "…")
         negative = record.get("negative_prompt")
         if negative:
             st.caption(f"**{_t('corpus_negative')}:** {negative}")
-        tags = record.get("tags", [])
+        with st.expander(_t("gallery_prompt_show")):
+            st.code(prompt, language=None, wrap_lines=True)
+        tags = record.get("tags") or []
         if tags:
-            labels = []
-            for tag_id in tags:
-                try:
-                    labels.append(resolve(tag_id).zh)
-                except ValueError:
-                    labels.append(tag_id)
-            st.markdown(" · ".join(labels))
-        source = record.get("source", {})
-        st.caption(f"{_t('corpus_source')}: {source.get('kind', '')}")
+            st.caption(" · ".join(_tag_label(tag_id) for tag_id in tags))
+        label = f"{_t('corpus_source')}: {source.get('kind', '')}"
+        url = source.get("url")
+        st.caption(f"{label} · {url}" if url else label)
+
+
+def _render_page_controls(page: int, pages: int) -> None:
+    previous, status, following = st.columns([1, 2, 1], vertical_alignment="center")
+    with previous:
+        if st.button(_t("gallery_prev"), key="gallery_prev", disabled=page <= 0):
+            st.session_state.gallery_page = page - 1
+            st.rerun()
+    with status:
+        st.caption(_t("gallery_page_status", page=page + 1, pages=pages))
+    with following:
+        if st.button(
+            _t("gallery_next"), key="gallery_next", disabled=page >= pages - 1,
+        ):
+            st.session_state.gallery_page = page + 1
+            st.rerun()
 
 
 def _render_gallery() -> None:
     st.title(_t("gallery_title"))
     st.caption(_t("gallery_tagline"))
-    featured = _showcase_items()
-    if featured:
-        st.subheader(_t("gallery_featured"))
-        columns = st.columns(
-            min(len(featured), SHOWCASE_PAGE_SIZE),
-            gap="medium",
-            vertical_alignment="top",
-        )
-        for column, item in zip(columns, featured[:SHOWCASE_PAGE_SIZE], strict=True):
-            with column:
-                st.image(
-                    item.image_path,
-                    caption=item.title,
-                    width="stretch",
-                    output_format="PNG",
-                )
-    st.subheader(_t("corpus_title"))
-    st.caption(_t("corpus_tagline"))
-    query = st.text_input(_t("corpus_search_placeholder"), key="corpus_query")
-    tag_options = [tag.id for facet in FACETS for tag in tags_of(facet)]
-    selected_tags = st.multiselect(
-        _t("corpus_tags_label"),
-        tag_options,
-        key="corpus_tags",
-        format_func=lambda tag_id: resolve(tag_id).zh,
+    collection = st.selectbox(
+        _t("gallery_collection_label"),
+        [None, *[tag.id for tag in tags_of("collection")]],
+        format_func=_collection_label,
+        key="gallery_collection",
     )
+    query = st.text_input(_t("corpus_search_placeholder"), key="corpus_query")
+    signature = (collection or "", query.strip())
+    if st.session_state.get("gallery_signature") != signature:
+        st.session_state.gallery_signature = signature
+        st.session_state.gallery_page = 0
+
     store = _corpus_store()
     try:
-        results = store.search(query or None, tags=selected_tags, limit=20)
+        ensure_gallery_seed(store, media_root=resolve_paths().corpus_media_root)
+        results = store.search(
+            query or None,
+            tags=[collection] if collection else None,
+            limit=MAX_RESULTS,
+        )
     finally:
         store.close()
     if not results:
         st.caption(_t("corpus_empty"))
         return
-    for record in results:
+
+    st.caption(_t("gallery_result_count", count=len(results)))
+    pages = max(1, ceil(len(results) / PAGE_SIZE))
+    page = min(int(st.session_state.get("gallery_page") or 0), pages - 1)
+    st.session_state.gallery_page = page
+    start = page * PAGE_SIZE
+    for record in results[start:start + PAGE_SIZE]:
         _render_corpus_record(record)
+    if pages > 1:
+        _render_page_controls(page, pages)

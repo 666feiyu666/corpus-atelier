@@ -16,7 +16,8 @@ from .index import CorpusStore
 from .records import CorpusRecord, new_record
 
 
-def _image_size(path: Path) -> tuple[int | None, int | None]:
+def image_size(path: Path) -> tuple[int | None, int | None]:
+    """Return an image's pixel size, or (None, None) when it cannot be read."""
     try:
         from PIL import Image
 
@@ -69,7 +70,7 @@ def from_atelier_run(
         if not source.is_file():
             raise ValueError(f"The run's image is missing: {image_path}")
         image = {"path": source.resolve().as_posix(), "sha256": digest_file(source)}
-        width, height = _image_size(source)
+        width, height = image_size(source)
         if width is not None:
             image["width"] = width
         if height is not None:

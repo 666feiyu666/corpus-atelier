@@ -482,26 +482,34 @@ class StreamlitAppTests(unittest.TestCase):
                 {"language": "en"},
             )
 
-    def test_gallery_renders_featured_showcase_images(self):
+    def test_gallery_browses_the_archived_corpus(self):
+        from corpus_atelier.corpus.gallery import (
+            import_seed, load_seed, packaged_seed_path,
+        )
+        from corpus_atelier.corpus.index import CorpusStore
+
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            showcase = root / "showcase"
-            showcase.mkdir()
-            image_path = showcase / "poster.png"
+            upstream = root / "upstream"
+            media = root / "media"
+            seed = load_seed(packaged_seed_path())
+            first = seed["records"][0]
+            image_path = upstream / first["image_source"]
+            image_path.parent.mkdir(parents=True)
             Image.new("RGB", (120, 180), (22, 44, 66)).save(
                 image_path,
                 format="PNG",
             )
-            write_json(showcase / "manifest.json", {
-                "format_version": 1,
-                "items": [{
-                    "image": "poster.png",
-                    "title": {
-                        "zh-CN": "实验海报",
-                        "en": "Experiment poster",
-                    },
-                }],
-            })
+            store = CorpusStore(root / "corpus.sqlite3")
+            try:
+                import_seed(
+                    store,
+                    {"format_version": 1, "records": [first]},
+                    media_root=media,
+                    source_root=upstream,
+                )
+            finally:
+                store.close()
             with patch.dict(os.environ, {
                 "CORPUS_ATELIER_TASKS_ROOT": str(root / "tasks"),
                 "CORPUS_ATELIER_PREFERENCES_PATH": str(
@@ -509,15 +517,15 @@ class StreamlitAppTests(unittest.TestCase):
                 ),
                 "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
                 "CORPUS_ATELIER_CORPUS_DB": str(root / "corpus.sqlite3"),
-                "CORPUS_ATELIER_CORPUS_MEDIA": str(root / "media"),
-                "CORPUS_ATELIER_SHOWCASE_ROOT": str(showcase),
+                "CORPUS_ATELIER_CORPUS_MEDIA": str(media),
             }):
                 app = AppTest.from_file(str(APP), default_timeout=10).run()
                 app.session_state["product_view_tabs"] = "gallery"
                 app.run()
 
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.get("image")), 1)
+        self.assertIn("gallery_collection", [box.key for box in app.selectbox])
+        self.assertGreaterEqual(len(app.get("image")), 1)
 
     def test_settings_saves_masked_api_key_without_frontend_echo(self):
         with TemporaryDirectory() as directory:

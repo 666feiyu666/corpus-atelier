@@ -26,4 +26,4 @@ packages = {find = {where = ["src"]}}
 [tool.setuptools.package-dir]
 "" = "src"
 [tool.setuptools.package-data]
-corpus_atelier = ["skills/**/*.md", "schemas/*.json", "assets/showcase/*"]
+corpus_atelier = ["skills/**/*.md", "schemas/*.json", "corpus/seed/*.json"]

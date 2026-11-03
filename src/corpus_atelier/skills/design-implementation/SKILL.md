@@ -1,6 +1,6 @@
 ---
 name: design-implementation
-description: Implement one approved design direction as a complete provider-independent visual design before any image-model prompt is written.
+description: Implement one approved design direction as a complete provider-independent visual design, meeting the requirements of its deliverable category, before any image-model prompt is written.
 ---
 
 # Design Implementation
@@ -11,6 +11,17 @@ complete, provider-independent description of the finished image.
 The approved direction is authoritative. Preserve its design thesis, objective strategy, and
 direction decisions. Resolve only the choices delegated through `implementation_freedom`; do not
 replace the direction, select a different style, or reopen portfolio planning.
+
+## Category completion standard
+
+The task supplies the guide for the direction's deliverable category. Treat its "decide before
+rendering" list as work you must actually resolve, its structural guidance as the expected anatomy
+of this artifact, and its visual-QA list as the checks the finished description must survive.
+
+The category guide sets requirements, not a style. Do not import its optional style vocabulary
+unless the approved direction already chose that language. When the category guide and the
+direction conflict about a requirement, keep the requirement and change the smallest visual
+decision that satisfies both.
 
 ## Completion standard
 
@@ -53,7 +64,7 @@ requests for further material.
 ## Boundaries
 
 - Implement the approved direction; do not plan alternative directions.
-- Do not write an image-model prompt or `image_spec`.
+- Do not write an image-model prompt or `image_prompt`.
 - Do not optimize wording for GPT Image or any other renderer.
 - Preserve required subjects, exact visible copy, constraints, and the user's chosen purpose.
 - Treat `exact_copy` as the exhaustive list of readable wording. Do not add headings, labels,

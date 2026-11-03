@@ -10,6 +10,12 @@ from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import write_json, write_text
 
 
+def _json_section(prompt: str, marker: str) -> dict:
+    """Read the first JSON object inside a prompt section."""
+    section = prompt.split(marker, 1)[1]
+    return json.JSONDecoder().raw_decode(section[section.index("{"):])[0]
+
+
 class FakeTextProvider:
     model = "fake-text"
 
@@ -72,24 +78,37 @@ class FakeTextProvider:
                 "negative_prompt": "photorealistic, flat vector, readable text, watermark",
             }
             return value, {"status": "completed", "provider": "fake"}
-        if schema_name == "image-spec.schema.json":
+        if schema_name == "image-prompt.schema.json":
             target = prompt.split("# Compilation target\n\n", 1)[1].split(
-                "\n\n# Completed design proposal", 1,
+                "\n\n# Approved design", 1,
             )[0]
-            proposal = json.loads(
-                prompt.split("# Completed design proposal\n\n", 1)[1]
-            )
+            design = _json_section(prompt, "# Approved design\n\n")
             visible = json.loads(target)["exact_copy"]
+            description = design.get(
+                "design_description",
+                design.get("topic")
+                or design.get("deliverable")
+                or design.get("article_title")
+                or "A resolved graphic design.",
+            )
+            quoted = " / ".join(f'"{item}"' for item in visible)
             value = {
-                "communication_objective": "Invite the intended audience to engage.",
-                "audience_and_context": "The approved delivery and viewing context.",
-                "visible_copy": visible,
-                "subject_and_scene": proposal["design_description"],
-                "composition": "One dominant title, a central layered motif, and quiet margins.",
-                "typography": "High-contrast display title with restrained supporting type.",
-                "visual_treatment": "Contemporary editorial collage with flat organic forms.",
-                "allowed_variation": ["Texture density may vary"],
-                "exclusions": ["No logos", "No additional copy"],
+                "asset_kind": "poster",
+                "canvas_statement": (
+                    "Create a vertical poster with a dominant title block above a central motif."
+                ),
+                "prompt": (
+                    f"A layered editorial composition. {description} "
+                    "Flat organic forms, warm paper texture, and soft side light. "
+                    f"Render exactly these strings: {quoted}."
+                ),
+                "exact_copy": visible,
+                "preserve": [],
+                "avoid": ["No logos", "No additional copy"],
+                "visual_qa": [
+                    "Every approved string renders exactly as written.",
+                    "The title block stays dominant and the margins stay quiet.",
+                ],
             }
             return value, {"status": "completed", "provider": "fake"}
         if schema_name == "design-direction-plan.schema.json":
@@ -104,6 +123,8 @@ class FakeTextProvider:
             for index in range(count):
                 directions.append({
                     "label": f"Direction {index + 1}",
+                    "asset_category": "typography-and-posters",
+                    "style_anchors": ["editorial type-led composition"],
                     "design_thesis": f"A distinct visual argument number {index + 1}.",
                     "objective_strategy": (
                         f"Apply the active objective through hierarchy strategy {index + 1}."
@@ -120,7 +141,6 @@ class FakeTextProvider:
                     "implementation_freedom": [
                         "Resolve exact spacing and material texture while preserving the strategy."
                     ],
-                    "movement_references": [],
                     "portfolio_role": f"This direction differs through strategy {index + 1}.",
                 })
             return {
@@ -174,9 +194,10 @@ class FakeImageProvider:
         self.fail = fail
 
     def describe_request(self, prompt: str, *, size: str,
-                         reference_paths: list[Path] | None = None):
+                         reference_paths: list[Path] | None = None,
+                         mask_path: Path | None = None):
         reference_paths = list(reference_paths or [])
-        return {
+        request = {
             "prompt": prompt,
             "model": self.model,
             "quality": self.quality,
@@ -189,14 +210,23 @@ class FakeImageProvider:
                 for path in reference_paths
             ],
         }
+        if mask_path is not None:
+            request["operation"] = "mask_edit"
+            request["mask"] = {
+                "file": Path(mask_path).name, "sha256": digest_file(mask_path),
+            }
+        return request
 
     def generate(self, prompt: str, *, size: str, output: Path,
-                 reference_paths: list[Path] | None = None):
+                 reference_paths: list[Path] | None = None,
+                 mask_path: Path | None = None):
         self.calls += 1
         self.last_size = size
         self.reference_paths = list(reference_paths or [])
+        self.mask_path = mask_path
         write_json(output / "request.json", self.describe_request(
             prompt, size=size, reference_paths=self.reference_paths,
+            mask_path=mask_path,
         ))
         write_text(output / "prompt.md", prompt)
         if self.fail:

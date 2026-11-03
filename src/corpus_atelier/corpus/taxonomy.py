@@ -4,9 +4,9 @@ A *closed* taxonomy means corpus records may only carry labels declared here.
 Adding, renaming, or removing a label is an explicit, versioned change to this
 module — it is not something an ingest path may do implicitly.
 
-The movement and objective facets intentionally mirror the packaged
-``skills/design-direction/references`` material so corpus labels stay aligned
-with the atelier's own guidance.
+The movement and objective facets label archived records for retrieval. They are
+corpus annotations only: the generation stages no longer ship a movement catalog,
+so these labels never select or justify a design direction.
 """
 
 from __future__ import annotations

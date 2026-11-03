@@ -122,7 +122,7 @@ class ArtifactStore:
         })
         now = datetime.now(timezone.utc).isoformat()
         manifest = {
-            "format_version": 2, "workflow_version": 18,
+            "format_version": 2, "workflow_version": 19,
             "case_id": case_id, "run_id": run_id,
             "title": title or case_id,
             "created_at": now,

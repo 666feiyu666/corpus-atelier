@@ -4,7 +4,12 @@
   "properties": {
     "planning_mode": {
       "type": "string",
-      "enum": ["open", "style_constrained", "structure_constrained", "convergent"]
+      "enum": [
+        "open",
+        "style_constrained",
+        "structure_constrained",
+        "convergent"
+      ]
     },
     "directions": {
       "type": "array",
@@ -14,9 +19,37 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "label": {"type": "string", "minLength": 1},
-          "design_thesis": {"type": "string", "minLength": 1},
-          "objective_strategy": {"type": "string", "minLength": 1},
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "asset_category": {
+            "type": "string",
+            "enum": [
+              "typography-and-posters",
+              "brand-systems-and-identity",
+              "editorial-and-covers",
+              "events-and-invitations",
+              "product-and-food",
+              "beauty-and-lifestyle",
+              "infographics-and-field-guides",
+              "data-and-research-figures",
+              "uiux-and-mockups",
+              "illustration-and-mediums",
+              "photography-and-cinematic",
+              "architecture-and-interior",
+              "technical-and-scientific"
+            ],
+            "description": "Deliverable category shared by the whole portfolio."
+          },
+          "design_thesis": {
+            "type": "string",
+            "minLength": 1
+          },
+          "objective_strategy": {
+            "type": "string",
+            "minLength": 1
+          },
           "direction_decisions": {
             "type": "array",
             "minItems": 1,
@@ -26,35 +59,60 @@
               "properties": {
                 "axis": {
                   "type": "string",
-                  "enum": ["concept", "composition", "palette", "typography", "image_making", "visual_language"]
+                  "enum": [
+                    "concept",
+                    "composition",
+                    "palette",
+                    "typography",
+                    "image_making",
+                    "visual_language"
+                  ]
                 },
-                "decision": {"type": "string", "minLength": 1}
+                "decision": {
+                  "type": "string",
+                  "minLength": 1
+                }
               },
-              "required": ["axis", "decision"]
+              "required": [
+                "axis",
+                "decision"
+              ]
             }
           },
           "implementation_freedom": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1}
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           },
-          "movement_references": {
+          "portfolio_role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "style_anchors": {
             "type": "array",
-            "items": {"type": "string"},
-            "description": "Optional IDs from the historical reference catalog supplied for the active design objective."
-          },
-          "portfolio_role": {"type": "string", "minLength": 1}
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Short descriptive phrases naming the visual language; not a list of labels."
+          }
         },
         "required": [
           "label",
+          "asset_category",
           "design_thesis",
           "objective_strategy",
           "direction_decisions",
           "implementation_freedom",
-          "movement_references",
           "portfolio_role"
         ]
       }
     }
   },
-  "required": ["planning_mode", "directions"]
+  "required": [
+    "planning_mode",
+    "directions"
+  ]
 }

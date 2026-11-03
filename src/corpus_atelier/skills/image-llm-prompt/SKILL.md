@@ -1,55 +1,72 @@
 ---
 name: image-llm-prompt
-description: Compile a completed visual design into explicit instructions for a specified image model. Use after design is complete and before image generation.
+description: Write one renderer-ready image prompt from an approved design. Use after the design is settled and before image generation or editing.
 ---
 
 # Image LLM Prompt
 
-Act as a visual-semantic compiler. Preserve the completed design while expressing it in language
-that the target image model can resolve into one coherent image.
+Act as an image-prompt writer. The approved design is authoritative; your job is to express it as
+one self-contained prompt that a specific image model can resolve into a single coherent image.
 
 ## Core task
 
-Translate the design description into a self-contained `image_spec`. Do not improve, restyle, or
-replace the design. Make implicit relationships explicit when they are logically entailed by the
-design and a model could otherwise choose a visibly different interpretation.
+Return the structured object: `asset_kind`, `canvas_statement`, `prompt`, `exact_copy`,
+`preserve`, `avoid`, and `visual_qa`.
 
-In particular, stabilize:
+Write `prompt` in this order, and skip a stage the design does not need:
 
-- entity identity and count;
-- pronoun and noun-phrase coreference;
-- ownership and part-whole relations;
-- anatomical and structural continuity;
-- contact, attachment, pose, orientation, depth, overlap, and occlusion;
-- relative scale and focal hierarchy;
-- the difference between emphasis on a product and enlargement of its carrier;
-- consistency between illustrated, photographic, and materially detailed elements;
-- exact visible copy and its placement.
+1. the scene or object the image shows, with entity identity, count, and ownership fixed;
+2. pose, orientation, contact, attachment, depth, overlap, and relative scale;
+3. medium and style, anchored to one specific and bounded visual language;
+4. palette, material, light direction, texture, and degree of realism as separate controls;
+5. where each approved string sits and how it is set;
+6. focal hierarchy as concrete visual means — placement, local contrast, light, sharpness,
+   detail, negative space;
+7. a short closing constraint only when a plausible misreading needs blocking.
 
-Stabilize a dimension only when the approved design depends on it or when leaving it implicit could
-plausibly change the intended image. Do not fill an unused field with invented content, inherit an
-entity or composition from an example, or convert harmless latitude into a renderer requirement.
+`canvas_statement` is one opening sentence: deliverable, aspect ratio, orientation, and where the
+main zones sit. It is rendered before `prompt`, so do not repeat the canvas inside `prompt`.
 
-Use targeted negative constraints only for plausible misreadings of this design. Do not append a
-generic catalog of defects. Prefer a positive, unambiguous scene description, supported by a few
-specific exclusions where necessary.
+Do not improve, restyle, or replace the design. Abstract words such as elegant, premium, modern, or
+dynamic are not instructions: whenever one matters, replace it with the visual decision that
+produces it. Scene density beats adjectives; a specific object with a stated relationship is worth
+more than three quality words.
 
-Before returning the specification, run a consistency pass across subject identity, anatomy,
-viewpoint, depth, attachment, lighting, and materials. Do not mechanically preserve two details
-that cannot be true in the same image. When the intended whole is unambiguous, reconcile a
-low-level contradiction in favor of that whole while changing as little as possible. Never solve
-a contradiction by splitting one entity into multiple subjects or by adding a new visual idea.
+## Exact wording
+
+Only the compilation target's `exact_copy` may appear as artwork text. Quote each string verbatim
+inside `prompt` and place it in the layout. Never translate, merge, split, re-letter, or invent
+copy, and never let a heading, label, slogan, watermark, or pseudo-text appear without being in
+that array. If the design implies text but the array is empty, render no text at all.
+
+## Preserve and avoid
+
+`preserve` lists what a reference-image edit or inpaint must keep unchanged: identity, expression,
+pose, framing, camera viewpoint, lighting, background, existing text, material character. Leave it
+empty for fresh generation.
+
+`avoid` is short and specific to plausible failures of this design. Each item should protect a
+stated identity, relation, hierarchy, copy requirement, or physical invariant. Never append a
+generic defect catalogue, and never reuse an exclusion from an unrelated task.
+
+## Visual QA
+
+`visual_qa` is the reviewer's checklist for the rendered image, not a promise about the renderer.
+Write three to six concrete, checkable observations: exact characters of each copy block, required
+counts, which region stays empty, whether identity and accessories survive, whether contact and
+light agree, whether text stays legible at the delivered size. Keep each item observable in the
+finished image.
+
+## Consistency pass
+
+Before returning, read the prompt as one scene. Confirm that identity and count stay stable; parts
+belong to the intended wholes; pose, viewpoint, contact, and overlap can coexist; materials and
+light describe the same scene. Reconcile a low-level contradiction in favor of the intended whole
+with the smallest change, and never resolve one by splitting an entity or adding a new idea.
 
 ## Authority
 
-You may clarify an identity, ownership, continuity, spatial, or hierarchy relation that the design
-already entails. Add only the minimum explicit wording needed to prevent a plausible material
-misreading. You may not introduce a new subject, symbol, composition, copy, style, or constraint
-that does not follow from the approved design.
-
-Return only the requested structured object. The result must stand on its own for the renderer;
-do not rely on the design rationale or private reasoning.
-
-Before compiling, apply the semantic-disambiguation patterns supplied with the task and the
-guidance for the target image model. Use them to make the `image_spec` more faithful and
-unambiguous, not to add content or redesign the work.
+You may make an identity, ownership, continuity, spatial, or hierarchy relation explicit when the
+design already entails it. You may not introduce a new subject, symbol, composition, copy, style,
+or constraint. Return only the requested structured object; do not write rationale, headings, JSON,
+or instructions into `prompt`.

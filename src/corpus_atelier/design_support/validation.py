@@ -36,8 +36,10 @@ def validate_proposal(
     return value
 
 
-def validate_image_spec(value: dict, exact_copy: list[str]) -> dict:
-    validate(value, "image-spec.schema.json")
-    if value["visible_copy"] != exact_copy:
-        raise ValueError("The image specification changed the exact visible copy.")
+def validate_image_prompt(value: dict, exact_copy: list[str]) -> dict:
+    validate(value, "image-prompt.schema.json")
+    if value["exact_copy"] != list(exact_copy):
+        raise ValueError("The image prompt changed the exact visible copy.")
+    if any(not item.strip() for item in value["visual_qa"]):
+        raise ValueError("The image prompt contains an empty visual QA check.")
     return value

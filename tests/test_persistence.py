@@ -60,7 +60,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(completed.status, "completed")
             tasks = third.list_tasks()
             self.assertEqual([task.run_id for task in tasks], [started.run_id])
-            self.assertEqual(tasks[0].manifest["workflow_version"], 18)
+            self.assertEqual(tasks[0].manifest["workflow_version"], 19)
             self.assertIn("models", tasks[0].manifest)
             third.close()
 

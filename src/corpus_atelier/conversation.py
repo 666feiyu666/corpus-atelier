@@ -14,6 +14,7 @@ from weakref import WeakValueDictionary
 from PIL import Image
 
 from .artifacts.hashing import digest_file
+from .artifacts.paths import task_path
 from .artifacts.records import read_json, write_json
 from .conversation_records import (
     FORMAT_VERSION, ConversationRecord, load_conversation, new_conversation, now, record_brief,
@@ -270,6 +271,19 @@ class ConversationMixin:
         else:
             raise ValueError("There is no failed conversation response to retry.")
         return self._result(run_id)
+
+    def _round_generation_inputs(self, root: Path) -> dict:
+        """Carry the task's reference images and mask into the next design round."""
+        manifest = self.store.manifest(root)
+        images = []
+        for item in manifest.get("reference_images") or []:
+            path = task_path(root, item["file"])
+            images.append((item.get("name") or path.name, path.read_bytes()))
+        mask = None
+        if manifest.get("mask"):
+            path = task_path(root, manifest["mask"]["file"])
+            mask = (manifest["mask"].get("name") or path.name, path.read_bytes())
+        return {"reference_images": tuple(images), "mask": mask}
 
     @serialized_conversation
     def create_conversation_round(self, run_id: str) -> RunResult:

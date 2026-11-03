@@ -174,7 +174,7 @@ class StreamlitAppTests(unittest.TestCase):
         write_text(run_dir / "input" / "request.txt", "设计一张文章封面。")
         write_json(run_dir / "manifest.json", {
             "format_version": 2,
-            "workflow_version": 18,
+            "workflow_version": 19,
             "case_id": "natural-language",
             "run_id": run_id,
             "title": title,

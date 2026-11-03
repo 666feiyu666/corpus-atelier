@@ -5,9 +5,12 @@ from corpus_atelier.atelier.design_direction.validation import (
 )
 
 
-def direction(label="Direction", *, axis="composition", movement=None):
+def direction(label="Direction", *, axis="composition",
+              category="typography-and-posters"):
     return {
         "label": label,
+        "asset_category": category,
+        "style_anchors": ["editorial type-led composition"],
         "design_thesis": f"A complete thesis for {label}.",
         "objective_strategy": f"A complete objective strategy for {label}.",
         "direction_decisions": [{
@@ -15,7 +18,6 @@ def direction(label="Direction", *, axis="composition", movement=None):
             "decision": f"A consequential {axis} decision for {label}.",
         }],
         "implementation_freedom": ["Resolve exact spacing."],
-        "movement_references": list(movement or []),
         "portfolio_role": f"The distinct role of {label}.",
     }
 
@@ -55,38 +57,34 @@ class DesignDirectionTests(unittest.TestCase):
                 plan, 3, objective="rhetoric-led.v1",
             )
 
-    def test_unknown_movement_is_rejected(self):
+    def test_plan_cannot_change_the_brief_category(self):
         plan = {
             "planning_mode": "open",
-            "directions": [direction(movement=["unknown-movement"])],
+            "directions": [direction(category="editorial-and-covers")],
         }
-        with self.assertRaisesRegex(ValueError, "Unknown historical references"):
+        with self.assertRaisesRegex(ValueError, "changed the brief's deliverable category"):
             validate_design_direction_plan(
                 plan, 3, objective="rhetoric-led.v1",
+                asset_category="typography-and-posters",
             )
 
-    def test_art_objective_rejects_design_movement_reference(self):
+    def test_directions_must_share_one_category(self):
         plan = {
             "planning_mode": "open",
-            "directions": [direction(movement=["swiss-style"])],
+            "directions": [direction("One"), direction("Two", category="editorial-and-covers")],
         }
-        with self.assertRaisesRegex(ValueError, "Unknown historical references"):
-            validate_design_direction_plan(
-                plan, 3, objective="art-led.v1",
-            )
+        with self.assertRaisesRegex(ValueError, "share one deliverable category"):
+            validate_design_direction_plan(plan, 3, objective="rhetoric-led.v1")
 
-    def test_art_objective_accepts_art_movement_reference(self):
+    def test_unknown_category_is_rejected(self):
         plan = {
             "planning_mode": "open",
-            "directions": [direction(movement=["impressionism"])],
+            "directions": [direction(category="not-a-category")],
         }
-        self.assertIs(
-            validate_design_direction_plan(
-                plan, 3, objective="art-led.v1",
-            ),
-            plan,
-        )
-
+        with self.assertRaisesRegex(
+            ValueError, "not one of|Unknown deliverable category",
+        ):
+            validate_design_direction_plan(plan, 3, objective="rhetoric-led.v1")
 
 if __name__ == "__main__":
     unittest.main()

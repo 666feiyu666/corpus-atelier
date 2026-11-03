@@ -2,15 +2,90 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "content_language": {"type": "string", "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"},
-    "topic": {"type": "string", "minLength": 1},
-    "purpose": {"type": "string", "minLength": 1},
-    "audience": {"type": "string", "minLength": 1},
-    "setting": {"type": "string"},
-    "exact_copy": {"type": "array", "items": {"type": "string"}},
-    "constraints": {"type": "array", "items": {"type": "string"}},
-    "user_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "preferences": {"type": "array", "items": {"type": "string"}}
+    "content_language": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+    },
+    "topic": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1
+    },
+    "setting": {
+      "type": "string"
+    },
+    "exact_copy": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "user_requirements": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "preferences": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "execution_route": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "staged"
+      ],
+      "description": "direct when the request already fixes the subject, visual language, exact copy and canvas so no design exploration is needed; staged when a direction or design proposal still has to be developed."
+    },
+    "route_reason": {
+      "type": "string",
+      "description": "One sentence explaining the route choice in the task content language."
+    },
+    "asset_category": {
+      "type": "string",
+      "enum": [
+        "typography-and-posters",
+        "brand-systems-and-identity",
+        "editorial-and-covers",
+        "events-and-invitations",
+        "product-and-food",
+        "beauty-and-lifestyle",
+        "infographics-and-field-guides",
+        "data-and-research-figures",
+        "uiux-and-mockups",
+        "illustration-and-mediums",
+        "photography-and-cinematic",
+        "architecture-and-interior",
+        "technical-and-scientific"
+      ],
+      "description": "Deliverable category chosen by intake; the design stage keeps it."
+    }
   },
-  "required": ["topic", "purpose", "audience", "setting", "exact_copy", "constraints", "preferences"]
+  "required": [
+    "topic",
+    "purpose",
+    "audience",
+    "setting",
+    "exact_copy",
+    "constraints",
+    "preferences"
+  ]
 }

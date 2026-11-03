@@ -10,7 +10,6 @@ def synthesize_design_implementation(
     reference_paths: list[Path] | None = None,
     canvas: dict | None = None,
     direction_seed: dict | None = None,
-    historical_knowledge: list[str] | None = None,
     content_language: str | None = None,
 ) -> tuple[str, dict, dict]:
     if canvas is None or direction_seed is None:
@@ -19,7 +18,6 @@ def synthesize_design_implementation(
         brief,
         canvas=canvas,
         direction_seed=direction_seed,
-        historical_knowledge=historical_knowledge,
         content_language=content_language,
     )
     proposal, response = provider.propose(

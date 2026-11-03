@@ -6,6 +6,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+GenerationMode = Literal["auto", "direct", "staged"]
+ExecutionRoute = Literal["direct", "staged"]
+
 RunStatus = Literal[
     "discussing", "discussing_request",
     "created", "interpreting_request", "designing",
@@ -21,6 +24,9 @@ class DesignJob:
     brief: dict[str, Any]
     candidate_count: int = 1  # Maximum number of meaningful directions.
     content_language: str | None = None
+    generation_mode: GenerationMode = "auto"
+    reference_images: tuple[tuple[str, bytes], ...] = ()
+    mask: tuple[str, bytes] | None = None
 
 
 @dataclass(frozen=True)
@@ -30,6 +36,9 @@ class NaturalLanguageDesignJob:
     request: str
     candidate_count: int = 1  # Maximum number of meaningful directions.
     content_language: str | None = None
+    generation_mode: GenerationMode = "auto"
+    reference_images: tuple[tuple[str, bytes], ...] = ()
+    mask: tuple[str, bytes] | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +88,10 @@ class AtelierState(TypedDict, total=False):
     user_requirements: list[str]
     superseded_user_requirements: list[str]
     brief: dict[str, Any]
+    generation_mode: GenerationMode
+    execution_route: ExecutionRoute
+    reference_paths: list[str]
+    mask_path: str
     candidate_limit: int
     candidate_count: int
     direction_plan: dict[str, Any]

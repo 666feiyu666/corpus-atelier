@@ -21,7 +21,8 @@ class SecondCandidateFailingImageProvider(FakeImageProvider):
         super().__init__()
         self.attempts = 0
 
-    def generate(self, prompt: str, *, size: str, output: Path, reference_paths=None):
+    def generate(self, prompt: str, *, size: str, output: Path,
+                 reference_paths=None, mask_path=None):
         self.attempts += 1
         if "c02" in output.parts:
             write_json(output / "response.json", {
@@ -29,7 +30,8 @@ class SecondCandidateFailingImageProvider(FakeImageProvider):
             })
             raise RuntimeError("deliberate c02 failure")
         return super().generate(
-            prompt, size=size, output=output, reference_paths=reference_paths,
+            prompt, size=size, output=output,
+            reference_paths=reference_paths, mask_path=mask_path,
         )
 
 
@@ -48,6 +50,8 @@ class ConvergentTextProvider(FakeTextProvider):
             "planning_mode": "convergent",
             "directions": [{
                 "label": "Convergent direction",
+                "asset_category": "typography-and-posters",
+                "style_anchors": ["resolved type-led layout"],
                 "design_thesis": "Implement the already resolved design faithfully.",
                 "objective_strategy": "Preserve the brief's resolved communication strategy.",
                 "direction_decisions": [{
@@ -55,7 +59,6 @@ class ConvergentTextProvider(FakeTextProvider):
                     "decision": "Retain the specified composition.",
                 }],
                 "implementation_freedom": ["Resolve exact spacing."],
-                "movement_references": [],
                 "portfolio_role": "The brief leaves no consequential alternative.",
             }],
         }, {"status": "completed", "provider": "fake"}
@@ -94,10 +97,6 @@ class MultiCandidateTests(unittest.TestCase):
                 [direction["candidate_id"] for direction in plan["directions"]],
                 ["c01", "c02", "c03"],
             )
-            self.assertTrue(all(
-                not direction["movement_references"]
-                for direction in plan["directions"]
-            ))
             self.assertEqual(
                 sum(
                     call["schema_name"] == "graphic-design-proposal.schema.json"

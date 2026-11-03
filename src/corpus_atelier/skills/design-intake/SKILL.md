@@ -27,6 +27,19 @@ problem actionable without prematurely designing its solution.
   by the active schema. Do not invent new fields.
 - Prefer a coherent, actionable brief over a literal transcription of the request.
 
+## Deliverable category
+
+When the schema provides `asset_category`, classify the deliverable into exactly one supplied
+category ID and return it.
+
+- Classify by what is being made and how it will be seen, not by the visual style the user likes.
+- A poster, an article cover, an invitation, a product packshot, an infographic, a UI mockup, and a
+  photograph are different artifacts with different requirements even at the same canvas size.
+- Prefer the category the user's own words imply. Ask for nothing extra merely to classify.
+- If two categories genuinely apply, choose the one that governs the reading context and leave the
+  secondary aspect to the design stage.
+- Never invent a category ID outside the supplied list.
+
 ## Visible copy
 
 Treat `exact_copy` as the exhaustive wording approved for the finished image.
@@ -38,6 +51,19 @@ Treat `exact_copy` as the exhaustive wording approved for the finished image.
   in `exact_copy`.
 - Do not include explanatory notes, alternatives, placeholders, or quotation marks that are not
   intended to appear in the image.
+
+## Generation route
+
+Set `execution_route` only when the schema provides it, and explain the choice in `route_reason`.
+
+- `direct`: the request itself already fixes the deliverable, subject, visual language or style,
+  the wording to render, and the canvas, so a designer could render it without exploring
+  alternatives. A concise, decided request takes this route.
+- `staged`: at least one consequential choice is still open — the concept, composition, visual
+  language, or hierarchy has to be developed and reviewed before rendering.
+
+Do not invent missing details to justify `direct`, and do not choose `staged` merely because the
+request is short. When the request leaves a real design decision open, prefer `staged`.
 
 ## Boundaries
 

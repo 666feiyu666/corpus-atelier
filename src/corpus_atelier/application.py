@@ -9,10 +9,12 @@ from typing import Callable
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
+from .artifacts.hashing import digest_file
 from .artifacts.paths import task_path
 from .artifacts.records import read_json
 from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
 from .conversation import ConversationMixin, serialized_conversation
+from .design_support.inputs import validate_mask, validate_reference_images
 from .design_support.validation import validate, validate_candidate_count
 from .graphs import build_graph
 from .language import bind_brief_language, validate_content_language
@@ -48,6 +50,7 @@ class CorpusAtelierApplication(ConversationMixin):
         text_provider=None,
         image_provider=None,
         status_callback: Callable[[str, str], None] | None = None,
+        corpus_db_path: Path | str | None = None,
     ):
         self.store = ArtifactStore(
             runs_root,
@@ -58,6 +61,7 @@ class CorpusAtelierApplication(ConversationMixin):
             self.store,
             text_provider or OpenAITextProvider(),
             image_provider or OpenAIImageProvider(),
+            corpus_db_path=corpus_db_path,
         )
         if checkpoint_path is None:
             checkpoint_path = self.store.root / "_system" / "checkpoints.sqlite3"
@@ -136,9 +140,47 @@ class CorpusAtelierApplication(ConversationMixin):
         title = " ".join(request.split())
         return title if len(title) <= 56 else f"{title[:55]}…"
 
+    @staticmethod
+    def _validate_generation_mode(mode: str) -> str:
+        if mode not in {"auto", "direct", "staged"}:
+            raise ValueError("Generation mode must be auto, direct, or staged.")
+        return mode
+
+    def _attach_generation_inputs(
+        self, run_dir: Path,
+        reference_images: tuple[tuple[str, bytes], ...] | list[tuple[str, bytes]],
+        mask: tuple[str, bytes] | None,
+    ) -> dict:
+        """Persist optional reference images and an inpaint mask for one run."""
+        images = validate_reference_images(list(reference_images or ()))
+        mask_file = validate_mask(mask, images)
+        details: dict = {}
+        if images:
+            records = []
+            for index, (name, data, suffix) in enumerate(images, start=1):
+                target = run_dir / "input" / "references" / f"{index}.{suffix}"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                records.append({
+                    "name": name, "file": target.relative_to(run_dir).as_posix(),
+                    "sha256": digest_file(target),
+                })
+            details["reference_images"] = records
+        if mask_file is not None:
+            name, data = mask_file
+            target = run_dir / "input" / "mask.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            details["mask"] = {
+                "name": name, "file": target.relative_to(run_dir).as_posix(),
+                "sha256": digest_file(target),
+            }
+        return details
+
     def start(self, job: DesignJob) -> RunResult:
         profile = get_profile(job.profile)
         candidate_count = validate_candidate_count(job.candidate_count)
+        mode = self._validate_generation_mode(job.generation_mode)
         content_language = validate_content_language(job.content_language or job.brief.get("content_language"))
         brief = validate(bind_brief_language(job.brief, content_language), profile.brief_schema)
         run_id, run_dir = self.store.create(
@@ -150,6 +192,12 @@ class CorpusAtelierApplication(ConversationMixin):
             candidate_limit=candidate_count,
             content_language=content_language,
         )
+        inputs = self._attach_generation_inputs(
+            run_dir, job.reference_images, job.mask,
+        )
+        details = {"generation_mode": mode, **inputs} if mode != "auto" else inputs
+        if details:
+            self.store.update(run_dir, "created", **details)
         state = {
             "case_id": job.case_id,
             "run_id": run_id,
@@ -158,8 +206,15 @@ class CorpusAtelierApplication(ConversationMixin):
             "brief": brief,
             "content_language": content_language,
             "candidate_limit": candidate_count,
+            "generation_mode": mode,
             "status": "created",
         }
+        if inputs.get("reference_images"):
+            state["reference_paths"] = [
+                str(run_dir / item["file"]) for item in inputs["reference_images"]
+            ]
+        if inputs.get("mask"):
+            state["mask_path"] = str(run_dir / inputs["mask"]["file"])
         return self._invoke_graph(run_id, run_dir, state)
 
     def create_request(self, job: NaturalLanguageDesignJob, *,
@@ -169,6 +224,7 @@ class CorpusAtelierApplication(ConversationMixin):
                        conversation_state: dict | None = None,
                        conversation_snapshot: dict | None = None) -> RunResult:
         self._validate_request(job.request)
+        mode = self._validate_generation_mode(job.generation_mode)
         content_language = validate_content_language(job.content_language)
         if conversation_state is not None:
             content_language = validate_content_language(conversation_state.get("content_language"))
@@ -188,6 +244,12 @@ class CorpusAtelierApplication(ConversationMixin):
             conversation_snapshot=conversation_snapshot,
             content_language=content_language,
         )
+        inputs = self._attach_generation_inputs(
+            run_dir, job.reference_images, job.mask,
+        )
+        details = {"generation_mode": mode, **inputs} if mode != "auto" else inputs
+        if details:
+            self.store.update(run_dir, "created", **details)
         return self._result(run_id)
 
     def run_request(self, run_id: str) -> RunResult:
@@ -219,8 +281,20 @@ class CorpusAtelierApplication(ConversationMixin):
             "user_request": request,
             "content_language": validate_content_language(manifest.get("content_language")),
             "candidate_limit": validate_candidate_count(manifest.get("candidate_limit")),
+            "generation_mode": self._validate_generation_mode(
+                manifest.get("generation_mode", "auto"),
+            ),
             "status": "created",
         }
+        references = [
+            task_path(run_dir, item["file"])
+            for item in manifest.get("reference_images") or []
+        ]
+        if references:
+            state["reference_paths"] = [str(path) for path in references]
+        mask = manifest.get("mask")
+        if mask:
+            state["mask_path"] = str(task_path(run_dir, mask["file"]))
         snapshot_relative = manifest.get("artifacts", {}).get("conversation_snapshot")
         if snapshot_relative:
             snapshot = read_json(task_path(run_dir, snapshot_relative))

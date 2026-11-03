@@ -141,6 +141,28 @@ class CorpusStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [json.loads(row["record"]) for row in rows]
 
+    def reference_slice(self, query: str, *, limit: int = 3) -> list[dict]:
+        """Return compact archived prompts for advisory use by the atelier.
+
+        Retrieval is best-effort: an empty corpus or an unusable query yields an
+        empty slice instead of an error.
+        """
+        if not query or not query.strip():
+            return []
+        try:
+            records = self.search(query, limit=limit)
+        except Exception:
+            return []
+        return [
+            {
+                "id": record["id"],
+                "prompt": record["prompt"],
+                "tags": list(record.get("tags", [])),
+                "source_run_id": (record.get("source") or {}).get("run_id"),
+            }
+            for record in records
+        ]
+
     def close(self) -> None:
         self.conn.close()
 

@@ -63,8 +63,14 @@ class LanguageTextProvider(ConversationTextProvider):
                     decision["decision"] = "保留花篮提手并让右下角留白。"
         elif chinese and schema_name.endswith("-proposal.schema.json"):
             value.update(brief_interpretation="国庆花篮海报。", chosen_direction="花篮作为画面主体。", design_description="写实藤编花篮，花材错落有致，右下角留白。", design_rationale="花材层次与标题共同传递节庆氛围。", review_criteria=["保留原始文案。", "花篮提手可见，右下角保持留白。"])
-        elif chinese and schema_name == "image-spec.schema.json":
-            value.update(communication_objective="传递国庆祝福。", audience_and_context="节庆海报的观看者。", composition="花篮居中，右下角留白。", typography="标题清晰可读。", visual_treatment="写实摄影质感。", allowed_variation=["调整花材层次。"], exclusions=["不增加其他文字。"])
+        elif chinese and schema_name == "image-prompt.schema.json":
+            value.update(
+                asset_kind="国庆海报。",
+                canvas_statement="竖版国庆海报，花篮居中，右下角留白。",
+                prompt="写实摄影质感的藤编花篮位于画面中央，花材错落有致，右下角保持留白，标题清晰可读。",
+                avoid=["不增加其他文字。"],
+                visual_qa=["标题文字逐字正确。", "右下角保持留白。"],
+            )
         return value, response
 
 
@@ -97,12 +103,15 @@ class LanguageTests(unittest.TestCase):
                     self.assertEqual(result.status, "awaiting_approval")
                     self.assertEqual(read_json(Path(result.artifacts["brief"])), saved["design_brief"])
                     candidates = read_json(Path(result.artifacts["candidate_index"]))
-                    self.assertEqual(candidates[0]["image_spec"]["visible_copy"], COPY)
+                    self.assertEqual(candidates[0]["image_prompt"]["exact_copy"], COPY)
                     self.assertIn(REQUIREMENT, candidates[0]["generation_prompt"])
                     if language == "zh-CN":
                         self.assertEqual(candidates[0]["direction_seed"]["label"], "花篮国庆祝福")
                         self.assertEqual(candidates[0]["proposal"]["design_description"], "写实藤编花篮，花材错落有致，右下角留白。")
-                        self.assertEqual(candidates[0]["image_spec"]["composition"], "花篮居中，右下角留白。")
+                        self.assertEqual(
+                            candidates[0]["image_prompt"]["canvas_statement"],
+                            "竖版国庆海报，花篮居中，右下角留白。",
+                        )
                     for call in text.chat_calls + text.design_calls:
                         self.assertEqual(prompt_language(call["prompt"])["content_language"], language if call != text.chat_calls[0] else None)
                     result = app.resume(child.run_id, HumanDecision(True))

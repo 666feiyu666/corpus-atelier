@@ -35,6 +35,7 @@ from corpus_atelier.i18n import (
 )
 from corpus_atelier.model_catalog import (
     IMAGE_MODEL_PROFILES,
+    IMAGE_QUALITIES,
     TEXT_MODEL_PROFILES,
     get_image_model_profile,
     get_text_model_profile,
@@ -232,6 +233,7 @@ def _application(
     get_image_model_profile(image_model)
     return CorpusAtelierApplication(
         runs_root=TASKS_ROOT,
+        corpus_db_path=CORPUS_DB_PATH,
         text_provider=OpenAITextProvider(
             model=text_model,
             reasoning_effort=reasoning_effort,
@@ -408,8 +410,10 @@ def _initialize_state() -> None:
     st.session_state.setdefault("new_task_model", _default_text_model())
     st.session_state.setdefault("new_task_image_model", _default_image_model())
     st.session_state.setdefault("new_task_reasoning", "medium")
+    st.session_state.setdefault("new_task_quality", "medium")
     st.session_state.setdefault("new_task_method", next(iter(DESIGN_METHODS)))
     st.session_state.setdefault("new_task_candidates", 3)
+    st.session_state.setdefault("new_task_mode", "auto")
 
 
 def _saved_tasks() -> list[RunSummary]:
@@ -776,7 +780,7 @@ def _render_product_tabs() -> str:
     return view
 
 
-def _render_new_task_settings() -> tuple[str, str, str, str, int]:
+def _render_new_task_settings() -> tuple[str, str, str, str, str, int, str]:
     model_ids = [profile.model for profile in TEXT_MODEL_PROFILES]
     model = st.selectbox(
         _t("text_model"),
@@ -798,6 +802,18 @@ def _render_new_task_settings() -> tuple[str, str, str, str, int]:
         format_func=_image_model_label,
         key="new_task_image_model",
     )
+    image_profile = get_image_model_profile(image_model)
+    qualities = [
+        quality for quality in IMAGE_QUALITIES
+        if quality not in {"xhigh", "max"} or image_profile.supports_max_quality
+    ]
+    if st.session_state.get("new_task_quality") not in qualities:
+        st.session_state.new_task_quality = "medium"
+    image_quality = st.segmented_control(
+        _t("image_quality"),
+        qualities,
+        key="new_task_quality",
+    )
     method = st.segmented_control(
         _t("design_method"),
         list(DESIGN_METHODS),
@@ -809,7 +825,13 @@ def _render_new_task_settings() -> tuple[str, str, str, str, int]:
         [1, 2, 3],
         key="new_task_candidates",
     )
-    return model, reasoning, image_model, method, candidates
+    generation_mode = st.segmented_control(
+        _t("generation_mode"),
+        ["auto", "direct", "staged"],
+        format_func=lambda value: _t(f"mode_{value}"),
+        key="new_task_mode",
+    )
+    return model, reasoning, image_model, image_quality, method, candidates, generation_mode
 
 
 def _corpus_store() -> CorpusStore:
@@ -929,9 +951,13 @@ def _start_task(
     model: str,
     reasoning_effort: str,
     image_model: str,
+    image_quality: str,
     profile: str,
     candidate_count: int,
+    generation_mode: str = "auto",
     attachments: list[tuple[str, bytes]] | None = None,
+    reference_images: list[tuple[str, bytes]] | None = None,
+    mask: tuple[str, bytes] | None = None,
 ) -> None:
     if not request.strip():
         st.error(_t("request_required"))
@@ -944,6 +970,7 @@ def _start_task(
         model,
         reasoning_effort,
         image_model,
+        image_quality,
         api_key=credential.value,
     )
     summary: RunSummary | None = None
@@ -953,6 +980,9 @@ def _start_task(
             profile=profile,
             request=request,
             candidate_count=candidate_count,
+            generation_mode=generation_mode,
+            reference_images=tuple(reference_images or ()),
+            mask=mask,
         )
         result = app.create_conversation(job, attachments=attachments)
         summary = app.inspect_task(result.run_id)
@@ -972,8 +1002,22 @@ def _render_studio() -> None:
     st.subheader(_t("start_from_request"))
     st.caption(_t("reference_upload_hint"))
     with st.popover(_t("task_settings"), icon=":material/tune:"):
-        model, reasoning, image_model, profile, candidate_count = (
-            _render_new_task_settings()
+        (
+            model, reasoning, image_model, image_quality, profile,
+            candidate_count, generation_mode,
+        ) = _render_new_task_settings()
+        st.divider()
+        st.caption(_t("generation_inputs_hint"))
+        reference_files = st.file_uploader(
+            _t("reference_images_label"),
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=True,
+            key="new_task_references",
+        )
+        mask_file = st.file_uploader(
+            _t("mask_label"),
+            type=["png"],
+            key="new_task_mask",
         )
     submission = st.chat_input(
         _t("request_placeholder"),
@@ -984,15 +1028,28 @@ def _render_studio() -> None:
         max_upload_size=10,
     )
     if submission:
-        _start_task(
-            _submission_text(submission) or _t("reference_only_request"),
-            model=model,
-            reasoning_effort=reasoning,
-            image_model=image_model,
-            profile=profile,
-            candidate_count=candidate_count,
-            attachments=_submission_attachments(submission),
+        references = [
+            (upload.name, upload.getvalue()) for upload in reference_files or []
+        ]
+        mask = (
+            (mask_file.name, mask_file.getvalue()) if mask_file is not None else None
         )
+        try:
+            _start_task(
+                _submission_text(submission) or _t("reference_only_request"),
+                model=model,
+                reasoning_effort=reasoning,
+                image_model=image_model,
+                image_quality=image_quality,
+                profile=profile,
+                candidate_count=candidate_count,
+                generation_mode=generation_mode,
+                attachments=_submission_attachments(submission),
+                reference_images=references,
+                mask=mask,
+            )
+        except ValueError as exc:
+            st.error(str(exc), icon=":material/error:")
 
 
 def _render_brief_contents(brief: dict, *, include_requirements: bool = True) -> None:
@@ -1114,24 +1171,35 @@ def _render_brief(result: RunResult) -> None:
             _render_brief_contents(brief)
 
 
+def _render_visual_qa(candidate: dict[str, Any]) -> None:
+    """Show the prompt writer's review checklist for one candidate."""
+    checks = ((candidate.get("image_prompt") or {}).get("visual_qa")) or []
+    if not checks:
+        return
+    with st.expander(_t("visual_qa"), icon=":material/checklist:"):
+        for item in checks:
+            st.markdown(f"- {item}")
+
+
 def _render_generation_preview(result: RunResult) -> None:
     ready = _ready_candidates(result)
     if not ready:
         return
     columns = st.columns(len(ready), gap="large", vertical_alignment="top")
     for column, candidate in zip(columns, ready, strict=True):
-        proposal = candidate.get("proposal", {})
+        proposal = candidate.get("proposal") or {}
         seed = candidate.get("direction_seed", {})
         with column.container(border=True, height="stretch"):
             st.subheader(seed.get("label", candidate["candidate_id"]))
-            st.markdown(
-                proposal.get("chosen_direction", _t("proposal_fallback"))
-            )
-            if proposal.get("design_description"):
-                with st.expander(_t("full_visual_description"), expanded=True):
-                    st.markdown(proposal["design_description"])
-            if proposal.get("design_rationale"):
-                st.caption(proposal["design_rationale"])
+            if proposal:
+                st.markdown(
+                    proposal.get("chosen_direction", _t("proposal_fallback"))
+                )
+                if proposal.get("design_description"):
+                    with st.expander(_t("full_visual_description"), expanded=True):
+                        st.markdown(proposal["design_description"])
+                if proposal.get("design_rationale"):
+                    st.caption(proposal["design_rationale"])
             request = candidate.get("generation_request", {})
             st.caption(
                 _t("meta_separator").join([
@@ -1140,6 +1208,7 @@ def _render_generation_preview(result: RunResult) -> None:
                     _t("size_meta", value=request.get("size", _t("not_recorded"))),
                 ])
             )
+            _render_visual_qa(candidate)
             prompt = candidate.get("generation_prompt", "")
             if prompt:
                 with st.expander(_t("full_prompt_to_send")):
@@ -1223,7 +1292,7 @@ def _render_image_gallery(
             candidate_id = candidate.get("candidate_id", "方案")
             is_selected = candidate_id == selected_id
             seed = candidate.get("direction_seed", {})
-            proposal = candidate.get("proposal", {})
+            proposal = candidate.get("proposal") or {}
             with column.container(border=True, height="stretch"):
                 image_data = _verified_image_bytes(candidate)
                 if image_data is None:
@@ -1245,6 +1314,7 @@ def _render_image_gallery(
                 if image_data is not None:
                     if proposal.get("design_rationale"):
                         st.caption(proposal["design_rationale"])
+                    _render_visual_qa(candidate)
                     st.download_button(
                         _t("download_png"),
                         data=image_data,
@@ -1340,7 +1410,7 @@ def _render_design_details(result: RunResult) -> None:
 
         for tab, candidate in zip(st.tabs(labels), candidates, strict=True):
             with tab:
-                proposal = candidate.get("proposal", {})
+                proposal = candidate.get("proposal") or {}
                 status = candidate.get("status")
                 if status == "failed":
                     error = candidate.get("error", {})
@@ -1349,16 +1419,19 @@ def _render_design_details(result: RunResult) -> None:
                         message=error.get("message", _t("no_failure_reason")),
                     ))
 
-                st.subheader(_t("design_direction"))
-                st.markdown(
-                    proposal.get("chosen_direction", _t("no_direction"))
-                )
-                if proposal.get("design_description"):
-                    st.subheader(_t("full_visual_description"))
-                    st.markdown(proposal["design_description"])
-                if proposal.get("design_rationale"):
-                    st.subheader(_t("design_rationale"))
-                    st.markdown(proposal["design_rationale"])
+                if proposal:
+                    st.subheader(_t("design_direction"))
+                    st.markdown(
+                        proposal.get("chosen_direction", _t("no_direction"))
+                    )
+                    if proposal.get("design_description"):
+                        st.subheader(_t("full_visual_description"))
+                        st.markdown(proposal["design_description"])
+                    if proposal.get("design_rationale"):
+                        st.subheader(_t("design_rationale"))
+                        st.markdown(proposal["design_rationale"])
+                else:
+                    st.caption(_t("direct_route_meta"))
 
                 request = candidate.get("generation_request", {})
                 if request:
@@ -1369,6 +1442,7 @@ def _render_design_details(result: RunResult) -> None:
                             _t("size_meta", value=request.get("size", _t("not_recorded"))),
                         ])
                     )
+                _render_visual_qa(candidate)
                 prompt = candidate.get("generation_prompt")
                 if prompt:
                     st.subheader(_t("generation_prompt"))

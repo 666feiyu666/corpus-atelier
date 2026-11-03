@@ -28,7 +28,7 @@ from corpus_atelier.config.settings import (
     resolve_openai_api_key,
     save_preferences,
 )
-from corpus_atelier.app.state import RunResult, RunSummary
+from corpus_atelier.app.state import RunSummary
 from corpus_atelier.app.supervisor import TaskSupervisor
 
 LOGGER = logging.getLogger(__name__)
@@ -37,27 +37,13 @@ LOGGER = logging.getLogger(__name__)
 PRODUCT_CASE_ID = "natural-language"
 
 
-TERMINAL_STATUSES = {"completed", "rejected", "failed"}
-
-
-# The studio runs one general design profile with one route policy: the brief decides
-# whether a round explores directions, and the direct route renders a single image.
-DEFAULT_PROFILE = "general-graphic"
-DEFAULT_CANDIDATE_LIMIT = 3
-DEFAULT_GENERATION_MODE = "auto"
-
-
 STATUS_ICONS = {
-    "created": ":material/progress_activity:",
-    "interpreting_request": ":material/progress_activity:",
-    "designing_directions": ":material/progress_activity:",
-    "implementing_designs": ":material/progress_activity:",
-    "compiling_candidates": ":material/progress_activity:",
-    "awaiting_approval": ":material/approval:",
-    "generating_candidates": ":material/progress_activity:",
-    "awaiting_selection": ":material/select_check_box:",
-    "completed": ":material/check_circle:",
-    "rejected": ":material/cancel:",
+    "created": ":material/pending:",
+    "discussing_request": ":material/progress_activity:",
+    "extracting": ":material/progress_activity:",
+    "generating_image": ":material/progress_activity:",
+    "prompt_ready": ":material/edit_note:",
+    "outcome_unknown": ":material/help:",
     "failed": ":material/error:",
 }
 
@@ -91,12 +77,6 @@ def _status_label(status: str) -> str:
     return _t(f"status.{status}")
 
 
-def _result_message(result: RunResult) -> str:
-    key = f"result.{result.status}"
-    value = _t(key)
-    return result.message if value == key else value
-
-
 def _current_credential() -> ApiCredential | None:
     return resolve_openai_api_key(
         st.session_state.get("session_openai_api_key"),
@@ -114,11 +94,8 @@ def _application(
     get_text_model_profile(text_model)
     validate_reasoning_effort(text_model, reasoning_effort)
     get_image_model_profile(image_model)
-    paths = resolve_paths()
     return CorpusAtelierApplication(
-        runs_root=paths.tasks_root,
-        corpus_db_path=paths.corpus_db_path,
-        corpus_media_root=paths.corpus_media_root,
+        runs_root=resolve_paths().tasks_root,
         text_provider=OpenAITextProvider(
             model=text_model,
             reasoning_effort=reasoning_effort,
@@ -158,6 +135,22 @@ def _image_model_label(model: str) -> str:
         return model
 
 
+def _app_for_manifest(manifest: dict[str, Any]) -> CorpusAtelierApplication:
+    credential = _current_credential()
+    return _application_for_manifest(
+        manifest,
+        credential.value if credential else None,
+    )
+
+
+def _application_for_manifest(
+    manifest: dict[str, Any],
+    api_key: str | None,
+) -> CorpusAtelierApplication:
+    model, effort, image_model, image_quality = _model_settings(manifest)
+    return _application(model, effort, image_model, image_quality, api_key)
+
+
 def _model_settings(manifest: dict[str, Any]) -> tuple[str, str, str, str]:
     text = manifest.get("models", {}).get("text", {})
     image = manifest.get("models", {}).get("image", {})
@@ -171,30 +164,6 @@ def _model_settings(manifest: dict[str, Any]) -> tuple[str, str, str, str]:
     return model, effort, image_model, image_quality
 
 
-def _app_for_manifest(
-    manifest: dict[str, Any],
-) -> CorpusAtelierApplication:
-    credential = _current_credential()
-    return _application_for_manifest(
-        manifest,
-        credential.value if credential else None,
-    )
-
-
-def _application_for_manifest(
-    manifest: dict[str, Any],
-    api_key: str | None,
-) -> CorpusAtelierApplication:
-    model, effort, image_model, image_quality = _model_settings(manifest)
-    return _application(
-        model,
-        effort,
-        image_model,
-        image_quality,
-        api_key,
-    )
-
-
 @st.cache_resource
 def _task_supervisor() -> TaskSupervisor:
     return TaskSupervisor(max_workers=2)
@@ -204,15 +173,11 @@ def _run_in_background(
     run_id: str,
     manifest: dict[str, Any],
     api_key: str,
-    decision: object | None = None,
 ) -> None:
     app: CorpusAtelierApplication | None = None
     try:
         app = _application_for_manifest(manifest, api_key)
-        if decision is None:
-            app.continue_task(run_id)
-        else:
-            app.resume(run_id, decision)
+        app.continue_task(run_id)
     except Exception as exc:
         LOGGER.exception("Background task %s failed.", run_id)
         store = _task_store()
@@ -230,21 +195,11 @@ def _run_in_background(
             app.close()
 
 
-def _submit_saved_task(
-    summary: RunSummary,
-    api_key: str,
-    *,
-    decision: object | None = None,
-) -> bool:
+def _submit_saved_task(summary: RunSummary, api_key: str) -> bool:
     manifest = dict(summary.manifest)
     return _task_supervisor().submit(
         summary.run_id,
-        lambda: _run_in_background(
-            summary.run_id,
-            manifest,
-            api_key,
-            decision,
-        ),
+        lambda: _run_in_background(summary.run_id, manifest, api_key),
     )
 
 
@@ -255,13 +210,16 @@ def _ensure_recoverable_tasks(tasks: list[RunSummary]) -> None:
     supervisor = _task_supervisor()
     for task in tasks:
         if (
-            task.status in RECOVERABLE_TASK_STATUSES
+            task.manifest.get("is_prompt_session")
+            and task.status in RECOVERABLE_TASK_STATUSES
             and not supervisor.is_running(task.run_id)
         ):
             _submit_saved_task(task, credential.value)
 
 
 def _task_is_live(task: RunSummary) -> bool:
+    if not task.manifest.get("is_prompt_session"):
+        return False
     if _task_supervisor().is_running(task.run_id):
         return True
     return (
@@ -333,6 +291,8 @@ def _save_language(language: str) -> None:
 
 
 def _task_icon(task: RunSummary) -> str:
+    if not task.manifest.get("is_prompt_session"):
+        return ":material/history:"
     if _task_supervisor().is_running(task.run_id):
         return ":material/progress_activity:"
     if (
@@ -349,32 +309,18 @@ def _corpus_store() -> CorpusStore:
     return CorpusStore(db_path)
 
 
-def _resume(summary: RunSummary, decision: object) -> None:
-    credential = _current_credential()
-    if credential is None:
-        st.error(_t("api_key_missing"), icon=":material/key_off:")
+def _delete_task(task: RunSummary) -> None:
+    """Permanently delete one task, then leave its workspace."""
+    app = CorpusAtelierApplication(runs_root=resolve_paths().tasks_root)
+    try:
+        app.delete_task(task.run_id)
+    except Exception:
+        LOGGER.exception("Could not delete task %s.", task.run_id)
+        st.error(_t("delete_failed"), icon=":material/error:")
         return
-    _submit_saved_task(
-        summary,
-        credential.value,
-        decision=decision,
-    )
-    st.rerun()
-
-
-def _status_state(status: str) -> str:
-    if status == "failed":
-        return "error"
-    if status in TERMINAL_STATUSES or status.startswith("awaiting_"):
-        return "complete"
-    return "running"
-
-
-def _submission_text(submission) -> str:
-    return submission if isinstance(submission, str) else submission.text
-
-
-def _submission_attachments(submission) -> list[tuple[str, bytes]]:
-    if isinstance(submission, str):
-        return []
-    return [(file.name, file.getvalue()) for file in submission.files]
+    finally:
+        app.close()
+    if st.session_state.selected_task_id == task.run_id:
+        _select_task(None)
+    st.toast(_t("task_deleted"), icon=":material/delete:")
+    st.rerun(scope="app")

@@ -1,40 +1,50 @@
 import io
-from pathlib import Path
+import json
+import tempfile
 import unittest
 from unittest.mock import patch
 
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.cli import main
 
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
 class CliTests(unittest.TestCase):
-    def test_profiles(self):
-        stream = io.StringIO()
-        with patch("sys.stdout", stream):
-            self.assertEqual(main(["profiles"]), 0)
-        listing = stream.getvalue()
-        for name in ("general-graphic", "poster", "article-cover"):
-            self.assertIn(name, listing)
-        self.assertNotIn("rhetoric", listing)
+    def test_inspect_prints_the_saved_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = CorpusAtelierApplication(runs_root=directory)
+            try:
+                created = app.start_from_prompt(
+                    "A quiet poster of a paper lantern.",
+                    case_id="natural-language",
+                    settings={"image_quality": "medium", "aspect_ratio": [1, 1]},
+                )
+            finally:
+                app.close()
+            stream = io.StringIO()
+            with patch("sys.stdout", stream):
+                self.assertEqual(
+                    main([
+                        "inspect", created.run_id, "--runs-root", directory,
+                    ]),
+                    0,
+                )
+            manifest = json.loads(stream.getvalue())
+            self.assertEqual(manifest["run_id"], created.run_id)
+            self.assertEqual(manifest["status"], "prompt_ready")
 
-    def test_validate_never_calls_provider(self):
-        stream = io.StringIO()
-        with patch("sys.stdout", stream):
-            code = main([
-                "validate", "--profile", "poster", "--brief",
-                str(ROOT / "tests/fixtures/cases/poster-01/brief.json"),
-            ])
-        self.assertEqual(code, 0)
-        self.assertIn("Valid poster brief", stream.getvalue())
+    def test_the_retired_profile_commands_are_gone(self):
+        for command in (["profiles"], ["validate", "--brief", "x.json"]):
+            with self.assertRaises(SystemExit):
+                with patch("sys.stderr", io.StringIO()):
+                    main(command)
 
-    def test_validate_accepts_a_retired_profile_name(self):
-        stream = io.StringIO()
-        with patch("sys.stdout", stream):
-            code = main([
-                "validate", "--profile", "rhetoric-poster", "--brief",
-                str(ROOT / "tests/fixtures/cases/poster-01/brief.json"),
-            ])
-        self.assertEqual(code, 0)
-        self.assertIn("Valid poster brief", stream.getvalue())
+    def test_inspect_rejects_an_unknown_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(FileNotFoundError):
+                main([
+                    "inspect", "20260101T000000Z_aaaaaaaa", "--runs-root", directory,
+                ])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -6,12 +6,6 @@ from importlib.resources import files
 from jsonschema import Draft202012Validator, ValidationError
 
 
-def validate_candidate_count(value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value not in {1, 2, 3}:
-        raise ValueError("Candidate limit must be 1, 2, or 3.")
-    return value
-
-
 def load_schema(name: str) -> dict:
     schema = json.loads(files("corpus_atelier").joinpath("schemas", name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
@@ -24,22 +18,4 @@ def validate(value: object, schema_name: str):
     except ValidationError as exc:
         location = ".".join(str(part) for part in exc.absolute_path)
         raise ValueError(f"Invalid {schema_name} at {location or '<root>'}: {exc.message}") from exc
-    return value
-
-
-def validate_proposal(
-    value: dict, schema_name: str, *, candidate_id: str | None = None,
-) -> dict:
-    validate(value, schema_name)
-    if candidate_id is not None and value["candidate_id"] != candidate_id:
-        raise ValueError("Design proposal changed the assigned candidate id.")
-    return value
-
-
-def validate_image_prompt(value: dict, exact_copy: list[str]) -> dict:
-    validate(value, "image-prompt.schema.json")
-    if value["exact_copy"] != list(exact_copy):
-        raise ValueError("The image prompt changed the exact visible copy.")
-    if any(not item.strip() for item in value["visual_qa"]):
-        raise ValueError("The image prompt contains an empty visual QA check.")
     return value

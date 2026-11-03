@@ -1,69 +1,29 @@
-"""Public application records and the LangGraph state contract."""
+"""Public application records for the prompt-centered workflow."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
-GenerationMode = Literal["auto", "direct", "staged"]
-ExecutionRoute = Literal["direct", "staged"]
-# manual: the user approves every generation preview. auto: a precise direct
-# request skips that pause, the way the gpt-image skill's fast path does.
-ApprovalPolicy = Literal["manual", "auto"]
 
 RunStatus = Literal[
     "discussing_request",
-    "prompt_ready", "extracting", "generating_image", "outcome_unknown",
-    "created", "interpreting_request", "designing",
-    "designing_directions", "implementing_designs", "compiling_candidates",
-    "awaiting_approval", "rejected", "generating_candidates",
-    "awaiting_selection", "completed", "failed",
+    "prompt_ready",
+    "extracting",
+    "generating_image",
+    "outcome_unknown",
+    "created",
+    "failed",
 ]
 
-@dataclass(frozen=True)
-class DesignJob:
-    case_id: str
-    profile: str
-    brief: dict[str, Any]
-    candidate_count: int = 1  # Maximum number of meaningful directions.
-    content_language: str | None = None
-    generation_mode: GenerationMode = "auto"
-    reference_images: tuple[tuple[str, bytes], ...] = ()
-    mask: tuple[str, bytes] | None = None
-
 
 @dataclass(frozen=True)
-class NaturalLanguageDesignJob:
+class PromptSessionJob:
+    """The minimal request record a prompt session needs at creation time."""
+
     case_id: str
-    profile: str
     request: str
-    candidate_count: int = 1  # Maximum number of meaningful directions.
-    content_language: str | None = None
-    generation_mode: GenerationMode = "auto"
-    reference_images: tuple[tuple[str, bytes], ...] = ()
-    mask: tuple[str, bytes] | None = None
-
-
-@dataclass(frozen=True)
-class HumanDecision:
-    approved: bool
-    reviewer: str = "cli-user"
-    note: str = ""
-    prompt_overrides: dict[str, str] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class CandidateSelection:
-    selected_candidate_id: str | None
-    reviewer: str = "cli-user"
-    note: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -81,33 +41,3 @@ class RunSummary:
     status: str
     run_dir: Path
     manifest: dict[str, Any]
-
-
-class AtelierState(TypedDict, total=False):
-    case_id: str
-    run_id: str
-    run_dir: str
-    profile: str
-    user_request: str
-    content_language: str | None
-    user_requirements: list[str]
-    superseded_user_requirements: list[str]
-    brief: dict[str, Any]
-    generation_mode: GenerationMode
-    execution_route: ExecutionRoute
-    approval_policy: ApprovalPolicy
-    reference_paths: list[str]
-    mask_path: str
-    candidate_limit: int
-    candidate_count: int
-    direction_plan: dict[str, Any]
-    candidates: list[dict[str, Any]]
-    generation_size: str
-    output_ratio: tuple[int, int]
-    canvas: dict[str, Any]
-    batch_digest: str
-    approval: dict[str, Any]
-    selection: dict[str, Any]
-    image_path: str
-    status: RunStatus
-    error: str

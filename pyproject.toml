@@ -12,8 +12,6 @@ dependencies = [
     "Pillow>=10,<13",
     "openai>=2,<3",
     "jsonschema>=4,<5",
-    "langgraph>=1,<2",
-    "langgraph-checkpoint-sqlite>=3,<4",
     "streamlit>=1.64,<2",
 ]
 
@@ -26,4 +24,4 @@ packages = {find = {where = ["src"]}}
 [tool.setuptools.package-dir]
 "" = "src"
 [tool.setuptools.package-data]
-corpus_atelier = ["skills/**/*.md", "schemas/*.json", "corpus/seed/*.json"]
+corpus_atelier = ["schemas/*.json", "corpus/seed/*.json"]

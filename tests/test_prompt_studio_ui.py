@@ -1,6 +1,5 @@
 """Streamlit checks for the prompt-centered entry and its session workspace."""
 
-import gc
 from io import BytesIO
 import json
 import os
@@ -11,7 +10,6 @@ import unittest
 from unittest.mock import patch
 
 from PIL import Image
-import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from corpus_atelier.app.service import CorpusAtelierApplication
@@ -309,6 +307,42 @@ class PromptStudioTests(unittest.TestCase):
             self.assertTrue(
                 (Path(directory) / CASE / run_id / edited["image_path"]).is_file()
             )
+
+    def test_the_source_image_and_negative_prompt_are_visible(self):
+        with TemporaryDirectory() as directory:
+            run_id = self.create_session(directory, image=True)
+            with self.provider_patches(), self.application(directory) as app:
+                app.continue_task(run_id)
+            with self.provider_patches(), patch.dict(os.environ, self.environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10)
+                page.session_state["selected_task_id"] = run_id
+                page.run()
+            self.assertFalse(page.exception)
+            captions = [item.value for item in page.caption]
+            self.assertIn("source.png", captions)
+            self.assertIn("源图 · 当前提示词提取自这张图", captions)
+            self.assertIn("本会话的图片（1）", [item.label for item in page.expander])
+            self.assertIn(
+                "photorealistic, flat vector rendering, watermark",
+                [item.value for item in page.code],
+            )
+            self.assertGreaterEqual(len(page.get("image")), 1)
+
+    def test_an_oversized_upload_reports_the_exact_reason(self):
+        oversized = b"0" * (10 * 1024 * 1024 + 1)
+        with TemporaryDirectory() as directory:
+            with self.provider_patches(), patch.dict(os.environ, self.environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10).run()
+                page.segmented_control(key="prompt_start_mode").set_value("image").run()
+                page.get("file_uploader")[0].upload(
+                    "huge.png", oversized, "image/png",
+                ).run()
+                page.button(key="start_image_action").click().run()
+            self.assertFalse(page.exception)
+            self.assertTrue(any(
+                "10 MB" in item.value for item in page.error
+            ), [item.value for item in page.error])
+            self.assertIsNone(page.session_state["selected_task_id"])
 
     def test_a_duplicate_submit_never_calls_the_provider_twice(self):
         with TemporaryDirectory() as directory:

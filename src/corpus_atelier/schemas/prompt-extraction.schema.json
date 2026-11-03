@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "PromptExtraction",
-  "description": "An estimated, standalone image-generation prompt derived from one image.",
+  "description": "An estimated, standalone image-generation prompt plus a targeted negative prompt derived from one image.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "prompt_text": {"type": "string", "minLength": 1, "maxLength": 8000},
+    "negative_prompt": {"type": ["string", "null"], "maxLength": 2000},
     "observations": {"type": ["string", "null"], "maxLength": 2000}
   },
   "required": ["prompt_text", "observations"]

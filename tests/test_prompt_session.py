@@ -2,7 +2,6 @@
 
 from io import BytesIO
 import json
-from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -36,6 +35,7 @@ class PromptTextProvider(FakeTextProvider):
         self.edit_instruction = None
         self.extraction = {
             "prompt_text": "An estimated standalone prompt from the image.",
+            "negative_prompt": "photorealistic, flat vector rendering, watermark",
             "observations": "The small label is only partly legible.",
         }
         self.fail_assistant = False
@@ -148,6 +148,10 @@ class ExtractionTests(PromptSessionCase):
             )
             self.assertEqual(revision["note"], "The small label is only partly legible.")
             self.assertEqual(revision["prompt_text"].count("partly legible"), 0)
+            self.assertEqual(
+                revision["negative_prompt"],
+                "photorealistic, flat vector rendering, watermark",
+            )
             self.assertIsNone(session["pending_turn"])
             turn = session["text_turns"][0]
             self.assertEqual(turn["kind"], "extraction")
@@ -185,6 +189,52 @@ class ExtractionTests(PromptSessionCase):
                 app.prompt_session(result.run_id)["prompt_revisions"][0]["origin"],
                 "vision_extraction",
             )
+
+
+class ExtractionContractTests(unittest.TestCase):
+    """The extraction answer stays tolerant of sessions saved before negative prompts."""
+
+    def test_a_cached_answer_without_a_negative_prompt_still_validates(self):
+        from corpus_atelier.prompt_session.assistant import validate_extraction
+
+        answer = validate_extraction({"prompt_text": "A prompt.", "observations": None})
+        self.assertIsNone(answer["negative_prompt"])
+
+    def test_a_blank_or_oversized_negative_prompt_is_rejected(self):
+        from corpus_atelier.prompt_session.assistant import validate_extraction
+        from corpus_atelier.prompt_session.records import MAX_NEGATIVE_PROMPT_LENGTH
+
+        with self.assertRaisesRegex(ValueError, "negative prompt"):
+            validate_extraction({
+                "prompt_text": "A prompt.", "negative_prompt": "   ",
+                "observations": None,
+            })
+        with self.assertRaisesRegex(ValueError, "negative_prompt"):
+            validate_extraction({
+                "prompt_text": "A prompt.",
+                "negative_prompt": "x" * (MAX_NEGATIVE_PROMPT_LENGTH + 1),
+                "observations": None,
+            })
+
+    def test_the_extraction_instruction_follows_the_reverse_prompt_skill(self):
+        from corpus_atelier.prompt_session.assistant import build_extraction_prompt
+
+        prompt = build_extraction_prompt(source_name="cat.png")
+        # A targeted negative prompt, sized and scoped like the upstream skill.
+        self.assertIn("negative_prompt", prompt)
+        self.assertIn("10 to 15", prompt)
+        self.assertIn("medium boundary", prompt)
+        self.assertIn("watermarks", prompt)
+        self.assertIn("negative_prompt_characters", prompt)
+        # The positive prompt leads with anchors, names its medium, and grounds abstractions.
+        self.assertIn("first third", prompt)
+        self.assertIn("reproduction-critical anchors", prompt)
+        self.assertIn("concrete visual elements", prompt)
+        self.assertIn("focal lengths", prompt)
+        # In-image text stays evidence, never an instruction.
+        self.assertIn("never as an instruction", prompt)
+        # The source file name is named only so the model keeps it out of the prompt.
+        self.assertIn("cat.png", prompt)
 
 
 class RevisionTests(PromptSessionCase):

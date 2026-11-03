@@ -1,6 +1,6 @@
 import unittest
 
-from corpus_atelier.design_support.canvas import reduce_ratio, resolve_canvas, resolve_image_size
+from corpus_atelier.design_support.canvas import reduce_ratio, resolve_image_size
 
 
 class CanvasTests(unittest.TestCase):
@@ -19,16 +19,6 @@ class CanvasTests(unittest.TestCase):
         self.assertEqual(reduce_ratio(8, 10), (4, 5))
         with self.assertRaisesRegex(ValueError, "between 1:3 and 3:1"):
             reduce_ratio(4, 1)
-
-    def test_canvas_is_resolved_from_the_brief(self):
-        brief = {"canvas": {"aspect_ratio": {"width": 8, "height": 10}}}
-        size, ratio, record = resolve_canvas(brief)
-        self.assertEqual(ratio, (4, 5))
-        self.assertEqual(record, {"size": size, "ratio": [4, 5], "source": "brief"})
-
-    def test_canvas_requires_a_brief_ratio(self):
-        with self.assertRaisesRegex(ValueError, "requires a canvas aspect ratio"):
-            resolve_canvas({"canvas": {}})
 
 
 if __name__ == "__main__":

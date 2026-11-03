@@ -1,8 +1,4 @@
-"""Command-line adapter for validating and inspecting saved Corpus Atelier tasks.
-
-Generation lives in the chat studio (Streamlit); the CLI is intentionally
-read-only so there is a single generation path.
-"""
+"""Command-line adapter for inspecting saved tasks and managing the corpus."""
 
 from __future__ import annotations
 
@@ -14,25 +10,15 @@ from .app.service import CorpusAtelierApplication
 from .config.paths import resolve_paths
 from .corpus.gallery import import_seed, load_seed, packaged_seed_path
 from .corpus.index import CorpusStore
-from .design_support.validation import validate
-from .app.registry import PROFILE_NAMES, PROFILES, get_profile
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="corpus-atelier")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("profiles", help="List registered design profiles.")
-
-    validate_cmd = commands.add_parser(
-        "validate", help="Validate inputs without model calls.",
-    )
-    validate_cmd.add_argument("--profile", required=True, choices=PROFILE_NAMES)
-    validate_cmd.add_argument("--brief", required=True, type=Path)
 
     inspect = commands.add_parser("inspect", help="Inspect a saved task.")
     inspect.add_argument("run_id")
-    inspect.add_argument("--case-id", required=True)
-    inspect.add_argument("--runs-root", type=Path, default=Path(".atelier/tasks"))
+    inspect.add_argument("--runs-root", type=Path, default=None)
 
     corpus = commands.add_parser("corpus", help="Manage the local corpus archive.")
     corpus_commands = corpus.add_subparsers(dest="corpus_command", required=True)
@@ -48,13 +34,6 @@ def _parser() -> argparse.ArgumentParser:
     gallery.add_argument("--db", type=Path, default=None)
     gallery.add_argument("--media-root", type=Path, default=None)
     return parser
-
-
-def _read_object(path: Path, label: str) -> dict:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a JSON object.")
-    return value
 
 
 def _import_gallery(args) -> int:
@@ -86,26 +65,14 @@ def _import_gallery(args) -> int:
 
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
-    if args.command == "profiles":
-        for profile in PROFILES.values():
-            print(f"{profile.name}\t{profile.description}")
-        return 0
-
-    if args.command == "validate":
-        profile = get_profile(args.profile)
-        validate(_read_object(args.brief, "Brief"), profile.brief_schema)
-        print(f"Valid {profile.name} brief: {args.brief.resolve()}")
-        return 0
-
     if args.command == "corpus":
         return _import_gallery(args)
 
-    app = CorpusAtelierApplication(
-        runs_root=getattr(args, "runs_root", ".atelier/tasks"),
-    )
+    runs_root = args.runs_root or resolve_paths().tasks_root
+    app = CorpusAtelierApplication(runs_root=runs_root)
     try:
-        summary = app.inspect(args.case_id, args.run_id)
-        print(json.dumps(summary.manifest, ensure_ascii=False, indent=2))
+        run_dir = app.store.find_run(args.run_id)
+        print(json.dumps(app.store.manifest(run_dir), ensure_ascii=False, indent=2))
     finally:
         app.close()
     return 0

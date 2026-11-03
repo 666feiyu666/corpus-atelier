@@ -151,38 +151,6 @@ class CorpusStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [json.loads(row["record"]) for row in rows]
 
-    def reference_slice(
-        self, query: str | None, *, limit: int = 3, tags: list[str] | None = None,
-    ) -> list[dict]:
-        """Return compact archived prompts for advisory use by the atelier.
-
-        Retrieval is best-effort: an empty corpus or an unusable query yields an
-        empty slice instead of an error. A label filter alone is enough, which is
-        how a brief with only a deliverable category still finds comparable work.
-        """
-        tags = list(tags or [])
-        if (not query or not query.strip()) and not tags:
-            return []
-        try:
-            records = self.search(query, tags=tags, limit=limit)
-            if not records and query:
-                # A long brief tailors the query too tightly for an AND match.
-                records = self.search(query, tags=tags, limit=limit, match_any=True)
-        except Exception:
-            return []
-        return [
-            {
-                "id": record["id"],
-                "prompt": record["prompt"],
-                "tags": list(record.get("tags", [])),
-                "source_run_id": (record.get("source") or {}).get("run_id"),
-                "note": (record.get("source") or {}).get("note"),
-                "url": (record.get("source") or {}).get("url"),
-                "image": (record.get("image") or {}).get("path"),
-            }
-            for record in records
-        ]
-
     def close(self) -> None:
         self.conn.close()
 

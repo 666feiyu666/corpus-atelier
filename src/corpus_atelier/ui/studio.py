@@ -9,21 +9,23 @@ from corpus_atelier.config.settings import load_preferences
 
 from corpus_atelier.config.paths import resolve_paths
 from corpus_atelier.ui.session import (
+    _delete_task,
+    _display_title,
     _ensure_recoverable_tasks,
     _initialize_state,
     _saved_tasks,
     _select_task,
+    _status_label,
     _sync_product_view_tabs,
     _t,
     _task_is_live,
 )
-from corpus_atelier.ui.sidebar import _render_live_task, _render_sidebar
-from corpus_atelier.ui.task_view import _render_task
+from corpus_atelier.ui.sidebar import _render_sidebar
 from corpus_atelier.ui.gallery import _render_gallery
+from corpus_atelier.ui.prompt_start import _render_prompt_start
 from corpus_atelier.ui.prompt_studio import (
     _render_live_prompt_session,
     _render_prompt_session,
-    _render_prompt_start,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -54,6 +56,20 @@ def _render_studio() -> None:
     st.title(_t("product_name"))
     st.caption(_t("product_tagline"))
     _render_prompt_start()
+
+
+def _render_retired_task(summary) -> None:
+    """A task saved by the retired staged workflow stays readable, never resumable."""
+    st.header(_display_title(summary.manifest.get("title", summary.run_id), limit=52))
+    st.badge(_status_label(summary.status), icon=":material/history:", color="gray")
+    st.info(_t("retired_task_notice"), icon=":material/history_toggle_off:")
+    st.caption(_t("retired_task_delete_hint"))
+    if st.button(
+        _t("delete_task_yes"),
+        icon=":material/delete:",
+        key=f"delete_retired_{summary.run_id}",
+    ):
+        _delete_task(summary)
 
 
 def main() -> None:
@@ -87,15 +103,12 @@ def main() -> None:
         return
 
     summary = next(task for task in tasks if task.run_id == selected)
-    if summary.manifest.get("is_prompt_session"):
-        if _task_is_live(summary) or summary.status in LIVE_IMAGE_STATUSES:
-            _render_live_prompt_session(summary.run_id)
-        else:
-            _render_prompt_session(summary)
-    elif _task_is_live(summary):
-        _render_live_task(summary.run_id)
+    if not summary.manifest.get("is_prompt_session"):
+        _render_retired_task(summary)
+    elif _task_is_live(summary) or summary.status in LIVE_IMAGE_STATUSES:
+        _render_live_prompt_session(summary.run_id)
     else:
-        _render_task(summary)
+        _render_prompt_session(summary)
 
 
 main()

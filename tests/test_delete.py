@@ -1,4 +1,4 @@
-"""Permanent task deletion for single-round tasks and prompt sessions."""
+"""Permanent task deletion for saved prompt sessions."""
 
 import tempfile
 import unittest
@@ -18,14 +18,13 @@ def _write_task(run_dir: Path, *, run_id: str) -> None:
     run_dir.mkdir(parents=True)
     manifest = {
         "format_version": 2,
-        "workflow_version": 19,
         "case_id": CASE,
         "run_id": run_id,
         "title": "task",
         "created_at": "2026-01-01T00:00:00+00:00",
         "updated_at": "2026-01-01T00:00:00+00:00",
         "input_mode": "natural_language",
-        "status": "completed",
+        "status": "prompt_ready",
     }
     write_json(run_dir / "manifest.json", manifest)
 
@@ -34,7 +33,6 @@ class DeleteTaskTests(unittest.TestCase):
     def _app(self, root: Path) -> CorpusAtelierApplication:
         return CorpusAtelierApplication(
             runs_root=root,
-            checkpoint_path=root / "_system" / "checkpoints.sqlite3",
             text_provider=FakeTextProvider(),
             image_provider=FakeImageProvider(),
         )
@@ -72,6 +70,16 @@ class DeleteTaskTests(unittest.TestCase):
                 self.assertEqual(deleted, [created.run_id])
                 self.assertFalse(created.run_dir.exists())
                 self.assertEqual(app.list_tasks(), [])
+            finally:
+                app.close()
+
+    def test_delete_rejects_a_path_outside_the_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = self._app(root / "tasks")
+            try:
+                with self.assertRaises(ValueError):
+                    app.store.delete(root)
             finally:
                 app.close()
 

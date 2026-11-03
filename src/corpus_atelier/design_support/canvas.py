@@ -42,20 +42,3 @@ def resolve_image_size(ratio: tuple[int, int]) -> tuple[str, tuple[int, int]]:
     scale = min(max(target_scale, minimum_scale), maximum_scale)
     width, height = 16 * x_ratio * scale, 16 * y_ratio * scale
     return f"{width}x{height}", (x_ratio, y_ratio)
-
-
-def resolve_canvas(brief: dict) -> tuple[str, tuple[int, int], dict]:
-    """Resolve the user-specified brief ratio to a supported image size."""
-    try:
-        requested = brief["canvas"]["aspect_ratio"]
-        ratio = reduce_ratio(requested["width"], requested["height"])
-    except (KeyError, TypeError) as exc:
-        raise ValueError("A general graphic brief requires a canvas aspect ratio.") from exc
-
-    size, ratio = resolve_image_size(ratio)
-    record = {
-        "size": size,
-        "ratio": list(ratio),
-        "source": "brief",
-    }
-    return size, ratio, record

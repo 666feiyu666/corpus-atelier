@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 import streamlit as st
 from corpus_atelier import __version__
-from corpus_atelier.app.service import (
-    RECOVERABLE_TASK_STATUSES,
-    CorpusAtelierApplication,
-)
+from corpus_atelier.app.service import RECOVERABLE_TASK_STATUSES
 from corpus_atelier.app.state import RunSummary
 
-from corpus_atelier.config.paths import resolve_paths
 from corpus_atelier.ui.session import (
     _current_credential,
+    _delete_task,
     _ensure_recoverable_tasks,
     _one_line,
     _saved_tasks,
@@ -26,26 +22,6 @@ from corpus_atelier.ui.session import (
     _task_supervisor,
 )
 from corpus_atelier.ui.settings_dialog import _show_settings_dialog
-from corpus_atelier.ui.task_view import _render_task
-
-LOGGER = logging.getLogger(__name__)
-
-
-def _delete_task(task: RunSummary) -> None:
-    """Permanently delete one task, then leave its workspace."""
-    app = CorpusAtelierApplication(runs_root=resolve_paths().tasks_root)
-    try:
-        app.delete_task(task.run_id)
-    except Exception:
-        LOGGER.exception("Could not delete task %s.", task.run_id)
-        st.error(_t("delete_failed"), icon=":material/error:")
-        return
-    finally:
-        app.close()
-    if st.session_state.selected_task_id == task.run_id:
-        _select_task(None)
-    st.toast(_t("task_deleted"), icon=":material/delete:")
-    st.rerun(scope="app")
 
 
 def _render_task_buttons(tasks: list[RunSummary]) -> None:
@@ -190,19 +166,3 @@ def _render_sidebar(tasks: list[RunSummary]) -> None:
             st.session_state.settings_dialog_open = True
     if st.session_state.settings_dialog_open:
         _show_settings_dialog()
-
-
-@st.fragment(run_every="1s")
-def _render_live_task(run_id: str) -> None:
-    tasks = _saved_tasks()
-    summary = next(
-        (task for task in tasks if task.run_id == run_id),
-        None,
-    )
-    if summary is None:
-        st.rerun(scope="app")
-        return
-    _ensure_recoverable_tasks(tasks)
-    _render_task(summary)
-    if not _task_is_live(summary):
-        st.rerun(scope="app")

@@ -26,13 +26,12 @@ WORKFLOW_KIND = "prompt_session_v1"
 MAX_PROMPT_LENGTH = 8000
 MAX_REPLY_LENGTH = 8000
 MAX_INSTRUCTION_LENGTH = 2000
+MAX_NEGATIVE_PROMPT_LENGTH = 2000
 
 ENTRY_MODES = ("prompt", "image")
 PROMPT_ORIGINS = frozenset({
     "user_input", "vision_extraction", "assistant_revision", "manual_edit",
 })
-ACTIONS = ("generate", "edit")
-PENDING_KINDS = ("extraction", "chat")
 
 
 class PromptSessionRecord(TypedDict):
@@ -107,6 +106,7 @@ def new_revision(
     source_image_id: str | None = None,
     source_turn_id: str | None = None,
     note: str | None = None,
+    negative_prompt: str | None = None,
     restored_from: str | None = None,
 ) -> dict[str, Any]:
     """Append one immutable revision and make it current."""
@@ -116,6 +116,13 @@ def new_revision(
         raise ValueError("A prompt revision requires nonempty prompt text.")
     if len(prompt_text) > MAX_PROMPT_LENGTH:
         raise ValueError(f"A prompt must be at most {MAX_PROMPT_LENGTH} characters.")
+    if negative_prompt is not None:
+        if not isinstance(negative_prompt, str) or not negative_prompt.strip():
+            raise ValueError("A negative prompt must be nonempty text or None.")
+        if len(negative_prompt) > MAX_NEGATIVE_PROMPT_LENGTH:
+            raise ValueError(
+                f"A negative prompt must be at most {MAX_NEGATIVE_PROMPT_LENGTH} characters."
+            )
     revision = {
         "id": new_id("rev"),
         "parent_revision_id": parent_revision_id,
@@ -125,6 +132,7 @@ def new_revision(
         "source_image_id": source_image_id,
         "note": note,
         "restored_from": restored_from,
+        "negative_prompt": negative_prompt,
         "digest": prompt_digest(prompt_text),
         "created_at": now(),
     }
@@ -133,11 +141,16 @@ def new_revision(
     return revision
 
 
+def _find(items: list[dict[str, Any]], value: str, *, kind: str) -> dict[str, Any]:
+    """Return the one record with this id, or report it missing by its role."""
+    for item in items:
+        if item.get("id") == value:
+            return item
+    raise ValueError(f"The {kind} does not exist in this session.")
+
+
 def find_revision(session: PromptSessionRecord, revision_id: str) -> dict[str, Any]:
-    for revision in session["prompt_revisions"]:
-        if revision["id"] == revision_id:
-            return revision
-    raise ValueError("The prompt revision does not exist in this session.")
+    return _find(session["prompt_revisions"], revision_id, kind="prompt revision")
 
 
 def current_revision(session: PromptSessionRecord) -> dict[str, Any] | None:
@@ -148,24 +161,15 @@ def current_revision(session: PromptSessionRecord) -> dict[str, Any] | None:
 
 
 def find_upload(session: PromptSessionRecord, upload_id: str) -> dict[str, Any]:
-    for upload in session["uploads"]:
-        if upload["id"] == upload_id:
-            return upload
-    raise ValueError("The selected upload does not exist in this session.")
+    return _find(session["uploads"], upload_id, kind="selected upload")
 
 
 def find_attempt(session: PromptSessionRecord, attempt_id: str) -> dict[str, Any]:
-    for attempt in session["image_attempts"]:
-        if attempt["id"] == attempt_id:
-            return attempt
-    raise ValueError("The image attempt does not exist in this session.")
+    return _find(session["image_attempts"], attempt_id, kind="image attempt")
 
 
 def find_result(session: PromptSessionRecord, image_id: str) -> dict[str, Any]:
-    for result in session["image_results"]:
-        if result["id"] == image_id:
-            return result
-    raise ValueError("The image result does not exist in this session.")
+    return _find(session["image_results"], image_id, kind="image result")
 
 
 def image_record(session: PromptSessionRecord, image_id: str) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-"""Create non-overwriting, self-contained product task directories."""
+"""Create non-overwriting, self-contained task directories."""
 
 from __future__ import annotations
 
@@ -64,18 +64,10 @@ class ArtifactStore:
         self.root = Path(root).resolve()
         self.status_callback = status_callback
 
-    def create(self, *, case_id: str, profile,
-               brief: dict | None = None,
-               request: str | None = None,
-               title: str | None = None,
-               models: dict | None = None,
-               candidate_limit: int | None = None,
-               content_language: str | None = None) -> tuple[str, Path]:
+    def create(self, *, case_id: str, request: str, title: str | None = None,
+               models: dict | None = None) -> tuple[str, Path]:
+        """Create one empty task directory holding the user's request."""
         case_id = validate_case_id(case_id)
-        if (brief is None) == (request is None):
-            raise ValueError(
-                "A run requires exactly one structured brief or natural-language request."
-            )
         case_root = self.root / case_id
         case_root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -87,35 +79,20 @@ class ArtifactStore:
                 break
             except FileExistsError:
                 continue
-        if brief is not None:
-            write_json(run_dir / "brief.json", brief)
-            input_mode = "structured_brief"
-            initial_artifacts = {"brief": "brief.json"}
-        else:
-            write_text(run_dir / "input/request.txt", request)
-            input_mode = "natural_language"
-            initial_artifacts = {"user_request": "input/request.txt"}
-        write_json(run_dir / "profile.json", {
-            "name": profile.name, "objective": profile.objective,
-            "description": profile.description,
-        })
+        write_text(run_dir / "input/request.txt", request)
         now = datetime.now(timezone.utc).isoformat()
         manifest = {
-            "format_version": 2, "workflow_version": 19,
+            "format_version": 2,
             "case_id": case_id, "run_id": run_id,
             "title": title or case_id,
             "created_at": now,
             "updated_at": now,
-            "objective_profile": profile.objective,
-            "input_mode": input_mode,
-            "status": "created", "artifacts": initial_artifacts,
+            "input_mode": "natural_language",
+            "status": "created",
+            "artifacts": {"user_request": "input/request.txt"},
         }
         if models is not None:
             manifest["models"] = models
-        if candidate_limit is not None:
-            manifest["candidate_limit"] = candidate_limit
-        if content_language is not None:
-            manifest["content_language"] = content_language
         write_json(run_dir / "manifest.json", manifest)
         return run_id, run_dir
 
@@ -174,7 +151,7 @@ class ArtifactStore:
         shutil.rmtree(run_dir)
 
     def list_runs(self) -> list[tuple[Path, dict]]:
-        """Return saved tasks newest-first without loading graph checkpoints."""
+        """Return saved tasks newest-first."""
         tasks = []
         if not self.root.exists():
             return tasks
@@ -204,15 +181,3 @@ class ArtifactStore:
         path = run_dir / relative
         write_text(path, value)
         return str(path.resolve())
-
-    def next_attempt(self, run_dir: Path, kind: str) -> Path:
-        root = run_dir / kind
-        root.mkdir(parents=True, exist_ok=True)
-        number = 1
-        while True:
-            path = root / f"attempt_{number:02d}"
-            try:
-                path.mkdir()
-                return path
-            except FileExistsError:
-                number += 1

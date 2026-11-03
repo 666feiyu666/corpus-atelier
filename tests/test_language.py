@@ -5,10 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.artifacts.records import read_json, write_json
 from corpus_atelier.language import validate_content_language
-from corpus_atelier.state import HumanDecision, NaturalLanguageDesignJob
+from corpus_atelier.app.state import HumanDecision, NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider
 from tests.test_conversation import ConversationTextProvider, seed_brief
 

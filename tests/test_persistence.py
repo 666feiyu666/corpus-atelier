@@ -3,8 +3,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.state import (
+from corpus_atelier.app.service import CorpusAtelierApplication
+from corpus_atelier.app.state import (
     CandidateSelection,
     DesignJob,
     HumanDecision,

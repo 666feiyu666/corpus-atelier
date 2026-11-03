@@ -4,13 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-DEFAULT_LANGUAGE = "zh-CN"
-SUPPORTED_LANGUAGES = ("zh-CN", "en")
-LANGUAGE_LABELS = {
-    "zh-CN": "简体中文",
-    "en": "English",
-}
+from ..config.languages import DEFAULT_LANGUAGE
 
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -157,6 +151,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "quality_meta": "质量：{value}",
         "size_meta": "尺寸：{value}",
         "not_recorded": "未记录",
+        "drafting_brief": "正在起草一版 brief…",
+        "agent_brief_hint": "已按你的描述起草一版；可直接修改任意字段，确认后保存。",
+        "reload_agent_brief": "重新载入 agent 草稿",
+        "edit_prompt": "编辑生图提示词",
+        "editable_prompt_hint": "确认生成前可修改将发送的提示词；修改会在确认时保存并生效。",
+        "restore_prompt": "恢复生成的提示词",
         "full_prompt_to_send": "将发送的完整提示词",
         "visual_qa": "生成后核对清单",
         "image_quality": "图像质量",
@@ -364,6 +364,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "quality_meta": "Quality: {value}",
         "size_meta": "Size: {value}",
         "not_recorded": "Not recorded",
+        "drafting_brief": "Drafting a first brief…",
+        "agent_brief_hint": "A first brief was drafted from your request. Edit any field, then save.",
+        "reload_agent_brief": "Reload the agent draft",
+        "edit_prompt": "Edit the image prompt",
+        "editable_prompt_hint": "You can change the prompt that will be sent; edits are saved when you confirm.",
+        "restore_prompt": "Restore the generated prompt",
         "full_prompt_to_send": "Full prompt to be sent",
         "visual_qa": "Post-generation checklist",
         "image_quality": "Image quality",

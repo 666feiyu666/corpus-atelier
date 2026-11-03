@@ -10,10 +10,14 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.language import compile_language_policy
-from corpus_atelier.registry import get_profile
-from corpus_atelier.state import CandidateSelection, HumanDecision, NaturalLanguageDesignJob
+from corpus_atelier.app.registry import get_profile
+from corpus_atelier.app.state import (
+    CandidateSelection,
+    HumanDecision,
+    NaturalLanguageDesignJob,
+)
 from tests.fakes import FakeImageProvider, FakeTextProvider
 
 

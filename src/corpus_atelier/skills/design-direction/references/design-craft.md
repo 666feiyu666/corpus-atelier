@@ -34,9 +34,12 @@ light direction once and keep every element accountable to it.
 
 ## Style anchors stay specific and bounded
 
-Choose one visual language and the two or three decisions that make it recognizable. Do not stack
-compatible-sounding labels. A historical name is vocabulary, not a direction: use one only when its
-principles already describe the decision you made, and never as a substitute for that decision.
+Choose one primary visual language and the two or three observable decisions that make it
+recognizable: a contour behavior, a value structure, a palette limit, a detail distribution. One
+supporting technique is usually enough, two is the ceiling. Do not stack compatible-sounding labels,
+and do not let three adjectives restate one surface decision. A historical name is vocabulary, not
+a direction: use one only when its principles already describe the decision you made, and never as a
+substitute for that decision.
 
 ## Text is a structural element
 
@@ -73,5 +76,6 @@ If the second glance fails, no amount of third-glance detail helps.
 ## Category before style
 
 Use the category guide for the deliverable to know what this artifact must get right. Style is
-chosen to serve those requirements, never the reverse. When the brief names no style, a resolved
-contemporary voice is a valid direction.
+chosen to serve those requirements, never the reverse. Visual language is chosen in the dimensions
+of the style space, and this checklist does not supply a list of names to pick from. When the brief
+names no style, a resolved contemporary voice is a valid direction.

@@ -33,7 +33,8 @@ Adapted from the brand-systems-and-identity slice of the GPT-Image2-Skill refere
 - Count colors: the stated palette, no accidental extras.
 - Check alignment of the zone grid and the legibility of the type specimen.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Geometric and rational, modular and objective, polished and symmetrical, deliberately unstable, or
-a contemporary identity voice.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

@@ -35,7 +35,8 @@ Adapted from the ui-ux-mockups slice of the GPT-Image2-Skill reference gallery
 - Confirm numbers agree between summary and detail.
 - Confirm no real brand mark and no unapproved text.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Clean product spec, editorial dashboard, neobrutalist interface, or a restrained dark theme when
-the brief asks for it.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

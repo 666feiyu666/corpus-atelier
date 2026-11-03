@@ -35,7 +35,8 @@ this pipeline.
 - Confirm nothing implies measured data when the brief supplies none.
 - Check readability at the intended print size.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Camera-ready minimalism, editorial data storytelling, or an isometric diagram style when the brief
-explicitly asks for it. Keep the grammar of a chart, not an illustration.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

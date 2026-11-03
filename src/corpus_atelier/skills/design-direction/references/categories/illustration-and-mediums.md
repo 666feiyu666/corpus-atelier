@@ -35,7 +35,8 @@ and rewritten for this pipeline.
 - Squint: the silhouette must still read.
 - Confirm no unintended photorealism or extra detail.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Impressionist color and touch, post-impressionist structure, expressionist distortion, surreal
-juxtaposition, or a contemporary medium-led voice with no movement label.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

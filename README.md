@@ -21,7 +21,7 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 python -m pip install -r requirements.txt
-python -m streamlit run src/corpus_atelier/streamlit_app.py
+python -m streamlit run src/corpus_atelier/ui/studio.py
 ```
 
 ### macOS
@@ -34,7 +34,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 python -m pip install -r requirements.txt
-python -m streamlit run src/corpus_atelier/streamlit_app.py
+python -m streamlit run src/corpus_atelier/ui/studio.py
 ```
 
 Corpus Atelier opens in your browser. On first use, open **Settings** and enter your OpenAI API key. Finished designs can be archived into the **Corpus** view; archived prompts and reference images become searchable references for future work.

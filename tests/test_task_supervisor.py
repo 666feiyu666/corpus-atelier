@@ -2,7 +2,7 @@ from threading import Event
 import time
 import unittest
 
-from corpus_atelier.task_supervisor import TaskSupervisor
+from corpus_atelier.app.supervisor import TaskSupervisor
 
 
 class TaskSupervisorTests(unittest.TestCase):

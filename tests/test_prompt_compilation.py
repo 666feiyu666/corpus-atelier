@@ -10,7 +10,7 @@ from corpus_atelier.atelier.image_prompt.prompt_compiler import (
     compile_generation_prompt, compile_image_prompt_prompt,
 )
 from corpus_atelier.atelier.image_prompt.synthesis import synthesize_image_prompt
-from corpus_atelier.registry import get_profile
+from corpus_atelier.app.registry import get_profile
 from tests.fakes import FakeTextProvider
 
 
@@ -54,7 +54,12 @@ class PromptTests(unittest.TestCase):
         self.assertIn("# Design objective", prompt)
         self.assertIn("Communication purpose precedes sign selection", prompt)
         self.assertIn("between one and 3 direction(s)", prompt)
-        self.assertIn("Choose a visual language by how the audience should recognize", prompt)
+        self.assertIn("Choose the visual language along the six dimensions below", prompt)
+        self.assertIn("# Style-space rules", prompt)
+        self.assertIn("One primary language, at most two supporting techniques", prompt)
+        self.assertIn("# Visual-language dimensions for rhetoric-led.v1", prompt)
+        self.assertIn("Sign carrier and warrant", prompt)
+        self.assertNotIn("Medium and rendering logic", prompt)
         self.assertIn("# Deliverable categories", prompt)
         self.assertIn("# Design craft checklist", prompt)
         self.assertNotIn("# Legacy", prompt)
@@ -70,7 +75,11 @@ class PromptTests(unittest.TestCase):
             canvas=CANVAS, candidate_limit=2,
         )
         self.assertIn("Start with a coherent art direction", prompt)
-        self.assertIn("Choose a visual language by the experience the work should create", prompt)
+        self.assertIn("Choose the visual language along the six dimensions below", prompt)
+        self.assertIn("# Style-space rules", prompt)
+        self.assertIn("# Visual-language dimensions for art-led.v1", prompt)
+        self.assertIn("Medium and rendering logic", prompt)
+        self.assertNotIn("Sign carrier and warrant", prompt)
         self.assertIn("# Deliverable categories", prompt)
         self.assertNotIn("Use a rigorous modular grid", prompt)
         self.assertNotIn("# Swiss Style", prompt)

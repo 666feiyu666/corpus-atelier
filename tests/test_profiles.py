@@ -8,7 +8,7 @@ from corpus_atelier.design_support.validation import (
     validate_proposal,
 )
 from corpus_atelier.providers.text import _schema_for_openai
-from corpus_atelier.registry import PROFILES, get_profile
+from corpus_atelier.app.registry import PROFILES, get_profile
 
 
 class ProfileTests(unittest.TestCase):

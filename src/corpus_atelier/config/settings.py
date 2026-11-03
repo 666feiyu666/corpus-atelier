@@ -12,7 +12,7 @@ from typing import Mapping
 
 from dotenv import dotenv_values
 
-from .i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
+from ..config.languages import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 
 
 OPENAI_API_KEY = "OPENAI_API_KEY"

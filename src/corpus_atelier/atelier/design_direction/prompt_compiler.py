@@ -3,12 +3,13 @@
 import json
 
 from ...language import compile_language_policy
-from ...skill_loader import load_skill, load_skill_reference, load_skill_reference_body
+from ...config.skill_loader import load_skill, load_skill_reference
 from .validation import (
     load_category_guide_body,
     load_category_index_body,
     load_design_craft_body,
-    style_space_reference,
+    load_style_space_body,
+    load_style_space_index_body,
 )
 
 
@@ -50,12 +51,11 @@ def compile_design_direction_prompt(
             canvas, ensure_ascii=False, indent=2, allow_nan=False,
         ),
         "# Visual-language style space\n\n"
-        "Use this map to consider broad stylistic possibilities. It is not exhaustive and does "
-        "not require a historical label. Choose or combine only the visual principles that serve "
-        "the brief, the category requirements, and the design objective.\n\n"
-        + load_skill_reference_body(
-            "design-direction", style_space_reference(profile.objective),
-        ),
+        "The style space is a set of dimensions to decide in, not a menu of styles to pick from. "
+        "Its rules apply to every objective; the objective's own space supplies the dimensions.\n\n"
+        "# Style-space rules\n\n" + load_style_space_index_body() + "\n\n"
+        f"# Visual-language dimensions for {profile.objective}\n\n"
+        + load_style_space_body(profile.objective),
     ])
     sections.append(
         "# Frozen shared brief\n\n"

@@ -46,6 +46,7 @@ class HumanDecision:
     approved: bool
     reviewer: str = "cli-user"
     note: str = ""
+    prompt_overrides: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

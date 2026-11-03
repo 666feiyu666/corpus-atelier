@@ -32,7 +32,8 @@ Adapted from the magazine, editorial, and cover work in the GPT-Image2-Skill ref
 - Read the title and standfirst exactly; confirm no extra words.
 - Confirm the quiet corner is actually quiet.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Conceptual photography, montage or collage, drawn illustration, type-only cover, duotone treatment,
-or a restrained editorial voice with no movement label.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

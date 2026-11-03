@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.artifacts.records import write_json
 from tests.fakes import FakeImageProvider, FakeTextProvider
 

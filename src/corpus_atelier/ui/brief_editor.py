@@ -5,10 +5,10 @@ from typing import Any, Callable, TypedDict
 
 import streamlit as st
 
-from .design_support.validation import load_schema
-from .conversation_records import ConversationRecord
-from .i18n import LANGUAGE_LABELS
-from .registry import get_profile
+from ..design_support.validation import load_schema
+from ..conversation.records import ConversationRecord
+from ..config.languages import LANGUAGE_LABELS
+from ..app.registry import get_profile
 
 
 TEXT_FIELDS = ("deliverable", "topic", "article_title", "article_summary", "purpose",

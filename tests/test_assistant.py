@@ -4,8 +4,8 @@ import json
 from tempfile import TemporaryDirectory
 import unittest
 
-from corpus_atelier.application import CorpusAtelierApplication
-from corpus_atelier.state import NaturalLanguageDesignJob
+from corpus_atelier.app.service import CorpusAtelierApplication
+from corpus_atelier.app.state import NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider
 from tests.test_conversation import ConversationTextProvider, image_bytes
 

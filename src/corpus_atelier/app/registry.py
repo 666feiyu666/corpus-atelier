@@ -1,8 +1,8 @@
 """Profile registry used by every UI adapter."""
 
-from .profiles.article_cover import PROFILE as ARTICLE_COVER
-from .profiles.general_graphic import ART_PROFILE, RHETORIC_PROFILE
-from .profiles.poster import PROFILE as POSTER
+from ..profiles.article_cover import PROFILE as ARTICLE_COVER
+from ..profiles.general_graphic import ART_PROFILE, RHETORIC_PROFILE
+from ..profiles.poster import PROFILE as POSTER
 
 PROFILES = {
     profile.name: profile

@@ -10,9 +10,9 @@ import argparse
 import json
 from pathlib import Path
 
-from .application import CorpusAtelierApplication
+from .app.service import CorpusAtelierApplication
 from .design_support.validation import validate
-from .registry import PROFILES, get_profile
+from .app.registry import PROFILES, get_profile
 
 
 def _parser() -> argparse.ArgumentParser:

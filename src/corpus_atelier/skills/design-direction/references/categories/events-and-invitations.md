@@ -33,7 +33,8 @@ Adapted from the events-and-experience and wayfinding work in the GPT-Image2-Ski
 - Confirm no invented claims, prices, or sponsors.
 - Check the reserved logo band is empty and the icon system is consistent.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Ceremonial geometry, declarative force, organic invitation line, restrained modern editorial, or a
-vernacular local voice.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

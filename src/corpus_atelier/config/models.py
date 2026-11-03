@@ -71,8 +71,6 @@ IMAGE_MODEL_PROFILES = (
 IMAGE_MODELS = {profile.model: profile for profile in IMAGE_MODEL_PROFILES}
 
 IMAGE_QUALITIES = ("auto", "low", "medium", "high", "xhigh", "max")
-IMAGE_FORMATS = ("png", "jpeg", "webp")
-IMAGE_BACKGROUNDS = ("auto", "opaque", "transparent")
 
 
 def get_text_model_profile(model: str) -> TextModelProfile:
@@ -96,43 +94,3 @@ def validate_reasoning_effort(model: str, effort: str) -> str:
             f"Unsupported reasoning effort {effort!r} for {model!r}."
         )
     return effort
-
-
-def validate_image_quality(model: str, quality: str) -> str:
-    profile = get_image_model_profile(model)
-    if quality not in IMAGE_QUALITIES:
-        raise ValueError(
-            f"Unsupported image quality {quality!r}. "
-            f"Choose one of: {', '.join(IMAGE_QUALITIES)}"
-        )
-    if quality in {"xhigh", "max"} and not profile.supports_max_quality:
-        raise ValueError(
-            f"Quality {quality!r} requires a GPT Image 2.5 model, not {model!r}."
-        )
-    return quality
-
-
-def validate_image_format(format: str) -> str:
-    if format not in IMAGE_FORMATS:
-        raise ValueError(
-            f"Unsupported image format {format!r}. "
-            f"Choose one of: {', '.join(IMAGE_FORMATS)}"
-        )
-    return format
-
-
-def validate_image_background(model: str, background: str, format: str = "png") -> str:
-    profile = get_image_model_profile(model)
-    if background not in IMAGE_BACKGROUNDS:
-        raise ValueError(
-            f"Unsupported image background {background!r}. "
-            f"Choose one of: {', '.join(IMAGE_BACKGROUNDS)}"
-        )
-    if background == "transparent":
-        if format not in ("png", "webp"):
-            raise ValueError("Transparent background requires PNG or WebP output.")
-        if not profile.supports_transparency:
-            raise ValueError(
-                f"Transparent background is not supported by {model!r}."
-            )
-    return background

@@ -3,7 +3,7 @@
 import json
 
 from ...language import compile_language_policy
-from ...skill_loader import load_skill
+from ...config.skill_loader import load_skill
 from ..design_direction.validation import load_category_guide_body
 
 

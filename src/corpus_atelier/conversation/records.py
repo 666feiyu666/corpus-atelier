@@ -6,8 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any, TypedDict
 
-from .artifacts.records import read_json
-from .artifacts.store import read_manifest
+from ..artifacts.records import read_json
+from ..artifacts.store import read_manifest
 
 
 LOGGER = logging.getLogger(__name__)

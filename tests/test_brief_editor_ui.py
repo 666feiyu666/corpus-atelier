@@ -127,12 +127,23 @@ class BriefEditorUITests(unittest.TestCase):
             app.segmented_control(key=f"workspace_view_{run_id}").set_value("design").run()
             self.assertFalse(app.exception)
             self.assertEqual(app.text_area(key=f"brief_edit_{run_id}_purpose").value, "切换对话时保留这份草稿。")
-            self.assertEqual(app.text_area(key=f"brief_edit_{run_id}_constraints").value, "")
+            draft = json.loads(
+                (path.parent / "brief-draft/brief.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                app.text_area(key=f"brief_edit_{run_id}_constraints").value,
+                "\n".join(draft["constraints"]),
+            )
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["design_brief"], original["design_brief"])
 
     def test_prompt_chat_is_a_continuing_dialogue_without_brief_controls(self):
         with self.workspace(seed=False) as (root, app, run_id, path):
-            self.assertEqual(app.text_area(key=f"brief_edit_{run_id}_purpose").value, "")
+            draft = json.loads(
+                (path.parent / "brief-draft/brief.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                app.text_area(key=f"brief_edit_{run_id}_purpose").value, draft["purpose"],
+            )
             self.assertTrue(app.button(key=f"prepare_round_{run_id}").disabled)
             for message in ("只描述花篮，不需要描述花。", "两侧提手竖直，连接的弧度很低。"):
                 app.chat_input(key=f"conversation_input_{run_id}").set_value(message).run()

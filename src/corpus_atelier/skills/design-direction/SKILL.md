@@ -31,16 +31,28 @@ sets the requirements; the direction decides how to meet them.
 - For an art-led objective, let the intended perceptual experience govern form, color, rhythm,
   texture, imagery, atmosphere, and material treatment.
 
-The supplied style space is a map of available possibilities, not a menu. Use it to consider
-materially different languages instead of defaulting to one familiar look. Style is chosen to
-serve the category requirements and the objective, never the reverse.
+The supplied style space is a set of dimensions to decide in, not a menu to pick from. Work through
+it to reach materially different languages instead of defaulting to one familiar look. Style is
+chosen to serve the category requirements and the objective, never the reverse.
 
-## Style is described, not labeled
+## Style is a set of observable decisions
 
-Name the visual language in words and the two or three decisions that make it recognizable. Do not
-cite a movement or style catalog: none is supplied, and a label is not a direction. A complete
-direction can describe a contemporary, vernacular, or medium-led voice without any historical
-reference.
+A visual language is defined by what it does to the image, not by the name attached to it. For each
+direction:
+
+- resolve the dimensions the work depends on, and state each as the decision that produces it — a
+  contour behavior, a value structure, a palette limit, a distribution of detail, a reading order.
+  A quality word is not a decision: it names the effect instead of producing it.
+- choose one primary language that sets the medium, contour, and value logic, plus at most two
+  supporting techniques that add color, texture, or post-treatment without competing for control.
+- resolve contradictions between dimensions by removing the weaker statement, rather than keeping
+  both and letting the renderer average them.
+- no movement, style, or catalog label may stand in for these decisions. A historical name is
+  allowed only when the decisions already denote it, and then only as their summary.
+
+A complete direction can describe a contemporary, vernacular, or medium-led voice without any
+historical reference. Name the two or three decisions that make the language recognizable; that
+naming is the direction.
 
 When the brief explicitly requires a style, treat that style as a shared invariant and vary the
 remaining decisions.
@@ -61,6 +73,11 @@ Return no more than the supplied candidate limit. Return fewer directions when t
 leave enough consequential freedom. Never manufacture nominal alternatives merely to reach the
 limit.
 
+Directions in one portfolio must be materially different, not differently worded: any two should
+differ on at least two of the visual-language dimensions, and at least one of those differences must
+be visible in the silhouette, structure, or value arrangement — not only in surface texture or
+palette temperature.
+
 ## Direction contract
 
 For every direction:
@@ -70,7 +87,8 @@ For every direction:
 - explain in `objective_strategy` how its choices embody the design objective for this category;
 - record only consequential macro decisions in `direction_decisions`;
 - put unresolved choices that do not define the direction in `implementation_freedom`;
-- add optional `style_anchors` as short descriptive phrases, not a list of labels;
+- add optional `style_anchors` as short descriptive phrases naming the observable decisions, not a
+  list of labels;
 - explain its distinct role in the portfolio, or why a convergent brief warrants one direction.
 
 The frozen brief is authoritative. Preserve its exact copy, required subjects, constraints,

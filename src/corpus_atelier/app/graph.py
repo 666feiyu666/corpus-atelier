@@ -2,8 +2,8 @@
 
 from langgraph.graph import END, START, StateGraph
 
-from ..state import AtelierState
-from ..workflow_runtime import resolve_execution_route
+from .state import AtelierState
+from .workflow import resolve_execution_route
 
 
 def _route(state: AtelierState) -> str:

@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from corpus_atelier.settings import (
+from corpus_atelier.config.settings import (
     load_preferences,
     mask_api_key,
     resolve_openai_api_key,

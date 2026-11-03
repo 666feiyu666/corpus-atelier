@@ -1,7 +1,7 @@
 """Semantic validation and deliverable-category knowledge loading."""
 
 from ...design_support.validation import validate
-from ...skill_loader import load_skill_reference, load_skill_reference_body
+from ...config.skill_loader import load_skill_reference_body
 
 
 CATEGORY_INDEX_REFERENCE = "categories/index.md"
@@ -23,6 +23,8 @@ CATEGORY_REFERENCES = {
     "technical-and-scientific": "categories/technical-and-scientific.md",
 }
 
+STYLE_SPACE_INDEX_REFERENCE = "style-spaces/index.md"
+
 STYLE_SPACE_REFERENCES = {
     "rhetoric-led.v1": "style-spaces/rhetoric-led.md",
     "art-led.v1": "style-spaces/art-led.md",
@@ -36,10 +38,6 @@ def _for_objective(mapping: dict, objective: str, kind: str):
         raise ValueError(f"No {kind} is configured for objective {objective!r}.") from exc
 
 
-def category_ids() -> tuple[str, ...]:
-    return tuple(CATEGORY_REFERENCES)
-
-
 def category_reference(category: str) -> str:
     try:
         return CATEGORY_REFERENCES[category]
@@ -48,13 +46,6 @@ def category_reference(category: str) -> str:
             f"Unknown deliverable category {category!r}. "
             f"Choose one of: {', '.join(CATEGORY_REFERENCES)}"
         ) from exc
-
-
-def load_category_guide(category: str | None) -> str | None:
-    """Return one category guide, or None when no category is fixed."""
-    if not category:
-        return None
-    return load_skill_reference("design-direction", category_reference(category))
 
 
 def load_category_guide_body(category: str | None) -> str | None:
@@ -73,6 +64,25 @@ def load_design_craft_body() -> str:
 
 def style_space_reference(objective: str) -> str:
     return _for_objective(STYLE_SPACE_REFERENCES, objective, "style space")
+
+
+def _load_style_space_body(relative: str) -> str:
+    try:
+        return load_skill_reference_body("design-direction", relative)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise ValueError(
+            f"Missing style-space reference {relative!r} in the design-direction skill."
+        ) from exc
+
+
+def load_style_space_index_body() -> str:
+    """Return the shared style-space rules without their leading H1."""
+    return _load_style_space_body(STYLE_SPACE_INDEX_REFERENCE)
+
+
+def load_style_space_body(objective: str) -> str:
+    """Return the objective's dimension space without its leading H1."""
+    return _load_style_space_body(style_space_reference(objective))
 
 
 def validate_design_direction_plan(

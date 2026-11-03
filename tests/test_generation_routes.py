@@ -8,13 +8,10 @@ import unittest
 
 from PIL import Image
 
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.corpus.index import CorpusStore
 from corpus_atelier.corpus.records import new_record
-from corpus_atelier.state import (
-    HumanDecision,
-    NaturalLanguageDesignJob,
-)
+from corpus_atelier.app.state import HumanDecision, NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider, FakeTextProvider
 
 

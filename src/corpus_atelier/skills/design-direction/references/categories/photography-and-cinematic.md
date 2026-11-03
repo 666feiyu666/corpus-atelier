@@ -36,7 +36,8 @@ and rewritten for this pipeline.
 - Confirm the frame matches one stated camera position.
 - Confirm no real-person likeness or unapproved logo appears.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Documentary 35 mm, editorial portrait, neo-noir, 1970s film, long-exposure night, or a
-contemporary natural-light look with no movement label.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

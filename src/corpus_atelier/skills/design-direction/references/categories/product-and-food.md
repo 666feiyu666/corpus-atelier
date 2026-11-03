@@ -34,7 +34,8 @@ Adapted from the product-and-food slice of the GPT-Image2-Skill reference galler
 - Check the light direction is consistent across product, props, and background.
 - Confirm no unapproved logo or claim appears.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Commercial studio photography, editorial still life, warm daylight, chiaroscuro, or a drawn or
-papercraft treatment when illustration is requested.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

@@ -8,15 +8,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 from uuid import uuid4
 
-from .artifacts.paths import verified_image
-from .artifacts.records import read_json
-from .conversation_records import FORMAT_VERSION, ConversationRecord, PendingTurn, now
-from .design_support.validation import validate
-from .language import compile_language_policy
-from .state import RunResult
+from ..artifacts.paths import verified_image
+from ..artifacts.records import read_json
+from .records import FORMAT_VERSION, ConversationRecord, PendingTurn, now
+from ..design_support.validation import validate
+from ..language import compile_language_policy
+from ..app.state import RunResult
 
 if TYPE_CHECKING:
-    from .application import CorpusAtelierApplication
+    from ..app.service import CorpusAtelierApplication
 
 
 LOGGER = logging.getLogger(__name__)
@@ -65,9 +65,9 @@ def _build_prompt(value: ConversationRecord, pending: PendingTurn,
     return (
         "You are a conversational assistant helping the user write useful image-generation "
         "wording for their own design brief. Respond naturally to the latest message using "
-        "the conversation and attached images. The user edits the brief themselves. Do not "
-        "organize, reconstruct, update, or claim to save a brief; do not select brief fields, "
-        "request adoption, or repeat all design requirements.\n"
+        "the conversation and attached images. The user edits and saves the brief themselves. "
+        "You may propose a short revised brief or specific field values when asked, but never "
+        "claim to save it, request adoption, or repeat all design requirements.\n"
         "Keep discussing the same subject across follow-ups without requiring another image "
         "upload. Incorporate the user's corrections and retain previously requested scope "
         "and exclusions until they change them. If they ask for the basket alone, leave out "

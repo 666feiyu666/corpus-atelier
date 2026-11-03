@@ -1,16 +1,11 @@
 import unittest
 
-from corpus_atelier.model_catalog import (
-    IMAGE_BACKGROUNDS,
-    IMAGE_FORMATS,
+from corpus_atelier.config.models import (
     IMAGE_MODEL_PROFILES,
     IMAGE_QUALITIES,
     TEXT_MODEL_PROFILES,
     get_image_model_profile,
     get_text_model_profile,
-    validate_image_background,
-    validate_image_format,
-    validate_image_quality,
     validate_reasoning_effort,
 )
 
@@ -46,46 +41,10 @@ class ModelCatalogTests(unittest.TestCase):
             get_image_model_profile("arbitrary-image-model")
 
     def test_image_quality_grades_are_allow_listed(self):
-        for quality in IMAGE_QUALITIES:
-            self.assertEqual(
-                validate_image_quality("gpt-image-2.5-flare", quality), quality,
-            )
-        with self.assertRaises(ValueError):
-            validate_image_quality("gpt-image-2.5-flare", "ultra")
-
-    def test_max_quality_requires_2_5_model(self):
         self.assertEqual(
-            validate_image_quality("gpt-image-2", "high"), "high",
+            ("auto", "low", "medium", "high", "xhigh", "max"),
+            IMAGE_QUALITIES,
         )
-        with self.assertRaises(ValueError):
-            validate_image_quality("gpt-image-2", "xhigh")
-        self.assertEqual(
-            validate_image_quality("gpt-image-2.5-sunburst", "max"), "max",
-        )
-
-    def test_image_formats_are_allow_listed(self):
-        for fmt in IMAGE_FORMATS:
-            self.assertEqual(validate_image_format(fmt), fmt)
-        with self.assertRaises(ValueError):
-            validate_image_format("gif")
-
-    def test_transparent_background_rules(self):
-        self.assertEqual(
-            validate_image_background("gpt-image-2.5-flare", "transparent", "png"),
-            "transparent",
-        )
-        self.assertEqual(
-            validate_image_background("gpt-image-2.5-flare", "transparent", "webp"),
-            "transparent",
-        )
-        with self.assertRaises(ValueError):
-            validate_image_background("gpt-image-2.5-flare", "transparent", "jpeg")
-        with self.assertRaises(ValueError):
-            validate_image_background("gpt-image-2", "transparent", "png")
-        for background in ("auto", "opaque"):
-            self.assertEqual(
-                validate_image_background("gpt-image-2", background, "png"), background,
-            )
 
 
 if __name__ == "__main__":

@@ -35,7 +35,8 @@ Adapted from the architecture-and-interior slice of the GPT-Image2-Skill referen
 - Confirm scale cues are present and coherent.
 - Check that no impossible structure appears.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Architectural render, interior editorial photography, brutalist documentation, Japanese minimalism,
-or a biophilic scheme when the brief supports it.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

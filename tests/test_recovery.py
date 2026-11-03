@@ -6,9 +6,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.artifacts.records import read_json, write_json, write_text
-from corpus_atelier.state import NaturalLanguageDesignJob
+from corpus_atelier.app.state import NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider
 from tests.test_conversation import ConversationTextProvider, seed_brief
 
@@ -66,7 +66,7 @@ class RecoveryTests(unittest.TestCase):
                     (folder / "answer.json").write_text(source, encoding="utf-8")
                     app.store.update(task.run_dir, "failed", error="Invalid cache")
                     app.retry_conversation(task.run_id)
-                    with self.assertLogs("corpus_atelier.assistant", level="WARNING"):
+                    with self.assertLogs("corpus_atelier.conversation.assistant", level="WARNING"):
                         result = app.continue_task(task.run_id)
                     self.assertEqual(result.status, "discussing")
                     self.assertEqual(len(text.chat_calls), 1)

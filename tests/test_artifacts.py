@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from corpus_atelier.artifacts.store import ArtifactStore
-from corpus_atelier.registry import get_profile
+from corpus_atelier.app.registry import get_profile
 
 
 class ArtifactTests(unittest.TestCase):

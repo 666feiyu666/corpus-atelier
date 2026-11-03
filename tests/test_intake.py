@@ -3,10 +3,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.atelier.intake import compile_intake_prompt
-from corpus_atelier.registry import get_profile
-from corpus_atelier.state import NaturalLanguageDesignJob
+from corpus_atelier.app.registry import get_profile
+from corpus_atelier.app.state import NaturalLanguageDesignJob
 from tests.fakes import FakeImageProvider, FakeTextProvider
 
 

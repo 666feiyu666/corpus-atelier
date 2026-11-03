@@ -12,7 +12,7 @@ Two deterministic-or-model steps, in this order:
 import json
 
 from ...language import compile_language_policy
-from ...skill_loader import load_skill, load_skill_reference_body
+from ...config.skill_loader import load_skill, load_skill_reference_body
 
 
 MODEL_FAMILY_REFERENCES = {

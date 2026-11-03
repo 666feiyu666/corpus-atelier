@@ -107,6 +107,23 @@ def create_viewport():
     )
 
 
+VIEWPORT_KEY = "atelier_viewport_controller"
+
+
+def register_viewport() -> None:
+    """Declare the component for this script run; call once per run, from main()."""
+    st.session_state[VIEWPORT_KEY] = create_viewport()
+
+
+def viewport_controller():
+    """Return the controller declared by register_viewport() in this run."""
+    controller = st.session_state.get(VIEWPORT_KEY)
+    if controller is None:
+        controller = create_viewport()
+        st.session_state[VIEWPORT_KEY] = controller
+    return controller
+
+
 def render_viewport(run_id: str, conversation: dict, *, label: str, controller,
                     surface: str = "design_panel", token: str | None = None) -> None:
     controller(key=f"viewport_{surface}_{run_id}", height=0, data={

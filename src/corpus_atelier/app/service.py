@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sqlite3
 from typing import Callable
@@ -9,16 +10,17 @@ from typing import Callable
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
-from .artifacts.hashing import digest_file
-from .artifacts.paths import task_path
-from .artifacts.records import read_json
-from .artifacts.store import ArtifactStore, validate_case_id, validate_run_id
-from .conversation import ConversationMixin, serialized_conversation
-from .design_support.inputs import validate_mask, validate_reference_images
-from .design_support.validation import validate, validate_candidate_count
-from .graphs import build_graph
-from .language import bind_brief_language, validate_content_language
-from .providers import OpenAIImageProvider, OpenAITextProvider
+from ..artifacts.hashing import digest_file
+from ..artifacts.paths import task_path, verified_image
+from ..artifacts.records import read_json
+from ..artifacts.store import ArtifactStore, validate_case_id, validate_run_id
+from ..atelier.intake import compile_intake_prompt
+from ..conversation.service import ConversationMixin, serialized_conversation
+from ..design_support.inputs import validate_mask, validate_reference_images
+from ..design_support.validation import validate, validate_candidate_count
+from .graph import build_graph
+from ..language import bind_brief_language, validate_content_language
+from ..providers import OpenAIImageProvider, OpenAITextProvider
 from .registry import get_profile
 from .state import (
     AtelierState,
@@ -27,7 +29,7 @@ from .state import (
     RunResult,
     RunSummary,
 )
-from .workflow_runtime import WorkflowRuntime
+from .workflow import WorkflowRuntime
 
 
 RECOVERABLE_TASK_STATUSES = frozenset({
@@ -251,6 +253,82 @@ class CorpusAtelierApplication(ConversationMixin):
         if details:
             self.store.update(run_dir, "created", **details)
         return self._result(run_id)
+
+    def draft_brief(self, run_id: str) -> dict:
+        """Ask the text model for a first-pass brief the user can edit and confirm.
+
+        The draft is advisory: it never creates a brief revision and never replaces the saved
+        brief until the user saves the editor.
+        """
+        run_dir = self.store.find_run(run_id)
+        manifest = self.store.manifest(run_dir)
+        if not manifest.get("is_conversation"):
+            raise ValueError("Only a design conversation can draft a brief.")
+        self._assert_model_binding(run_dir)
+        value = self.conversation(run_id)
+        profile = get_profile(value["profile"])
+        references = []
+        for message in value["messages"]:
+            for record in message.get("attachments", []):
+                try:
+                    references.append(verified_image(
+                        run_dir, record["path"], record["sha256"],
+                    ))
+                except Exception:
+                    continue
+        prompt = compile_intake_prompt(
+            profile,
+            value["effective_request"] or "",
+            user_requirements=value["user_requirements"] or None,
+            content_language=value["content_language"],
+        )
+        prompt += (
+            "\n\n# Conversation context\n\n"
+            "Draft one brief from these user messages. The user will review and edit it before it "
+            "becomes authoritative; do not treat the draft as confirmed."
+            "\n\n"
+            + json.dumps([
+                {"role": message["role"], "text": message["text"],
+                 "attachments": [item["name"] for item in message.get("attachments", [])]}
+                for message in value["messages"]
+                if message.get("kind", "discussion") == "discussion"
+            ], ensure_ascii=False, indent=2)
+        )
+        if value["design_brief"] is not None:
+            prompt += (
+                "\n\n# Previous brief\n\n"
+                "Revise this brief to match the conversation; keep wording the user has not asked "
+                "to change."
+                "\n\n"
+                + json.dumps(value["design_brief"], ensure_ascii=False, indent=2, allow_nan=False)
+            )
+        self.store.text(run_dir, "brief-draft/prompt.md", prompt)
+        try:
+            brief, response = self.runtime.text_provider.propose(
+                prompt,
+                schema_name=profile.brief_schema,
+                reference_paths=references[:3] or None,
+            )
+            brief = validate(
+                bind_brief_language(brief, value["content_language"]),
+                profile.brief_schema,
+            )
+            self.store.json(run_dir, "brief-draft/response.json", response)
+            self.store.json(run_dir, "brief-draft/brief.json", brief)
+            self.store.register(
+                run_dir,
+                brief_draft_prompt="brief-draft/prompt.md",
+                brief_draft_response="brief-draft/response.json",
+                brief_draft="brief-draft/brief.json",
+            )
+            return brief
+        except Exception as exc:
+            self.store.json(run_dir, "brief-draft/error.json", {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            })
+            raise
 
     def run_request(self, run_id: str) -> RunResult:
         run_dir = self.store.find_run(run_id)

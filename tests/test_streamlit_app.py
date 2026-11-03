@@ -13,7 +13,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from corpus_atelier import __version__
-from corpus_atelier.application import CorpusAtelierApplication
+from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import write_json, write_text
 from corpus_atelier.providers import OpenAITextProvider
@@ -21,7 +21,7 @@ from tests.fakes import FakeTextProvider
 
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / "src/corpus_atelier/streamlit_app.py"
+APP = ROOT / "src/corpus_atelier/ui/studio.py"
 
 
 class StreamlitAppTests(unittest.TestCase):
@@ -97,6 +97,66 @@ class StreamlitAppTests(unittest.TestCase):
                 self.assertFalse(reopened.exception)
                 self.assertIn("标题更突出一点。", [item.value for item in reopened.markdown])
                 self.assertIsNotNone(reopened.chat_input(key=f"conversation_input_{parent_id}"))
+
+    def test_new_task_is_seeded_with_an_agent_brief_draft(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                "OPENAI_API_KEY": "sk-test",
+            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
+                parent_id = app.session_state["selected_task_id"]
+                self._wait_for_status(app, root, parent_id, "discussing")
+                task_root = root / "natural-language" / parent_id
+                manifest = json.loads((task_root / "manifest.json").read_text(encoding="utf-8"))
+                self.assertIn("brief_draft", manifest["artifacts"])
+                draft = json.loads(
+                    (task_root / manifest["artifacts"]["brief_draft"]).read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    app.text_area(key=f"brief_edit_{parent_id}_purpose").value,
+                    draft["purpose"],
+                )
+                conversation = json.loads(
+                    (task_root / "conversation.json").read_text(encoding="utf-8")
+                )
+                self.assertIsNone(conversation["design_brief"])
+                self.assertEqual(conversation["revision"], 0)
+
+    def test_approval_page_offers_an_editable_prompt(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                "OPENAI_API_KEY": "sk-test",
+            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
+                parent_id = app.session_state["selected_task_id"]
+                self._wait_for_status(app, root, parent_id, "discussing")
+                self._save_initial_brief(app, parent_id)
+                app.button(key=f"prepare_round_{parent_id}").click().run()
+                conversation = json.loads(
+                    (root / "natural-language" / parent_id / "conversation.json")
+                    .read_text(encoding="utf-8")
+                )
+                child_id = conversation["rounds"][-1]["run_id"]
+                self._wait_for_status(app, root, child_id, "awaiting_approval")
+                key = f"generation_prompt_{child_id}_c01"
+                self.assertIn(key, [area.key for area in app.text_area])
+                original = app.text_area(key=key).value
+                self.assertTrue(original)
+                edited = "Edited prompt from the approval page."
+                app.text_area(key=key).set_value(edited).run()
+                self.assertEqual(app.text_area(key=key).value, edited)
+                app.button(key=f"restore_prompt_{child_id}_c01").click().run()
+                self.assertEqual(app.text_area(key=key).value, original)
 
     def test_single_brief_editor_persists_changes_and_invalidates_old_designs(self):
         with TemporaryDirectory() as directory:
@@ -503,18 +563,26 @@ class StreamlitAppTests(unittest.TestCase):
             self.assertTrue(all(secret not in caption for caption in captions))
 
     def test_product_source_is_detached_from_experiments(self):
-        source = APP.read_text(encoding="utf-8")
-        for term in (
-            "experiments/",
-            "CorpusExperimentJob",
-            "CorpusComparisonJob",
-            "render_experiment_page",
-            "语料对比实验",
-        ):
-            self.assertNotIn(term, source)
-        self.assertIn('st.chat_message("user")', source)
-        self.assertIn('st.chat_message("assistant")', source)
-        self.assertIn('ROOT / ".atelier" / "tasks"', source)
+        sources = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in sorted(APP.parent.glob("*.py"))
+        }
+        for name, source in sources.items():
+            for term in (
+                "experiments/",
+                "CorpusExperimentJob",
+                "CorpusComparisonJob",
+                "render_experiment_page",
+                "语料对比实验",
+            ):
+                self.assertNotIn(term, source, f"{name} still references {term!r}")
+        self.assertIn('st.chat_message("user")', sources["task_view.py"])
+        self.assertIn('st.chat_message("assistant")', sources["task_view.py"])
+        self.assertNotIn(".atelier", sources["studio.py"])
+        self.assertIn(
+            '".atelier" / "tasks"',
+            (ROOT / "src/corpus_atelier/config/paths.py").read_text(encoding="utf-8"),
+        )
 
     def test_model_selector_is_allow_listed(self):
         with TemporaryDirectory() as directory, patch.dict(os.environ, {

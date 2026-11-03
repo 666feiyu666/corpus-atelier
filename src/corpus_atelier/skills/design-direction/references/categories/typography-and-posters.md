@@ -33,7 +33,8 @@ Adapted from the typography-and-posters slice of the GPT-Image2-Skill reference 
 - Check legibility at the stated distance and the smallest printed size.
 - Confirm margins, baseline alignment, and the reserved empty band.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Typographic discipline, geometric luxury, diagonal force, vibrating lettering, or a contemporary
-editorial voice. Use one bounded anchor, not a stack of labels.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

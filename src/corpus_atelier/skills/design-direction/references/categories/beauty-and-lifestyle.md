@@ -33,7 +33,8 @@ Adapted from the beauty-and-lifestyle slice of the GPT-Image2-Skill reference ga
 - Confirm lighting direction agrees between subject, product, and background.
 - Confirm no extra text, claims, or badges.
 
-## Optional style vocabulary
+## Style vocabulary
 
-Natural editorial photography, soft analog film, luxury vanity staging, Japanese minimal still
-life, or a drawn cosmetic illustration when requested.
+None is supplied here. This guide sets what this kind of artifact must get right, not how it looks.
+Choose the visual language in the observable dimensions of the style space, and state each choice as
+the decision that produces it rather than as a label.

@@ -17,9 +17,9 @@ CASE = "prompt-session-tests"
 SETTINGS = {"image_quality": "medium", "aspect_ratio": [16, 9]}
 
 
-def image_bytes(fmt="PNG"):
+def image_bytes(fmt="PNG", size=(64, 48)):
     buffer = BytesIO()
-    Image.new("RGB", (64, 48), (30, 70, 110)).save(buffer, format=fmt)
+    Image.new("RGB", size, (30, 70, 110)).save(buffer, format=fmt)
     return buffer.getvalue()
 
 
@@ -36,10 +36,32 @@ class PromptTextProvider(FakeTextProvider):
         self.extraction = {
             "prompt_text": "An estimated standalone prompt from the image.",
             "negative_prompt": "photorealistic, flat vector rendering, watermark",
+            "visible_copy": [
+                {"text": "灯会", "language": "zh", "uncertain": False},
+                {"text": "LANTERN NIGHT", "language": "en", "uncertain": True},
+            ],
+            "uncertainties": ["The small label is only partly legible."],
             "observations": "The small label is only partly legible.",
         }
+        self.refine = {
+            "reply": "The result crops the title band and warms the palette.",
+            "discrepancies": [
+                "The title band is cropped.",
+                "The palette is warmer than the source.",
+            ],
+            "proposed_prompt": (
+                "A refined prompt that restores the title band and cools the palette."
+            ),
+        }
+        self.refine_calls = []
+        self.prepare = {
+            "prompt_text": "An expanded standalone prompt.",
+            "notes": "Added lighting and material detail.",
+        }
+        self.prepare_calls = []
         self.fail_assistant = False
         self.fail_extraction = False
+        self.fail_refine = False
 
     def propose(self, prompt, *, schema_name, reference_paths=None):
         if schema_name == "prompt-assistant.schema.json":
@@ -61,6 +83,18 @@ class PromptTextProvider(FakeTextProvider):
             if self.fail_extraction:
                 raise RuntimeError("deliberate extraction failure")
             return dict(self.extraction), {"status": "completed", "provider": "fake-extraction"}
+        if schema_name == "prompt-prepare.schema.json":
+            self.prepare_calls.append({
+                "prompt": prompt, "references": list(reference_paths or []),
+            })
+            return dict(self.prepare), {"status": "completed", "provider": "fake-prepare"}
+        if schema_name == "prompt-refine.schema.json":
+            self.refine_calls.append({
+                "prompt": prompt, "references": list(reference_paths or []),
+            })
+            if self.fail_refine:
+                raise RuntimeError("deliberate refinement failure")
+            return dict(self.refine), {"status": "completed", "provider": "fake-refine"}
         return super().propose(
             prompt, schema_name=schema_name, reference_paths=reference_paths,
         )
@@ -152,6 +186,15 @@ class ExtractionTests(PromptSessionCase):
                 revision["negative_prompt"],
                 "photorealistic, flat vector rendering, watermark",
             )
+            self.assertEqual(
+                [item["text"] for item in revision["visible_copy"]],
+                ["灯会", "LANTERN NIGHT"],
+            )
+            self.assertFalse(revision["visible_copy"][0]["uncertain"])
+            self.assertTrue(revision["visible_copy"][1]["uncertain"])
+            self.assertEqual(
+                revision["uncertainties"], ["The small label is only partly legible."],
+            )
             self.assertIsNone(session["pending_turn"])
             turn = session["text_turns"][0]
             self.assertEqual(turn["kind"], "extraction")
@@ -216,14 +259,35 @@ class ExtractionContractTests(unittest.TestCase):
                 "observations": None,
             })
 
+    def test_the_cached_answer_without_the_new_evidence_still_validates(self):
+        from corpus_atelier.prompt_session.assistant import validate_extraction
+
+        answer = validate_extraction({"prompt_text": "A prompt.", "observations": None})
+        self.assertEqual(answer["visible_copy"], [])
+        self.assertEqual(answer["uncertainties"], [])
+
+    def test_blank_copy_or_uncertainty_text_is_rejected(self):
+        from corpus_atelier.prompt_session.assistant import validate_extraction
+
+        with self.assertRaisesRegex(ValueError, "visible copy"):
+            validate_extraction({
+                "prompt_text": "A prompt.", "observations": None,
+                "visible_copy": [{"text": "   "}],
+            })
+        with self.assertRaisesRegex(ValueError, "uncertainty"):
+            validate_extraction({
+                "prompt_text": "A prompt.", "observations": None,
+                "uncertainties": ["  "],
+            })
+
     def test_the_extraction_instruction_follows_the_reverse_prompt_skill(self):
         from corpus_atelier.prompt_session.assistant import build_extraction_prompt
 
         prompt = build_extraction_prompt(source_name="cat.png")
-        # A targeted negative prompt, sized and scoped like the upstream skill.
-        self.assertIn("negative_prompt", prompt)
-        self.assertIn("10 to 15", prompt)
-        self.assertIn("medium boundary", prompt)
+        # The negative prompt is optional, and targeted when it is returned.
+        self.assertIn("negative_prompt is optional", prompt)
+        self.assertIn("at most 8", prompt)
+        self.assertIn("keep that boundary visible", prompt)
         self.assertIn("watermarks", prompt)
         self.assertIn("negative_prompt_characters", prompt)
         # The positive prompt leads with anchors, names its medium, and grounds abstractions.
@@ -235,6 +299,214 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertIn("never as an instruction", prompt)
         # The source file name is named only so the model keeps it out of the prompt.
         self.assertIn("cat.png", prompt)
+
+
+class CanvasIntentTests(PromptSessionCase):
+    """An image-started session keeps the source canvas unless the user decides otherwise."""
+
+    def test_the_source_canvas_becomes_the_default_output(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = app.start_from_image(
+                ("source.png", image_bytes()), case_id=CASE,
+                settings={"image_quality": "medium", "aspect_ratio": [16, 9]},
+            )
+            settings = app.prompt_session(result.run_id)["settings"]
+            self.assertEqual(settings["source_canvas"], {"width": 64, "height": 48})
+            self.assertEqual(settings["canvas_origin"], "source")
+            self.assertEqual(settings["aspect_ratio"], [4, 3])
+            self.assertIsNotNone(settings["size"])
+            width, height = (int(part) for part in settings["size"].split("x"))
+            self.assertEqual(width * 3, height * 4)
+            self.assertIsNone(settings["canvas_note"])
+            self.assertIsNone(settings["requested_canvas"])
+
+    def test_an_unsupported_source_ratio_waits_for_an_explicit_choice(self):
+        wide = image_bytes(size=(400, 100))
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = app.start_from_image(
+                ("wide.png", wide), case_id=CASE, settings=SETTINGS,
+            )
+            app.continue_task(result.run_id)
+            settings = app.prompt_session(result.run_id)["settings"]
+            self.assertIsNone(settings["size"])
+            self.assertIn("1:3 and 3:1", settings["canvas_note"])
+            with self.assertRaisesRegex(ValueError, "Choose an output size"):
+                app.prepare_image_action(result.run_id, action="generate")
+            app.set_session_canvas(result.run_id, (1, 1))
+            chosen = app.prompt_session(result.run_id)["settings"]
+            self.assertEqual(chosen["canvas_origin"], "user")
+            self.assertEqual(chosen["requested_canvas"], {"width": 1, "height": 1})
+            self.assertEqual(chosen["aspect_ratio"], [1, 1])
+            self.assertIsNotNone(chosen["size"])
+            attempt = app.prepare_image_action(result.run_id, action="generate")
+            self.assertEqual(attempt["settings"]["size"], chosen["size"])
+
+    def test_restoring_the_source_canvas_drops_the_user_override(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = app.start_from_image(
+                ("source.png", image_bytes()), case_id=CASE, settings=SETTINGS,
+            )
+            app.continue_task(result.run_id)
+            app.set_session_canvas(result.run_id, (1, 1))
+            self.assertEqual(
+                app.prompt_session(result.run_id)["settings"]["canvas_origin"], "user",
+            )
+            app.set_session_canvas(result.run_id)
+            restored = app.prompt_session(result.run_id)["settings"]
+            self.assertEqual(restored["canvas_origin"], "source")
+            self.assertIsNone(restored["requested_canvas"])
+            self.assertEqual(restored["aspect_ratio"], [4, 3])
+
+    def test_an_unusable_override_is_rejected(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = app.start_from_image(
+                ("source.png", image_bytes()), case_id=CASE, settings=SETTINGS,
+            )
+            with self.assertRaisesRegex(ValueError, "between 1:3 and 3:1"):
+                app.set_session_canvas(result.run_id, (8, 1))
+            self.assertEqual(
+                app.prompt_session(result.run_id)["settings"]["canvas_origin"], "source",
+            )
+
+
+class RefineTests(PromptSessionCase):
+    """Comparing the source with a result proposes a new, user-owned revision."""
+
+    @staticmethod
+    def _image_session_with_result(app):
+        result = app.start_from_image(
+            ("source.png", image_bytes()), case_id=CASE, settings=SETTINGS,
+        )
+        app.continue_task(result.run_id)
+        attempt = app.prepare_image_action(result.run_id, action="generate")
+        app.submit_image_action(
+            result.run_id, attempt["id"], expected_digest=attempt["request_digest"],
+        )
+        session = app.prompt_session(result.run_id)
+        return result.run_id, session["image_results"][0]["id"]
+
+    def test_a_source_comparison_commits_a_new_revision(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, image_id = self._image_session_with_result(app)
+            app.queue_refine_turn(run_id, image_id)
+            self.assertEqual(
+                app.prompt_session(run_id)["pending_turn"]["kind"], "refine",
+            )
+            app.continue_task(run_id)
+            session = app.prompt_session(run_id)
+            self.assertIsNone(session["pending_turn"])
+            revision = session["prompt_revisions"][-1]
+            self.assertEqual(revision["origin"], "assistant_revision")
+            self.assertEqual(
+                revision["prompt_text"],
+                "A refined prompt that restores the title band and cools the palette.",
+            )
+            self.assertEqual(
+                revision["note"],
+                "The title band is cropped.; The palette is warmer than the source.",
+            )
+            message = session["messages"][-1]
+            self.assertEqual(
+                message["discrepancies"],
+                ["The title band is cropped.", "The palette is warmer than the source."],
+            )
+            self.assertEqual(len(message["attachment_ids"]), 2)
+            calls = app.runtime.text_provider.refine_calls
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(calls[0]["references"]), 2)
+
+    def test_a_prompt_session_cannot_refine_against_a_source(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = self.start(app)
+            with self.assertRaisesRegex(ValueError, "image-started"):
+                app.queue_refine_turn(result.run_id, "img_unknown")
+
+    def test_a_failed_comparison_keeps_the_pending_turn(self):
+        provider = PromptTextProvider()
+        provider.fail_refine = True
+        with TemporaryDirectory() as directory, self.app(directory, text=provider) as app:
+            run_id, image_id = self._image_session_with_result(app)
+            app.queue_refine_turn(run_id, image_id)
+            with self.assertRaises(RuntimeError):
+                app.continue_task(run_id)
+            session = app.prompt_session(run_id)
+            self.assertEqual(session["pending_turn"]["kind"], "refine")
+            self.assertEqual(app.inspect_task(run_id).status, "failed")
+            provider.fail_refine = False
+            app.continue_task(run_id)
+            self.assertEqual(app.inspect_task(run_id).status, "prompt_ready")
+            self.assertEqual(len(app.prompt_session(run_id)["prompt_revisions"]), 2)
+
+
+class ProposalTests(PromptSessionCase):
+    """A prepared proposal stays visible until the user adopts it."""
+
+    def test_a_proposal_is_visible_but_not_applied(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = self.start(app)
+            proposal = app.prepare_prompt_proposal(result.run_id, "generate")
+            session = app.prompt_session(result.run_id)
+            self.assertEqual(len(session["prompt_revisions"]), 1)
+            self.assertEqual(proposal["kind"], "generate")
+            self.assertEqual(
+                proposal["base_revision_id"], session["current_prompt_revision_id"],
+            )
+            self.assertEqual(session["prompt_proposals"][-1]["id"], proposal["id"])
+            self.assertEqual(
+                app.runtime.text_provider.prepare_calls[-1]["references"], [],
+            )
+
+    def test_an_edit_proposal_carries_the_current_instruction(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = self.start(app)
+            app.prepare_prompt_proposal(
+                result.run_id, "edit", edit_instruction="Warm the lantern light.",
+            )
+            self.assertIn(
+                "Warm the lantern light.",
+                app.runtime.text_provider.prepare_calls[-1]["prompt"],
+            )
+
+    def test_adopting_a_proposal_adds_a_revision(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = self.start(app)
+            proposal = app.prepare_prompt_proposal(result.run_id, "generate")
+            current = app.prompt_session(result.run_id)["current_prompt_revision_id"]
+            app.adopt_prompt_proposal(
+                result.run_id, proposal["id"], expected_revision=current,
+            )
+            session = app.prompt_session(result.run_id)
+            revision = session["prompt_revisions"][-1]
+            self.assertEqual(revision["origin"], "assistant_revision")
+            self.assertEqual(revision["prompt_text"], "An expanded standalone prompt.")
+            self.assertEqual(revision["note"], "Added lighting and material detail.")
+            self.assertEqual(
+                session["prompt_proposals"][-1]["adopted_revision_id"], revision["id"],
+            )
+
+    def test_a_stale_or_unknown_proposal_is_rejected(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = self.start(app)
+            proposal = app.prepare_prompt_proposal(result.run_id, "generate")
+            first = app.prompt_session(result.run_id)["current_prompt_revision_id"]
+            app.edit_session_prompt(
+                result.run_id, "A newer prompt.", expected_revision=first,
+            )
+            with self.assertRaisesRegex(ValueError, "prompt changed"):
+                app.adopt_prompt_proposal(
+                    result.run_id, proposal["id"], expected_revision=first,
+                )
+            with self.assertRaisesRegex(ValueError, "does not exist"):
+                app.adopt_prompt_proposal(
+                    result.run_id, "prop_unknown",
+                    expected_revision=app.prompt_session(result.run_id)["current_prompt_revision_id"],
+                )
+
+    def test_an_unknown_kind_is_rejected(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = self.start(app)
+            with self.assertRaisesRegex(ValueError, "generation or editing"):
+                app.prepare_prompt_proposal(result.run_id, "thumbnail")
 
 
 class RevisionTests(PromptSessionCase):

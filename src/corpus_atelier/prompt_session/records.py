@@ -91,6 +91,7 @@ def new_session(entry_mode: str, settings: dict[str, Any]) -> PromptSessionRecor
         "text_turns": [],
         "image_attempts": [],
         "image_results": [],
+        "prompt_proposals": [],
         "active_image_id": None,
         "pending_turn": None,
     }
@@ -107,6 +108,8 @@ def new_revision(
     source_turn_id: str | None = None,
     note: str | None = None,
     negative_prompt: str | None = None,
+    visible_copy: list[dict[str, Any]] | None = None,
+    uncertainties: list[str] | None = None,
     restored_from: str | None = None,
 ) -> dict[str, Any]:
     """Append one immutable revision and make it current."""
@@ -133,6 +136,8 @@ def new_revision(
         "note": note,
         "restored_from": restored_from,
         "negative_prompt": negative_prompt,
+        "visible_copy": list(visible_copy or []),
+        "uncertainties": list(uncertainties or []),
         "digest": prompt_digest(prompt_text),
         "created_at": now(),
     }
@@ -217,6 +222,7 @@ def load_session(root: Path) -> PromptSessionRecord:
         "text_turns": [],
         "image_attempts": [],
         "image_results": [],
+        "prompt_proposals": [],
         "active_image_id": None,
         "pending_turn": None,
     }

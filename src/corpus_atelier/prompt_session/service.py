@@ -19,10 +19,16 @@ from ..app.state import PromptSessionJob, RunResult
 from .assistant import (
     ASSISTANT_SCHEMA,
     EXTRACTION_SCHEMA,
+    PREPARE_SCHEMA,
+    REFINE_SCHEMA,
     build_extraction_prompt,
+    build_prepare_prompt,
+    build_refine_prompt,
     build_turn_prompt,
     label_images,
     validate_extraction,
+    validate_prepare,
+    validate_refine,
     validate_turn_answer,
 )
 from .attempts import ImageAttemptMixin
@@ -32,6 +38,7 @@ from .records import (
     WORKFLOW_KIND,
     PromptSessionRecord,
     current_revision,
+    find_result,
     find_revision,
     find_upload,
     image_record,
@@ -43,7 +50,11 @@ from .records import (
     save_session,
 )
 from .uploads import MAX_REFERENCES, UploadMixin, validate_upload
-from .validation import validate_prompt_text, validate_session_settings
+from .validation import (
+    resolve_canvas_settings,
+    validate_prompt_text,
+    validate_session_settings,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -129,10 +140,17 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
         ) -> RunResult:
             """Archive one source image and queue a vision extraction; no image call."""
             name, data = image
-            validate_upload(name, data)
+            _, width, height = validate_upload(name, data)
+            # An image-started session keeps the source canvas unless the user
+            # later asks for a different output size.
+            source_settings = {
+                key: value for key, value in dict(settings or {}).items()
+                if key == "image_quality"
+            }
+            source_settings["source_canvas"] = {"width": width, "height": height}
             run_id, root, session = self._create_session(
                 request_text=f"Extract an estimated prompt from the uploaded image {Path(name).name}",
-                entry_mode="image", case_id=case_id, settings=settings,
+                entry_mode="image", case_id=case_id, settings=source_settings,
             )
             upload = self._archive_upload(root, session, name, data, role="source_image")
             session["pending_turn"] = {
@@ -142,6 +160,102 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
             self._save(root, session)
             self.store.update(root, "extracting", error=None)
             return self._result(run_id)
+
+
+    @serialized_session
+    def set_session_canvas(
+        self, run_id: str, ratio: tuple[int, int] | None = None,
+    ) -> RunResult:
+        """Choose the output canvas explicitly; earlier attempts keep their own size."""
+        root, session, _ = self._prompt_session(run_id)
+        self._require_idle(session)
+        value = {key: item for key, item in session["settings"].items() if key != "size"}
+        if ratio is None:
+            value.pop("requested_canvas", None)
+            value.pop("aspect_ratio", None)
+        else:
+            if not isinstance(ratio, (list, tuple)) or len(ratio) != 2:
+                raise ValueError("An aspect ratio requires exactly two integers.")
+            value.pop("aspect_ratio", None)
+            value["requested_canvas"] = {"width": int(ratio[0]), "height": int(ratio[1])}
+        resolved = {**session["settings"], **resolve_canvas_settings(value)}
+        if resolved["size"] is None:
+            raise ValueError(
+                resolved["canvas_note"]
+                or "No supported output size keeps this canvas ratio."
+            )
+        session["settings"] = resolved
+        self._save(root, session)
+        self.store.update(
+            root, "prompt_ready", prompt_session_settings=resolved, error=None,
+        )
+        return self._result(run_id)
+
+
+    @serialized_session
+    def prepare_prompt_proposal(
+        self, run_id: str, kind: str, *, edit_instruction: str | None = None,
+    ) -> dict[str, Any]:
+        """Ask the text model for one visible proposal; nothing is applied."""
+        root, session, _ = self._prompt_session(run_id)
+        self._assert_model_binding(root)
+        revision = current_revision(session)
+        if revision is None:
+            raise ValueError("Write a prompt before asking for a proposal.")
+        proposal_id = new_id("prop")
+        proposal_dir = root / "prompt-proposals" / proposal_id
+        prompt = build_prepare_prompt(
+            session, kind=kind, base_revision=revision,
+            edit_instruction=edit_instruction,
+        )
+        self.store.text(proposal_dir, "prompt.md", prompt)
+        answer, response = self.runtime.text_provider.propose(
+            prompt, schema_name=PREPARE_SCHEMA,
+        )
+        answer = validate_prepare(answer)
+        self.store.json(proposal_dir, "response.json", response)
+        proposal = {
+            "id": proposal_id,
+            "kind": kind,
+            "base_revision_id": revision["id"],
+            "prompt_text": answer["prompt_text"],
+            "notes": answer["notes"],
+            "created_at": now(),
+        }
+        session.setdefault("prompt_proposals", []).append(proposal)
+        self._save(root, session)
+        return proposal
+
+
+    @serialized_session
+    def adopt_prompt_proposal(
+        self, run_id: str, proposal_id: str, *, expected_revision: str,
+    ) -> RunResult:
+        """Adopt one proposal as a new revision; the user decides when to use it."""
+        root, session, _ = self._prompt_session(run_id)
+        self._require_idle(session)
+        proposal = next(
+            (
+                item for item in session.get("prompt_proposals", [])
+                if item["id"] == proposal_id
+            ),
+            None,
+        )
+        if proposal is None:
+            raise ValueError("That prompt proposal does not exist in this session.")
+        if expected_revision != session.get("current_prompt_revision_id"):
+            raise ValueError("The prompt changed. Review the current prompt before adopting.")
+        revision = new_revision(
+            session, proposal["prompt_text"], "assistant_revision",
+            parent_revision_id=expected_revision, note=proposal.get("notes"),
+        )
+        proposal["adopted_revision_id"] = revision["id"]
+        self._save(root, session)
+        self.store.update(
+            root, "prompt_ready", error=None,
+            current_prompt_revision_id=session["current_prompt_revision_id"],
+        )
+        return self._result(run_id)
 
 
     @serialized_session
@@ -363,6 +477,8 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
                         session, answer["prompt_text"], "vision_extraction",
                         source_image_id=upload["id"], note=answer["observations"],
                         negative_prompt=answer.get("negative_prompt"),
+                        visible_copy=answer.get("visible_copy"),
+                        uncertainties=answer.get("uncertainties"),
                         source_turn_id=turn_id,
                     )
                 session["text_turns"].append({
@@ -407,6 +523,134 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
             return answer
 
 
+    @serialized_session
+    def queue_refine_turn(self, run_id: str, result_image_id: str) -> RunResult:
+        """Queue one source-versus-result comparison; the user still owns the proposal."""
+        root, session, _ = self._prompt_session(run_id)
+        self._assert_model_binding(root)
+        if session["entry_mode"] != "image":
+            raise ValueError("Only an image-started session can refine against its source.")
+        if session.get("pending_turn"):
+            raise ValueError("Wait for the current response, or retry it.")
+        source = next(
+            (upload for upload in session["uploads"] if upload.get("role") == "source_image"),
+            None,
+        )
+        if source is None:
+            raise ValueError("This session has no source image to compare against.")
+        find_result(session, result_image_id)
+        session["pending_turn"] = {
+            "kind": "refine",
+            "turn_id": new_id("turn"),
+            "source_image_id": source["id"],
+            "result_image_id": result_image_id,
+            "base_revision_id": session["current_prompt_revision_id"],
+            "created_at": now(),
+        }
+        self._save(root, session)
+        self.store.update(root, "discussing_request", error=None)
+        return self._result(run_id)
+
+
+    @serialized_session
+    def run_refine_turn(self, run_id: str) -> RunResult:
+        """Compare the source with one result and commit the proposed revision."""
+        root, session, _ = self._prompt_session(run_id)
+        pending = session.get("pending_turn") or {}
+        if pending.get("kind") != "refine":
+            raise ValueError("There is no pending source comparison to run.")
+        self._assert_model_binding(root)
+        turn_id = pending["turn_id"]
+        turn_dir = root / "turns" / turn_id
+        source = image_record(session, pending["source_image_id"])
+        result = image_record(session, pending["result_image_id"])
+        base = (
+            find_revision(session, pending["base_revision_id"])
+            if pending.get("base_revision_id") else None
+        )
+        self.store.update(root, "discussing_request", error=None)
+        try:
+            answer = self._refine_answer(root, turn_dir, session, source, result, base)
+            revision = None
+            conflict = False
+            proposal = answer["proposed_prompt"]
+            if proposal is not None:
+                if session.get("current_prompt_revision_id") != pending.get("base_revision_id"):
+                    conflict = True
+                else:
+                    revision = new_revision(
+                        session, proposal, "assistant_revision",
+                        parent_revision_id=pending.get("base_revision_id"),
+                        note="; ".join(answer["discrepancies"]) or None,
+                        source_turn_id=turn_id,
+                    )
+            session["text_turns"].append({
+                "id": turn_id, "kind": "refine", "status": "completed",
+                "source_image_id": source["id"], "result_image_id": result["id"],
+                "base_revision_id": pending.get("base_revision_id"),
+                "reply": answer["reply"], "discrepancies": answer["discrepancies"],
+                "proposed_prompt": proposal,
+                "proposed_revision_id": revision["id"] if revision else None,
+                "conflict": conflict,
+                "model_input": f"turns/{turn_id}/prompt.md",
+                "raw_response": f"turns/{turn_id}/response.json",
+                "created_at": now(),
+            })
+            session["messages"].append({
+                "id": new_id("msg"), "role": "assistant", "text": answer["reply"],
+                "attachment_ids": [source["id"], result["id"]],
+                "attachment_names": [
+                    source.get("name") or source["id"],
+                    result.get("label") or result["id"],
+                ],
+                "discrepancies": answer["discrepancies"],
+                "proposed_prompt": proposal,
+                "proposed_revision_id": revision["id"] if revision else None,
+                "conflict": conflict, "turn_id": turn_id, "created_at": now(),
+            })
+            session["pending_turn"] = None
+            self._save(root, session)
+            self.store.update(
+                root, "prompt_ready", error=None,
+                current_prompt_revision_id=session["current_prompt_revision_id"],
+            )
+        except Exception as exc:
+            self.store.json(turn_dir, "error.json", {
+                "status": "failed", "error_type": type(exc).__name__, "message": str(exc),
+            })
+            self.store.fail(root, exc)
+            raise
+        return self._result(run_id)
+
+
+    def _refine_answer(
+        self, root: Path, turn_dir: Path, session: PromptSessionRecord,
+        source: dict[str, Any], result: dict[str, Any], base: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        cached = turn_dir / "answer.json"
+        if cached.is_file():
+            try:
+                return validate_refine(read_json(cached))
+            except (OSError, ValueError):
+                LOGGER.warning("Ignoring an invalid cached refinement at %s.", cached)
+        source_path = verified_image(root, source["path"], source["sha256"])
+        result_path = verified_image(root, result["path"], result["sha256"])
+        prompt = build_refine_prompt(
+            session, base_revision=base,
+            source_label=source.get("name") or source["id"],
+            result_label=result.get("label") or result["id"],
+        )
+        self.store.text(turn_dir, "prompt.md", prompt)
+        answer, response = self.runtime.text_provider.propose(
+            prompt, schema_name=REFINE_SCHEMA,
+            reference_paths=[source_path, result_path],
+        )
+        answer = validate_refine(answer)
+        self.store.json(turn_dir, "response.json", response)
+        self.store.json(turn_dir, "answer.json", answer)
+        return answer
+
+
     def continue_prompt_session(self, run_id: str) -> RunResult:
             """Resume the one pending text step, if any; never repeat an image call."""
             root, session, manifest = self._prompt_session(run_id)
@@ -417,4 +661,6 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
                 return self._result(run_id)
             if pending.get("kind") == "extraction":
                 return self.run_prompt_extraction(run_id)
+            if pending.get("kind") == "refine":
+                return self.run_refine_turn(run_id)
             return self.run_session_turn(run_id)

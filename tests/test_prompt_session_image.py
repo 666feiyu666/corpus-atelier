@@ -19,6 +19,21 @@ def image_bytes(fmt="PNG", color=(30, 70, 110)):
     return buffer.getvalue()
 
 
+def mask_bytes(size=(64, 48), *, transparent=True, fmt="PNG"):
+    """A white RGBA mask whose top-left quadrant is transparent by default."""
+    image = Image.new("RGBA", size, (255, 255, 255, 255))
+    if transparent:
+        for x in range(size[0] // 2):
+            for y in range(size[1] // 2):
+                image.putpixel((x, y), (255, 255, 255, 0))
+    buffer = BytesIO()
+    if fmt == "PNG":
+        image.save(buffer, format="PNG")
+    else:
+        image.convert("RGB").save(buffer, format=fmt)
+    return buffer.getvalue()
+
+
 class TimeoutImageProvider(FakeImageProvider):
     """Simulate a request that may have reached the provider before it failed."""
 
@@ -166,6 +181,50 @@ class ReferenceSelectionTests(ImageActionCase):
             self.assertEqual(request["operation"], "reference_generation")
             self.assertEqual(request["references"][0]["sha256"], upload["sha256"])
 
+    def test_reference_roles_are_numbered_in_the_prompt(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = start_with_attachment(app)
+            upload = app.prompt_session(result.run_id)["uploads"][0]
+            attempt = app.prepare_image_action(
+                result.run_id, action="generate",
+                reference_image_ids=[upload["id"]],
+                reference_roles={upload["id"]: "palette"},
+            )
+            self.assertEqual(
+                attempt["reference_roles"],
+                [{"index": 1, "image_id": upload["id"], "role": "palette"}],
+            )
+            self.assertIn("Reference images: 1 = palette.", attempt["request_text"])
+            request = read_json(result.run_dir / attempt["request_path"])
+            self.assertIn("Reference images: 1 = palette.", request["prompt"])
+
+    def test_a_reference_role_must_be_known(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = start_with_attachment(app)
+            upload = app.prompt_session(result.run_id)["uploads"][0]
+            with self.assertRaisesRegex(ValueError, "reference role"):
+                app.prepare_image_action(
+                    result.run_id, action="generate",
+                    reference_image_ids=[upload["id"]],
+                    reference_roles={upload["id"]: "mood"},
+                )
+
+    def test_an_edit_without_extra_references_keeps_the_instruction_exact(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            result = self.start(app)
+            attempt = app.prepare_image_action(
+                result.run_id, action="generate",
+            )
+            self.submit(app, result.run_id, attempt)
+            source = app.prompt_session(result.run_id)["image_results"][0]
+            instruction = "Warm only the lantern light."
+            edited = app.prepare_image_action(
+                result.run_id, action="edit", source_image_id=source["id"],
+                edit_instruction=instruction,
+            )
+            self.assertEqual(edited["request_text"], instruction)
+            self.assertIsNone(edited["reference_guidance"])
+
     def test_more_than_three_references_are_rejected(self):
         with TemporaryDirectory() as directory, self.app(directory) as app:
             result = self.start(app)
@@ -192,6 +251,66 @@ def start_with_attachment(app, prompt="A poster with this texture."):
     )
     app.run_session_turn(result.run_id)
     return result
+
+
+class MaskTests(ImageActionCase):
+    """The masked-edit path freezes one validated mask into the request."""
+
+    def _generated_source(self, app):
+        result = self.start(app)
+        attempt = app.prepare_image_action(result.run_id, action="generate")
+        self.submit(app, result.run_id, attempt)
+        session = app.prompt_session(result.run_id)
+        return result.run_id, session["image_results"][0]["id"]
+
+    @staticmethod
+    def _upload_mask(app, run_id, data):
+        app.attach_session_upload(run_id, ("mask.png", data), role="mask")
+        return app.prompt_session(run_id)["uploads"][-1]["id"]
+
+    def test_a_valid_mask_is_frozen_into_the_request(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, source_id = self._generated_source(app)
+            # The fake provider renders 94x60, so the mask must match that source.
+            mask_id = self._upload_mask(app, run_id, mask_bytes(size=(94, 60)))
+            attempt = app.prepare_image_action(
+                run_id, action="edit", source_image_id=source_id,
+                edit_instruction="Replace the sky only.", mask_image_id=mask_id,
+            )
+            self.assertEqual(attempt["mask"]["id"], mask_id)
+            request = read_json(app.store.find_run(run_id) / attempt["request_path"])
+            self.assertEqual(request["operation"], "mask_edit")
+            self.assertEqual(request["mask"]["sha256"], attempt["mask"]["sha256"])
+
+    def test_a_mask_must_match_the_source_size(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, source_id = self._generated_source(app)
+            mask_id = self._upload_mask(app, run_id, mask_bytes(size=(32, 32)))
+            with self.assertRaisesRegex(ValueError, "match the source"):
+                app.prepare_image_action(
+                    run_id, action="edit", source_image_id=source_id,
+                    edit_instruction="Replace the sky only.", mask_image_id=mask_id,
+                )
+
+    def test_a_mask_needs_a_transparent_region(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, source_id = self._generated_source(app)
+            mask_id = self._upload_mask(app, run_id, mask_bytes(transparent=False))
+            with self.assertRaisesRegex(ValueError, "transparent region"):
+                app.prepare_image_action(
+                    run_id, action="edit", source_image_id=source_id,
+                    edit_instruction="Replace the sky only.", mask_image_id=mask_id,
+                )
+
+    def test_a_mask_must_be_png_with_alpha(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, source_id = self._generated_source(app)
+            mask_id = self._upload_mask(app, run_id, mask_bytes(fmt="JPEG"))
+            with self.assertRaisesRegex(ValueError, "PNG with an alpha channel"):
+                app.prepare_image_action(
+                    run_id, action="edit", source_image_id=source_id,
+                    edit_instruction="Replace the sky only.", mask_image_id=mask_id,
+                )
 
 
 class EditTests(ImageActionCase):

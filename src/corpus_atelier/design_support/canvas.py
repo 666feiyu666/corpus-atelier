@@ -42,3 +42,24 @@ def resolve_image_size(ratio: tuple[int, int]) -> tuple[str, tuple[int, int]]:
     scale = min(max(target_scale, minimum_scale), maximum_scale)
     width, height = 16 * x_ratio * scale, 16 * y_ratio * scale
     return f"{width}x{height}", (x_ratio, y_ratio)
+
+
+def canvas_from_source(
+    width: int, height: int,
+) -> tuple[str | None, tuple[int, int] | None, str | None]:
+    """Resolve the provider canvas that keeps a source image's exact ratio.
+
+    Returns ``(size, ratio, reason)``. ``size`` is ``None`` when the provider
+    cannot keep the source ratio or dimensions; ``reason`` then explains why so
+    the interface can ask the user to choose another output size instead of
+    silently cropping, padding, or changing the ratio.
+    """
+    try:
+        ratio = reduce_ratio(int(width), int(height))
+    except (TypeError, ValueError) as exc:
+        return None, None, str(exc)
+    try:
+        size, reduced = resolve_image_size(ratio)
+    except ValueError as exc:
+        return None, None, str(exc)
+    return size, reduced, None

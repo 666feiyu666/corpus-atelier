@@ -18,6 +18,7 @@ from corpus_atelier.ui.prompt_editor import (
 )
 from corpus_atelier.ui.prompt_images import (
     _render_archive_control,
+    _render_canvas_control,
     _render_image_actions,
     _render_results,
 )
@@ -86,6 +87,7 @@ def _render_prompt_session(summary: RunSummary, *, embedded: bool = False) -> No
             _render_session_images(summary, session)
             _render_revision_history(summary, session, busy=busy)
         with st.container(border=True, key=f"image_section_{summary.run_id}"):
+            _render_canvas_control(summary, session, busy=busy)
             _render_image_actions(summary, session, busy=busy)
             _render_results(summary, session, busy=busy)
             _render_archive_control(summary, session)

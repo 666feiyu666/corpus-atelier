@@ -71,10 +71,12 @@ h4 {{ font-size: 15px !important; font-weight: 600; }}
 }}
 
 /* The reading column stays centred and slightly narrow on wide screens. */
+/* Streamlit's header is fixed at 56px and paints over the content when the
+   sidebar is collapsed, so the reading column starts below it. */
 [data-testid="stMainBlockContainer"] {{
   max-width: 1180px;
   margin: 0 auto;
-  padding-top: 1.6rem;
+  padding-top: 3.6rem;
 }}
 
 /* Top navigation: one wordmark, two quiet tabs, a single indigo rule. */
@@ -159,10 +161,6 @@ input:focus-visible, textarea:focus-visible, [role="combobox"]:focus-visible {{
 }}
 
 @media (max-width: 700px) {{
-  /* Leave room for the collapsed-sidebar control floating above the content. */
-  [data-testid="stMainBlockContainer"] {{
-    padding-top: 3rem;
-  }}
   .st-key-atelier_nav {{
     flex-wrap: wrap;
     row-gap: 0.35rem;

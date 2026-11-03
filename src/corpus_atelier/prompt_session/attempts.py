@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from ..artifacts.hashing import digest_file
 from ..artifacts.paths import verified_image
 from ..app.locking import serialized_run as serialized_session
@@ -24,11 +26,36 @@ from .records import (
     now,
 )
 from .uploads import MAX_REFERENCES
-from .validation import validate_session_settings
+from .validation import resolve_canvas_settings
 
 LOGGER = logging.getLogger(__name__)
 
 _UNKNOWN_OUTCOME_TOKENS = ("timeout", "connection", "interrupt")
+
+# How a selected reference image is meant to influence the result.
+REFERENCE_ROLES = ("subject", "composition", "palette", "style")
+DEFAULT_REFERENCE_ROLE = "subject"
+
+
+def _reference_guidance(
+    action: str, reference_ids: list[str], roles: dict[str, str],
+) -> str | None:
+    """Number the references and state the role each one plays, in the prompt itself."""
+    if action == "generate":
+        if not reference_ids:
+            return None
+        parts = [
+            f"{index} = {roles.get(image_id, DEFAULT_REFERENCE_ROLE)}"
+            for index, image_id in enumerate(reference_ids, start=1)
+        ]
+        return "Reference images: " + ", ".join(parts) + "."
+    if len(reference_ids) < 2:
+        return None
+    parts = [
+        f"{index} = {roles.get(image_id, DEFAULT_REFERENCE_ROLE)}"
+        for index, image_id in enumerate(reference_ids[1:], start=2)
+    ]
+    return "Additional references to the image to edit: " + ", ".join(parts) + "."
 
 
 def outcome_unknown(exc: BaseException) -> bool:
@@ -39,6 +66,19 @@ def outcome_unknown(exc: BaseException) -> bool:
     return any(token in name for token in _UNKNOWN_OUTCOME_TOKENS)
 
 
+def _validate_mask(mask_path: Path, source_path: Path) -> None:
+    """A mask must be a PNG with transparency and the source image's exact size."""
+    with Image.open(mask_path) as image:
+        if image.format != "PNG" or image.mode != "RGBA":
+            raise ValueError("The mask must be a PNG with an alpha channel.")
+        mask_size = image.size
+        if image.getchannel("A").getextrema() == (255, 255):
+            raise ValueError("The mask needs a transparent region to regenerate.")
+    with Image.open(source_path) as image:
+        if image.size != mask_size:
+            raise ValueError("The mask must match the source image dimensions.")
+
+
 class ImageAttemptMixin:
     """One frozen request per attempt, executed at most once."""
 
@@ -47,6 +87,7 @@ class ImageAttemptMixin:
     def prepare_image_action(
             self, run_id: str, *, action: str, edit_instruction: str | None = None,
             source_image_id: str | None = None, reference_image_ids: list[str] | None = None,
+            reference_roles: dict[str, str] | None = None,
             mask_image_id: str | None = None, expected_revision: str | None = None,
         ) -> dict[str, Any]:
             """Freeze one exact, reviewable image request and return its attempt record."""
@@ -80,6 +121,17 @@ class ImageAttemptMixin:
                 reference_ids = [source_image_id, *[i for i in reference_ids if i != source_image_id]]
             if len(reference_ids) > MAX_REFERENCES:
                 raise ValueError(f"An image request accepts at most {MAX_REFERENCES} reference images.")
+            roles = dict(reference_roles or {})
+            for role in roles.values():
+                if role not in REFERENCE_ROLES:
+                    raise ValueError(
+                        "A reference role must be one of: "
+                        + ", ".join(REFERENCE_ROLES)
+                        + "."
+                    )
+            guidance = _reference_guidance(action, reference_ids, roles)
+            if guidance:
+                request_text = f"{request_text}\n\n{guidance}"
             references = []
             for image_id in reference_ids:
                 record = image_record(session, image_id)
@@ -95,8 +147,17 @@ class ImageAttemptMixin:
                 mask = {"id": mask_image_id, "path": record["path"], "sha256": record["sha256"]}
             if mask is not None and len(references) != 1:
                 raise ValueError("Mask inpainting requires exactly one reference image.")
+            if mask is not None:
+                _validate_mask(root / mask["path"], root / references[0]["path"])
             settings = session["settings"]
-            size = settings.get("size") or validate_session_settings(settings)["size"]
+            size = settings.get("size")
+            if not size:
+                size = resolve_canvas_settings(settings).get("size")
+            if not size:
+                raise ValueError(
+                    "Choose an output size before generating: no supported size "
+                    "keeps this canvas ratio."
+                )
             request = self.runtime.image_provider.describe_request(
                 request_text, size=size,
                 reference_paths=[root / item["path"] for item in references] or None,
@@ -118,6 +179,15 @@ class ImageAttemptMixin:
                 "reference_image_ids": reference_ids,
                 "mask_image_id": mask_image_id,
                 "references": references,
+                "reference_roles": [
+                    {
+                        "index": index,
+                        "image_id": image_id,
+                        "role": roles.get(image_id, DEFAULT_REFERENCE_ROLE),
+                    }
+                    for index, image_id in enumerate(reference_ids, start=1)
+                ],
+                "reference_guidance": guidance,
                 "mask": mask,
                 "settings": {
                     "model": request.get("model"), "quality": request.get("quality"),

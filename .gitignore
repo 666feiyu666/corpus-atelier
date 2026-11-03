@@ -1,15 +1,35 @@
+# Local credentials and environment
 .env
 .env.*
 !.env.example
 .venv/
+
+# Python build and cache artifacts
 __pycache__/
 *.py[cod]
-.ipynb_checkpoints/
 *.egg-info/
 build/
 dist/
-AGENTS.md
-experiments/
-docs/
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Streamlit secrets; config.toml is tracked
+.streamlit/secrets.toml
+
+# Local product state, agent scratch, and experiment outputs
 .atelier/
-gallery/
+.reasonix/
+experiments/
+AGENTS.md
+
+# Local-only documentation
+docs/
+
+# OS noise and logs
+.DS_Store
+Thumbs.db
+*.log

@@ -49,6 +49,17 @@ def image_bytes(fmt="PNG"):
     return buffer.getvalue()
 
 
+def mask_bytes(size=(64, 48)):
+    """A white RGBA mask with a transparent quadrant, matching image_bytes()."""
+    image = Image.new("RGBA", size, (255, 255, 255, 255))
+    for x in range(size[0] // 2):
+        for y in range(size[1] // 2):
+            image.putpixel((x, y), (255, 255, 255, 0))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 class PromptStudioTests(unittest.TestCase):
     def setUp(self):
         self.text = PromptTextProvider()
@@ -322,10 +333,14 @@ class PromptStudioTests(unittest.TestCase):
             self.assertIn("source.png", captions)
             self.assertIn("源图 · 当前提示词提取自这张图", captions)
             self.assertIn("本会话的图片（1）", [item.label for item in page.expander])
-            self.assertIn(
-                "photorealistic, flat vector rendering, watermark",
-                [item.value for item in page.code],
-            )
+            codes = [item.value for item in page.code]
+            self.assertIn("photorealistic, flat vector rendering, watermark", codes)
+            self.assertIn("灯会", codes)
+            self.assertIn("LANTERN NIGHT", codes)
+            self.assertTrue(any(
+                "The small label is only partly legible." in item.value
+                for item in page.markdown
+            ))
             self.assertGreaterEqual(len(page.get("image")), 1)
 
     def test_an_oversized_upload_reports_the_exact_reason(self):
@@ -343,6 +358,110 @@ class PromptStudioTests(unittest.TestCase):
                 "10 MB" in item.value for item in page.error
             ), [item.value for item in page.error])
             self.assertIsNone(page.session_state["selected_task_id"])
+
+    def test_an_image_session_shows_the_source_canvas_and_output_size(self):
+        with TemporaryDirectory() as directory:
+            run_id = self.create_session(directory, image=True)
+            with self.provider_patches(), self.application(directory) as app:
+                app.continue_task(run_id)
+            with self.provider_patches(), patch.dict(os.environ, self.environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10)
+                page.session_state["selected_task_id"] = run_id
+                page.run()
+            self.assertFalse(page.exception)
+            captions = [item.value for item in page.caption]
+            self.assertTrue(
+                any("源图 64×48（4:3）" in item for item in captions), captions,
+            )
+            self.assertTrue(
+                any(item.startswith("输出 ") for item in captions), captions,
+            )
+            self.assertIn(
+                f"canvas_ratio_{run_id}", [box.key for box in page.selectbox],
+            )
+
+    def test_an_image_session_offers_refine_against_source(self):
+        with TemporaryDirectory() as directory:
+            run_id = self.create_session(directory, image=True)
+            with self.provider_patches(), self.application(directory) as app:
+                app.continue_task(run_id)
+                attempt = app.prepare_image_action(run_id, action="generate")
+                app.submit_image_action(
+                    run_id, attempt["id"], expected_digest=attempt["request_digest"],
+                )
+                image_id = app.prompt_session(run_id)["image_results"][0]["id"]
+            with self.provider_patches(), patch.dict(os.environ, self.environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10)
+                page.session_state["selected_task_id"] = run_id
+                page.run()
+            self.assertFalse(page.exception)
+            self.assertIn(f"refine_{image_id}", [button.key for button in page.button])
+
+    def test_reference_roles_are_selectable_per_image(self):
+        with TemporaryDirectory() as directory:
+            run_id = self.create_session(directory, "A poster with this texture.")
+            with self.provider_patches(), self.application(directory) as app:
+                app.queue_session_message(
+                    run_id, "Use this texture.",
+                    attachments=[("swatch.png", image_bytes())],
+                )
+                app.run_session_turn(run_id)
+                upload_id = app.prompt_session(run_id)["uploads"][0]["id"]
+            with self.provider_patches(), patch.dict(os.environ, self.environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10)
+                page.session_state["selected_task_id"] = run_id
+                page.run()
+                page.multiselect(key=f"prompt_refs_{run_id}").set_value([upload_id]).run()
+            self.assertFalse(page.exception)
+            self.assertIn(
+                f"reference_role_{run_id}_{upload_id}",
+                [box.key for box in page.selectbox],
+            )
+
+    def test_a_mask_can_be_uploaded_and_previewed(self):
+        with TemporaryDirectory() as directory:
+            run_id = self.create_session(directory, "A quiet poster of a paper lantern.")
+            self.generate_result(directory, run_id)
+            with self.provider_patches(), patch.dict(os.environ, self.environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10)
+                page.session_state["selected_task_id"] = run_id
+                page.run()
+                uploader = next(
+                    item for item in page.get("file_uploader")
+                    if item.key == f"edit_mask_upload_{run_id}"
+                )
+                uploader.upload("mask.png", mask_bytes(), "image/png").run()
+                page.button(key=f"add_mask_{run_id}").click().run()
+            self.assertFalse(page.exception)
+            self.assertIn(f"edit_mask_{run_id}", [box.key for box in page.selectbox])
+            # The selected mask renders its overlay next to the result image.
+            self.assertGreaterEqual(len(page.get("image")), 2)
+            self.assertIn(
+                "不透明像素保留，透明像素重绘。",
+                [item.value for item in page.caption],
+            )
+
+    def test_a_generation_proposal_can_be_prepared_and_adopted(self):
+        with TemporaryDirectory() as directory:
+            run_id = self.create_session(directory, "Original prompt.")
+            with self.provider_patches(), patch.dict(os.environ, self.environment(directory)):
+                page = AppTest.from_file(str(APP), default_timeout=10)
+                page.session_state["selected_task_id"] = run_id
+                page.run()
+                page.button(key=f"prepare_prompt_{run_id}").click().run()
+                self.assertFalse(page.exception)
+                proposal = self.session_record(directory, run_id)["prompt_proposals"][-1]
+                self.assertIn(f"adopt_{proposal['id']}", [b.key for b in page.button])
+                page.button(key=f"adopt_{proposal['id']}").click().run()
+                self.assertFalse(page.exception)
+            session = self.session_record(directory, run_id)
+            self.assertEqual(
+                session["prompt_revisions"][-1]["prompt_text"],
+                "An expanded standalone prompt.",
+            )
+            self.assertEqual(
+                session["prompt_revisions"][-1]["origin"], "assistant_revision",
+            )
 
     def test_a_duplicate_submit_never_calls_the_provider_twice(self):
         with TemporaryDirectory() as directory:

@@ -14,7 +14,7 @@ from corpus_atelier.config.models import (
     get_image_model_profile,
     get_text_model_profile,
 )
-from corpus_atelier.ui.prompt_common import _creation_failure
+from corpus_atelier.ui.prompt_common import RATIO_OPTIONS, _creation_failure
 from corpus_atelier.ui.prompt_images import _submit_image_attempt
 from corpus_atelier.ui.session import (
     PRODUCT_CASE_ID,
@@ -28,8 +28,6 @@ from corpus_atelier.ui.session import (
 )
 
 LOGGER = logging.getLogger(__name__)
-
-RATIO_OPTIONS = ((1, 1), (16, 9), (9, 16), (4, 3), (3, 4), (3, 2), (2, 3))
 
 
 def _settings_values() -> tuple[str, str, str, str, tuple[int, int]]:
@@ -172,6 +170,7 @@ def _render_prompt_start() -> None:
             )
     else:
         st.caption(_t("extract_prompt_hint"))
+        st.caption(_t("canvas_source_hint"))
         upload = st.file_uploader(
             _t("source_image_label"), type=["png", "jpg", "jpeg", "webp"],
             accept_multiple_files=False, key="new_session_source",

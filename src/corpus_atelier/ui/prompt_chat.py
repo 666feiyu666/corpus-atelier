@@ -36,6 +36,10 @@ def _render_prompt_conversation(summary: RunSummary, session: dict, *, busy: boo
                         path = _image_path(summary, session, image_id)
                         if path is not None:
                             st.image(str(path), caption=labels.get(image_id, image_id), width=180)
+                    if message.get("discrepancies"):
+                        st.caption(_t("refine_discrepancies"))
+                        for item in message["discrepancies"]:
+                            st.markdown(f"- {item}")
                     if message.get("proposed_prompt"):
                         if message.get("conflict"):
                             st.warning(

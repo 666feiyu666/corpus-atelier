@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PromptPreparation",
+  "description": "One visible, optional prompt proposal: an expanded generation prompt or a rewritten edit instruction.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "prompt_text": {"type": "string", "minLength": 1, "maxLength": 8000},
+    "notes": {"type": ["string", "null"], "maxLength": 2000}
+  },
+  "required": ["prompt_text"]
+}

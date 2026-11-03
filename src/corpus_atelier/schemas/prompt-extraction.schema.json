@@ -1,12 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "PromptExtraction",
-  "description": "An estimated, standalone image-generation prompt plus a targeted negative prompt derived from one image.",
+  "description": "Visual evidence from one image: a renderer-ready prompt, the exact visible copy, the details that stay uncertain, and an optional negative prompt.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "prompt_text": {"type": "string", "minLength": 1, "maxLength": 8000},
     "negative_prompt": {"type": ["string", "null"], "maxLength": 2000},
+    "visible_copy": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {"type": "string", "minLength": 1, "maxLength": 500},
+          "language": {"type": ["string", "null"], "maxLength": 35},
+          "uncertain": {"type": "boolean"}
+        },
+        "required": ["text"]
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {"type": "string", "minLength": 1, "maxLength": 300}
+    },
     "observations": {"type": ["string", "null"], "maxLength": 2000}
   },
   "required": ["prompt_text", "observations"]

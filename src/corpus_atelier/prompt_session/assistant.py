@@ -23,6 +23,8 @@ from .records import (
 
 ASSISTANT_SCHEMA = "prompt-assistant.schema.json"
 EXTRACTION_SCHEMA = "prompt-extraction.schema.json"
+REFINE_SCHEMA = "prompt-refine.schema.json"
+PREPARE_SCHEMA = "prompt-prepare.schema.json"
 
 
 def build_turn_prompt(
@@ -98,8 +100,10 @@ def build_extraction_prompt(*, source_name: str) -> str:
     """The deterministic extraction instruction; no scene content is injected.
 
     The wording follows the ``get-prompt-from-image`` agent skill: recover the visual
-    mechanisms that drive similarity rather than listing content, name the medium
-    boundary, and pair the positive prompt with a targeted negative prompt.
+    mechanisms that drive similarity rather than listing content, and name the medium
+    boundary. The negative prompt is optional because the image provider receives no
+    separate negative field; the exact visible copy and the remaining uncertainties are
+    returned as structured evidence.
     """
     return (
         "Read the attached image and reverse-engineer one standalone prompt that would let "
@@ -140,20 +144,18 @@ def build_extraction_prompt(*, source_name: str) -> str:
         "composition without relying on protected names.\n\n"
         f"Write prompt_text in English and make it self-contained: do not refer to the "
         f"attached image, this instruction, or the file name ({source_name}) inside it.\n\n"
-        "Also return negative_prompt: 10 to 15 English words or short phrases, "
-        "comma-separated, chosen for this image and its medium boundary rather than copied "
-        "from a fixed template. Draw them from the failure modes that would hurt this result "
-        "most: the wrong medium, a wrong composition or viewpoint, deformed structure, extra "
-        "or missing elements, low resolution or thin detail, over- or underexposure and "
-        "wrong lighting, oversharpening, excessive skin smoothing or dirty noise, wrong "
-        "materials and reflections, and clear brand logos, watermarks, or garbled and "
-        "incorrect text. Never restate the positive prompt, and never return an empty "
-        "string; use fewer phrases only when the image genuinely leaves little room for "
-        "error.\n\n"
-        "Return prompt_text, negative_prompt, and observations. observations is a short note "
-        "on what remains genuinely uncertain (partly legible copy, an object that cannot be "
-        "identified), not a summary of the analysis; return null when nothing is "
-        "uncertain.\n\n"
+        "Return four more fields alongside prompt_text. visible_copy lists every legible "
+        "piece of design copy exactly as it appears, each with its language and an "
+        "uncertain flag for characters that are not fully legible; return an empty list "
+        "when the image has no readable copy. uncertainties lists the details that "
+        "genuinely cannot be decided from the pixels (partly legible copy, an object that "
+        "cannot be identified) as short strings; return an empty list when nothing is "
+        "uncertain. negative_prompt is optional: return null unless a few targeted phrases "
+        "would help avoid a specific misreading, at most 8 English words or short phrases, "
+        "comma-separated, chosen for this image rather than a fixed template, and never a "
+        "restatement of the positive prompt. observations is one short sentence "
+        "summarising the evidence, or null when there is nothing to add beyond the other "
+        "fields.\n\n"
         + json.dumps({"source_name": source_name, "limits": {
             "prompt_characters": MAX_PROMPT_LENGTH,
             "negative_prompt_characters": MAX_NEGATIVE_PROMPT_LENGTH,
@@ -163,21 +165,155 @@ def build_extraction_prompt(*, source_name: str) -> str:
 
 
 def validate_extraction(answer: Any) -> dict[str, Any]:
-    """Accept one prompt, an optional negative prompt, and an uncertainty note."""
+    """Accept the prompt, exact visible copy, uncertainties, and an optional negative prompt."""
     validate(answer, EXTRACTION_SCHEMA)
     if not answer["prompt_text"].strip():
         raise ValueError("The extracted prompt must not be empty.")
     negative = answer.get("negative_prompt")
-    if negative is not None and not negative.strip():
-        raise ValueError("The extracted negative prompt must be nonempty text or null.")
-    if negative is not None and len(negative) > MAX_NEGATIVE_PROMPT_LENGTH:
-        raise ValueError(
-            f"A negative prompt must be at most {MAX_NEGATIVE_PROMPT_LENGTH} characters."
-        )
+    if negative is not None:
+        if not negative.strip():
+            raise ValueError("The extracted negative prompt must be nonempty text or null.")
+        if len(negative) > MAX_NEGATIVE_PROMPT_LENGTH:
+            raise ValueError(
+                f"A negative prompt must be at most {MAX_NEGATIVE_PROMPT_LENGTH} characters."
+            )
+    visible_copy = []
+    for item in answer.get("visible_copy") or []:
+        text = item.get("text") if isinstance(item, dict) else item
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Each visible copy entry needs nonempty text.")
+        language = item.get("language") if isinstance(item, dict) else None
+        visible_copy.append({
+            "text": text,
+            "language": language if isinstance(language, str) and language.strip() else None,
+            "uncertain": bool(item.get("uncertain", False)) if isinstance(item, dict) else False,
+        })
+    uncertainties = []
+    for item in answer.get("uncertainties") or []:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("Each uncertainty needs nonempty text.")
+        uncertainties.append(item.strip())
     observations = answer["observations"]
     if observations is not None and not observations.strip():
         raise ValueError("Extraction observations must be nonempty text or null.")
-    return {**answer, "negative_prompt": negative}
+    return {
+        **answer,
+        "negative_prompt": negative,
+        "visible_copy": visible_copy,
+        "uncertainties": uncertainties,
+    }
+
+
+def build_refine_prompt(
+    session: PromptSessionRecord,
+    *,
+    base_revision: dict[str, Any] | None,
+    source_label: str,
+    result_label: str,
+) -> str:
+    """Ask for the few visual discrepancies between a source image and one result."""
+    return (
+        "You compare two images from the same session: image 1 is the source the user "
+        "uploaded, image 2 is the result the image model produced from the current "
+        "prompt. Report only the discrepancies that matter most for reproducing the "
+        "source: subject and its proportions, composition and framing, medium, palette, "
+        "lighting, materials, background geometry, and legible copy. Ignore incidental "
+        "noise, and do not invent details that are not visible in either image.\n\n"
+        "Return three fields. reply is one or two sentences for the user. discrepancies "
+        "is an ordered list of short, concrete observations, at most six. proposed_prompt "
+        "is one complete replacement prompt that keeps what already matches and corrects "
+        "only the discrepancies; it must stand alone in English and must not refer to "
+        "image 1, image 2, the source, or this instruction. Return null for "
+        "proposed_prompt only when the result already matches the source closely enough "
+        "that no change is worth making.\n\n"
+        + json.dumps({
+            "entry_mode": session["entry_mode"],
+            "current_prompt": None if base_revision is None else {
+                "revision_id": base_revision["id"],
+                "prompt_text": base_revision["prompt_text"],
+            },
+            "images": [
+                {"index": 1, "role": "source", "label": source_label},
+                {"index": 2, "role": "result", "label": result_label},
+            ],
+            "limits": {
+                "prompt_characters": MAX_PROMPT_LENGTH,
+                "reply_characters": MAX_REPLY_LENGTH,
+                "discrepancies": 6,
+            },
+        }, ensure_ascii=False)
+    )
+
+
+def validate_refine(answer: Any) -> dict[str, Any]:
+    """Accept a reply, the ordered discrepancies, and an optional replacement prompt."""
+    validate(answer, REFINE_SCHEMA)
+    if not answer["reply"].strip():
+        raise ValueError("The refinement reply must not be empty.")
+    discrepancies = []
+    for item in answer["discrepancies"]:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("Each discrepancy needs nonempty text.")
+        discrepancies.append(item.strip())
+    proposal = answer["proposed_prompt"]
+    if proposal is not None and not proposal.strip():
+        raise ValueError("proposed_prompt must be nonempty text or null.")
+    return {**answer, "discrepancies": discrepancies, "proposed_prompt": proposal}
+
+
+def build_prepare_prompt(
+    session: PromptSessionRecord,
+    *,
+    kind: str,
+    base_revision: dict[str, Any] | None,
+    edit_instruction: str | None = None,
+) -> str:
+    """Ask for one optional, visible proposal: an expanded prompt or a sharper edit."""
+    if kind == "generate":
+        instruction = (
+            "Expand the current prompt into one self-contained scene description an image "
+            "model can render. Preserve every explicit requirement, exact copy, subject, "
+            "and exclusion the user wrote. Add only the visual decisions the prompt leaves "
+            "open - composition, lighting, materials, palette relationships, medium "
+            "boundary - and keep the result in English. Do not mention this instruction or "
+            "that anything was expanded."
+        )
+    elif kind == "edit":
+        instruction = (
+            "Rewrite the current edit request as one precise editing instruction for an "
+            "image model: state what changes, where, and what must stay untouched. Keep "
+            "the user's intent, exact copy, and constraints, and add no new subjects. Write "
+            "one English instruction, not a list."
+        )
+    else:
+        raise ValueError("A prompt proposal must be for generation or editing.")
+    return (
+        instruction + "\n\n"
+        + json.dumps({
+            "entry_mode": session["entry_mode"],
+            "kind": kind,
+            "current_prompt": None if base_revision is None else {
+                "revision_id": base_revision["id"],
+                "prompt_text": base_revision["prompt_text"],
+            },
+            "current_edit_instruction": edit_instruction,
+            "limits": {
+                "prompt_characters": MAX_PROMPT_LENGTH,
+                "notes_characters": MAX_INSTRUCTION_LENGTH,
+            },
+        }, ensure_ascii=False)
+    )
+
+
+def validate_prepare(answer: Any) -> dict[str, Any]:
+    """Accept one proposal and an optional note about what the proposal changed."""
+    validate(answer, PREPARE_SCHEMA)
+    if not answer["prompt_text"].strip():
+        raise ValueError("The proposed prompt must not be empty.")
+    notes = answer.get("notes")
+    if notes is not None and not notes.strip():
+        raise ValueError("Proposal notes must be nonempty text or null.")
+    return {**answer, "notes": notes}
 
 
 def label_images(

@@ -13,6 +13,9 @@ from corpus_atelier.ui.session import _t
 
 LOGGER = logging.getLogger(__name__)
 
+# Ratios a user may pick when the source canvas cannot be kept exactly.
+RATIO_OPTIONS = ((1, 1), (16, 9), (9, 16), (4, 3), (3, 4), (3, 2), (2, 3))
+
 
 def _creation_failure(exc: Exception, log_message: str) -> None:
     """Report an upload or prompt validation reason, and log anything unexpected."""

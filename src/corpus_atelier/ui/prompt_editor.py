@@ -72,17 +72,75 @@ def _render_prompt_editor(summary: RunSummary, session: dict, *, busy: bool) -> 
             ):
                 st.session_state[key] = {"base": None, "version": draft["version"] + 1}
                 st.rerun(scope="app")
+            if st.button(
+                _t("prepare_prompt"), key=f"prepare_prompt_{summary.run_id}",
+                disabled=busy or revision is None, icon=":material/auto_awesome:",
+            ):
+                with st.spinner(_t("prepare_prompt_running")):
+                    try:
+                        with _app_for_manifest(summary.manifest) as app:
+                            proposal = app.prepare_prompt_proposal(
+                                summary.run_id, "generate",
+                            )
+                        st.session_state[f"proposal_{summary.run_id}"] = proposal
+                        st.rerun(scope="app")
+                    except Exception as exc:
+                        _prompt_error(exc)
             if revision is not None:
                 st.caption(_t(
                     "prompt_revision_meta",
                     revision=_revision_number(session, revision["id"]),
                     origin=_t(f"origin_{revision['origin']}"),
                 ))
+        proposal = st.session_state.get(f"proposal_{summary.run_id}")
+        if proposal:
+            st.caption(_t("prompt_proposal_label"))
+            st.code(proposal["prompt_text"], language=None, wrap_lines=True)
+            if proposal.get("notes"):
+                st.caption(proposal["notes"])
+            with st.container(horizontal=True):
+                if st.button(
+                    _t("adopt_proposal"), key=f"adopt_{proposal['id']}",
+                    type="primary", disabled=busy,
+                ):
+                    try:
+                        with _app_for_manifest(summary.manifest) as app:
+                            app.adopt_prompt_proposal(
+                                summary.run_id, proposal["id"],
+                                expected_revision=session.get("current_prompt_revision_id"),
+                            )
+                        st.session_state.pop(f"proposal_{summary.run_id}", None)
+                        st.toast(_t("proposal_adopted"))
+                        st.rerun(scope="app")
+                    except Exception as exc:
+                        _prompt_error(exc)
+                if st.button(
+                    _t("dismiss_proposal"), key=f"dismiss_{proposal['id']}",
+                    disabled=busy,
+                ):
+                    st.session_state.pop(f"proposal_{summary.run_id}", None)
+                    st.rerun(scope="app")
         if revision and revision.get("note"):
             st.caption(f"{_t('prompt_revision_note')} {revision['note']}")
         if revision and revision.get("negative_prompt"):
             st.caption(_t("prompt_negative_label"))
             st.code(revision["negative_prompt"], language=None, wrap_lines=True)
+        visible_copy = (revision or {}).get("visible_copy") or []
+        if visible_copy:
+            st.caption(_t("extraction_visible_copy"))
+            for item in visible_copy:
+                st.code(item["text"], language=None, wrap_lines=True)
+                notes = [item.get("language") or ""]
+                if item.get("uncertain"):
+                    notes.append(_t("copy_uncertain"))
+                detail = "  ".join(note for note in notes if note)
+                if detail:
+                    st.caption(detail)
+        uncertainties = (revision or {}).get("uncertainties") or []
+        if uncertainties:
+            st.caption(_t("extraction_uncertainties"))
+            for item in uncertainties:
+                st.markdown(f"- {item}")
 
 
 def _render_session_images(summary: RunSummary, session: dict) -> None:

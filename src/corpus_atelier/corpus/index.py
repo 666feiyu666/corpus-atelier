@@ -31,16 +31,21 @@ def _searchable_text(record: dict) -> str:
     return "\n".join(parts)
 
 
-def _fts_terms(text: str) -> str | None:
+def _fts_terms(text: str, *, match_any: bool = False) -> str | None:
     """Turn free text into a safe FTS5 MATCH expression.
 
     Each whitespace token is quoted as a phrase so FTS operators inside it are
-    inert, and tokens are AND-ed (FTS5's default between adjacent phrases).
+    inert. Terms are AND-ed by default; ``match_any`` OR-s them instead, keeping
+    only tokens long enough to carry meaning, which loosens an over-specific query
+    instead of returning nothing.
     """
     terms = [t for t in re.split(r"\s+", text.strip()) if t]
+    if match_any:
+        terms = [t for t in terms if len(t) >= 3]
     if not terms:
         return None
-    return " ".join('"%s"' % t.replace('"', '""') for t in terms)
+    joiner = " OR " if match_any else " "
+    return joiner.join('"%s"' % t.replace('"', '""') for t in terms)
 
 
 class CorpusStore:
@@ -110,14 +115,19 @@ class CorpusStore:
         *,
         tags: list[str] | None = None,
         limit: int = 20,
+        match_any: bool = False,
     ) -> list[dict]:
-        """Keyword search (AND-ed terms) with optional AND-ed label filter."""
+        """Keyword search (AND-ed terms) with optional AND-ed label filter.
+
+        ``match_any`` OR-s the query terms instead, for loosening an over-specific
+        query rather than returning nothing.
+        """
         tags = list(tags or [])
         clauses: list[str] = []
         params: list[object] = []
         matched = False
         if query and query.strip():
-            terms = _fts_terms(query)
+            terms = _fts_terms(query, match_any=match_any)
             if terms:
                 matched = True
                 clauses.append("records_fts MATCH ?")
@@ -141,16 +151,23 @@ class CorpusStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [json.loads(row["record"]) for row in rows]
 
-    def reference_slice(self, query: str, *, limit: int = 3) -> list[dict]:
+    def reference_slice(
+        self, query: str | None, *, limit: int = 3, tags: list[str] | None = None,
+    ) -> list[dict]:
         """Return compact archived prompts for advisory use by the atelier.
 
         Retrieval is best-effort: an empty corpus or an unusable query yields an
-        empty slice instead of an error.
+        empty slice instead of an error. A label filter alone is enough, which is
+        how a brief with only a deliverable category still finds comparable work.
         """
-        if not query or not query.strip():
+        tags = list(tags or [])
+        if (not query or not query.strip()) and not tags:
             return []
         try:
-            records = self.search(query, limit=limit)
+            records = self.search(query, tags=tags, limit=limit)
+            if not records and query:
+                # A long brief tailors the query too tightly for an AND match.
+                records = self.search(query, tags=tags, limit=limit, match_any=True)
         except Exception:
             return []
         return [
@@ -159,6 +176,9 @@ class CorpusStore:
                 "prompt": record["prompt"],
                 "tags": list(record.get("tags", [])),
                 "source_run_id": (record.get("source") or {}).get("run_id"),
+                "note": (record.get("source") or {}).get("note"),
+                "url": (record.get("source") or {}).get("url"),
+                "image": (record.get("image") or {}).get("path"),
             }
             for record in records
         ]

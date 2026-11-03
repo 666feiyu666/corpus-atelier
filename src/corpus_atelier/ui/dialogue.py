@@ -61,6 +61,7 @@ def _render_brief_editor(summary: RunSummary, conversation: ConversationRecord, 
     with st.container(border=True, key=f"brief_workspace_{summary.run_id}"):
         st.subheader(_t("design_contract"))
         st.caption(_t("brief_review_hint"))
+        st.caption(_t("brief_audience_hint"))
         agent_draft = _agent_brief_draft(summary, conversation)
         if brief_editor.draft_key(summary.run_id) not in st.session_state:
             brief_editor.load_draft(summary.run_id, conversation, agent_draft)

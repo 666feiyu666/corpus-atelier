@@ -8,6 +8,9 @@ from typing import Any, Literal, TypedDict
 
 GenerationMode = Literal["auto", "direct", "staged"]
 ExecutionRoute = Literal["direct", "staged"]
+# manual: the user approves every generation preview. auto: a precise direct
+# request skips that pause, the way the gpt-image skill's fast path does.
+ApprovalPolicy = Literal["manual", "auto"]
 
 RunStatus = Literal[
     "discussing", "discussing_request",
@@ -91,6 +94,7 @@ class AtelierState(TypedDict, total=False):
     brief: dict[str, Any]
     generation_mode: GenerationMode
     execution_route: ExecutionRoute
+    approval_policy: ApprovalPolicy
     reference_paths: list[str]
     mask_path: str
     candidate_limit: int

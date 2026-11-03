@@ -10,6 +10,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import streamlit as st
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import read_json
+from corpus_atelier.atelier.image_prompt.prompt_compiler import MAX_GENERATION_PROMPT_CHARS
 from corpus_atelier.app.state import CandidateSelection, RunResult, RunSummary
 
 from corpus_atelier.ui.session import _resume, _t
@@ -155,6 +156,10 @@ def _render_generation_preview(
             )
             _render_visual_qa(candidate)
             prompt = candidate.get("generation_prompt", "")
+            if prompt:
+                st.caption(_t(
+                    "prompt_length", count=len(prompt), limit=MAX_GENERATION_PROMPT_CHARS,
+                ))
             if prompt and editable:
                 key = f"generation_prompt_{result.run_id}_{candidate['candidate_id']}"
                 st.session_state.setdefault(key, prompt)
@@ -176,6 +181,49 @@ def _render_generation_preview(
                 with st.expander(_t("full_prompt_to_send")):
                     st.code(prompt, language=None, wrap_lines=True)
     return overrides
+
+
+def _render_generation_receipt(result: RunResult) -> None:
+    """Report the render that just ran: settings, artifact paths, one next check.
+
+    This is the skill's closing report rather than an audit: the exact inputs that
+    were sent, where they live, and the single check most likely to matter.
+    """
+    generated = [
+        candidate for candidate in _all_candidates(result)
+        if candidate.get("status") == "generated"
+    ]
+    if not generated:
+        return
+    selected_id = _selected_candidate_id(result)
+    candidate = next(
+        (item for item in generated if item.get("candidate_id") == selected_id), generated[0],
+    )
+    request = read_json_artifact(result, "generation_request_preview")
+    if not isinstance(request, dict) or not request:
+        request = candidate.get("generation_request") or {}
+    checks = (candidate.get("image_prompt") or {}).get("visual_qa") or []
+    prompt_path = (result.artifacts or {}).get("generation_prompt") or (
+        f"candidates/{candidate.get('candidate_id', 'c01')}/generation/prompt.md"
+    )
+    with st.expander(_t("generation_receipt"), icon=":material/receipt_long:"):
+        st.caption(_t("meta_separator").join([
+            _t("image_model_meta", value=request.get("model", _t("not_recorded"))),
+            _t("quality_meta", value=request.get("quality", _t("not_recorded"))),
+            _t("size_meta", value=request.get("size", _t("not_recorded"))),
+        ]))
+        st.markdown(f"**{_t('receipt_prompt')}**")
+        st.code(prompt_path or _t("not_recorded"), language=None, wrap_lines=True)
+        if candidate.get("generation_prompt"):
+            st.caption(_t(
+                "prompt_length",
+                count=len(candidate["generation_prompt"]),
+                limit=MAX_GENERATION_PROMPT_CHARS,
+            ))
+        st.markdown(f"**{_t('receipt_image')}**")
+        st.code(str(candidate.get("image_path") or _t("not_recorded")), language=None, wrap_lines=True)
+        if checks:
+            st.caption(_t("receipt_refinement", hint=checks[0]))
 
 
 def _render_image_gallery(

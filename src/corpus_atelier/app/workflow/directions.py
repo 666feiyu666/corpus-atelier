@@ -14,6 +14,7 @@ from ...design_support.canvas import resolve_canvas
 from ...design_support.validation import validate_candidate_count, validate_proposal
 from ..registry import get_profile
 from ..state import AtelierState
+from .references import text_references
 
 class DirectionsMixin:
     """Produce the direction portfolio and implement the approved direction."""
@@ -30,6 +31,8 @@ class DirectionsMixin:
             content_language=state.get("content_language") or state["brief"].get("content_language"),
         )
         prompt = ""
+        references = self._corpus_references(state)
+        reference_images = self._corpus_reference_images(references)
         try:
             prompt, raw_plan, response = synthesize_design_directions(
                 profile,
@@ -38,6 +41,8 @@ class DirectionsMixin:
                 canvas=canvas,
                 candidate_limit=candidate_limit,
                 content_language=state.get("content_language"),
+                corpus_references=text_references(references),
+                reference_paths=reference_images,
             )
             raw_plan = validate_design_direction_plan(
                 raw_plan, candidate_limit, objective=profile.objective,
@@ -61,6 +66,8 @@ class DirectionsMixin:
                     "canvas": canvas,
                 },
                 "directions": directions,
+                "corpus_references": text_references(references),
+                "corpus_reference_images": self._corpus_image_relatives(references),
             }
             request = {
                 "model": getattr(

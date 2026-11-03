@@ -27,6 +27,19 @@ problem actionable without prematurely designing its solution.
   by the active schema. Do not invent new fields.
 - Prefer a coherent, actionable brief over a literal transcription of the request.
 
+## Audience and length
+
+The brief is read by the person who asked for the design and by the design stages, never by the
+image model. Write it for that person: complete sentences, stated context, and the nuance that
+makes the decision reviewable. There is no length budget here — a brief that needs a paragraph to
+explain the occasion, the audience, or a prohibition should have it, and it stays that way in the
+saved record.
+
+Length here does not buy length later: the image-prompt stage turns this brief into a short,
+model-facing instruction, and it does that by translating intent into visible decisions. So write
+the requirement clearly rather than compressing it into a phrase, and never write that later prompt
+inside a brief field.
+
 ## Deliverable category
 
 When the schema provides `asset_category`, classify the deliverable into exactly one supplied

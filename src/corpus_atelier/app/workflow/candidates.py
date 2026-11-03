@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-import logging
 from pathlib import Path
 from typing import Any
 from ...artifacts.hashing import digest_json
 from ...design_support.validation import validate_image_prompt
 from ...atelier.image_prompt import compile_generation_prompt, synthesize_image_prompt
-from ...corpus.index import CorpusStore
 from ...config.models import get_image_model_profile
 from ..registry import get_profile
 from ..state import AtelierState
-
-LOGGER = logging.getLogger(__name__)
+from .references import text_references
 
 class CandidatesMixin:
     """Compile renderer prompts for each candidate and persist their bindings."""
@@ -58,29 +55,6 @@ class CandidatesMixin:
             return get_image_model_profile(model).family
         except ValueError:
             return "gpt-image-2"
-
-    def _reference_slice(self, state: AtelierState) -> list[dict[str, Any]]:
-        """Advisory archived prompts for the prompt writer; retrieval never blocks a run."""
-        if self.corpus_db_path is None:
-            return []
-        brief = state["brief"]
-        query = " ".join(
-            str(value) for value in (
-                brief.get("topic"), brief.get("article_title"), brief.get("deliverable"),
-                *brief.get("preferences", []),
-            ) if value
-        ).strip()
-        if not query:
-            return []
-        try:
-            store = CorpusStore(self.corpus_db_path)
-            try:
-                return store.reference_slice(query, limit=3)
-            finally:
-                store.close()
-        except Exception as exc:  # retrieval is advisory, never fatal
-            LOGGER.warning("Corpus reference retrieval failed: %s", exc)
-            return []
 
     def _generation_inputs(self, state: AtelierState) -> tuple[list[Path], Path | None, str]:
         references = [Path(path) for path in state.get("reference_paths") or []]
@@ -192,7 +166,7 @@ class CandidatesMixin:
     def compile_candidates(self, state: AtelierState) -> AtelierState:
         run_dir = self._dir(state)
         self.store.update(run_dir, "compiling_candidates")
-        references = self._reference_slice(state)
+        references = text_references(self._corpus_references(state))
 
         def compile_one(candidate):
             if candidate["status"] != "implemented":
@@ -268,7 +242,8 @@ class CandidatesMixin:
         compiled = self._compile_candidate(
             {**state, "generation_size": generation_size,
              "output_ratio": output_ratio, "canvas": canvas},
-            candidate, design=brief, references=self._reference_slice(state),
+            candidate, design=brief,
+            references=text_references(self._corpus_references(state)),
         )
         result = self._finish_compilation(
             {**state, "generation_size": generation_size,

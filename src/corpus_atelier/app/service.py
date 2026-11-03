@@ -15,7 +15,7 @@ from ..artifacts.paths import task_path, verified_image
 from ..artifacts.records import read_json
 from ..artifacts.store import ArtifactStore, validate_case_id, validate_run_id
 from ..atelier.intake import compile_intake_prompt
-from ..conversation.service import ConversationMixin, serialized_conversation
+from ..conversation.service import BUSY_ROUND_STATUSES, ConversationMixin, serialized_conversation
 from ..design_support.inputs import validate_mask, validate_reference_images
 from ..design_support.validation import validate, validate_candidate_count
 from .graph import build_graph
@@ -43,6 +43,18 @@ RECOVERABLE_TASK_STATUSES = frozenset({
 })
 
 
+class FastPathUnavailable(ValueError):
+    """A conversation cannot render unattended; the caller keeps the review flow.
+
+    The reason is a stable code the interface translates, so the fallback can say
+    exactly which condition was missing instead of silently doing nothing.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class CorpusAtelierApplication(ConversationMixin):
     def __init__(
         self,
@@ -53,6 +65,7 @@ class CorpusAtelierApplication(ConversationMixin):
         image_provider=None,
         status_callback: Callable[[str, str], None] | None = None,
         corpus_db_path: Path | str | None = None,
+        corpus_media_root: Path | str | None = None,
     ):
         self.store = ArtifactStore(
             runs_root,
@@ -64,6 +77,7 @@ class CorpusAtelierApplication(ConversationMixin):
             text_provider or OpenAITextProvider(),
             image_provider or OpenAIImageProvider(),
             corpus_db_path=corpus_db_path,
+            corpus_media_root=corpus_media_root,
         )
         if checkpoint_path is None:
             checkpoint_path = self.store.root / "_system" / "checkpoints.sqlite3"
@@ -148,6 +162,12 @@ class CorpusAtelierApplication(ConversationMixin):
             raise ValueError("Generation mode must be auto, direct, or staged.")
         return mode
 
+    @staticmethod
+    def _validate_approval_policy(policy: str) -> str:
+        if policy not in {"manual", "auto"}:
+            raise ValueError("Approval policy must be manual or auto.")
+        return policy
+
     def _attach_generation_inputs(
         self, run_dir: Path,
         reference_images: tuple[tuple[str, bytes], ...] | list[tuple[str, bytes]],
@@ -224,9 +244,11 @@ class CorpusAtelierApplication(ConversationMixin):
                        conversation_parent_id: str | None = None,
                        conversation_revision: int | None = None,
                        conversation_state: dict | None = None,
-                       conversation_snapshot: dict | None = None) -> RunResult:
+                       conversation_snapshot: dict | None = None,
+                       approval_policy: str = "manual") -> RunResult:
         self._validate_request(job.request)
         mode = self._validate_generation_mode(job.generation_mode)
+        policy = self._validate_approval_policy(approval_policy)
         content_language = validate_content_language(job.content_language)
         if conversation_state is not None:
             content_language = validate_content_language(conversation_state.get("content_language"))
@@ -250,6 +272,8 @@ class CorpusAtelierApplication(ConversationMixin):
             run_dir, job.reference_images, job.mask,
         )
         details = {"generation_mode": mode, **inputs} if mode != "auto" else inputs
+        if policy != "manual":
+            details = {**details, "approval_policy": policy}
         if details:
             self.store.update(run_dir, "created", **details)
         return self._result(run_id)
@@ -330,11 +354,74 @@ class CorpusAtelierApplication(ConversationMixin):
             })
             raise
 
+    @staticmethod
+    def _brief_draft(root: Path) -> dict | None:
+        path = root / "brief-draft/brief.json"
+        if not path.is_file():
+            return None
+        try:
+            value = read_json(path)
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _fast_path_blocker(self, value: dict, draft: dict | None) -> str | None:
+        """Return the first condition that keeps a conversation on the review flow."""
+        if value.get("pending"):
+            return "conversation_busy"
+        for record in value["rounds"]:
+            if self.inspect_task(record["run_id"]).status in BUSY_ROUND_STATUSES:
+                return "conversation_busy"
+        if draft is None:
+            return "no_draft"
+        if draft.get("execution_route") != "direct":
+            # Only a request that already fixes subject, visual language, copy and
+            # canvas may render unattended; anything else still needs exploration.
+            return "needs_directions"
+        if value["open_questions"]:
+            return "open_questions"
+        if not draft.get("content_language"):
+            return "language_missing"
+        if value["rounds"] and value["rounds"][-1]["revision"] == value["revision"]:
+            return "round_exists"
+        return None
+
+    def fast_path_status(self, run_id: str) -> dict:
+        """Report whether this conversation can render without a brief review."""
+        root = self.store.find_run(run_id)
+        if not self.store.manifest(root).get("is_conversation"):
+            return {"eligible": False, "reason": "not_conversation"}
+        reason = self._fast_path_blocker(self.conversation(run_id), self._brief_draft(root))
+        return {"eligible": reason is None, "reason": reason}
+
+    @serialized_conversation
+    def start_fast_round(self, run_id: str, *, redraft: bool = False) -> RunResult:
+        """Confirm the drafted brief and render one image without a review stop.
+
+        This is the fast path the gpt-image skill describes: when the request already
+        fixes everything a brief review would settle, the draft becomes the confirmed
+        brief and one direct round starts with auto approval. Any gap raises
+        FastPathUnavailable so the caller keeps the ordinary review flow.
+        """
+        root = self.store.find_run(run_id)
+        if not self.store.manifest(root).get("is_conversation"):
+            raise FastPathUnavailable("not_conversation")
+        draft = None if redraft else self._brief_draft(root)
+        if draft is None:
+            draft = self.draft_brief(run_id)
+        value = self.conversation(run_id)
+        reason = self._fast_path_blocker(value, draft)
+        if reason is not None:
+            raise FastPathUnavailable(reason)
+        self.save_conversation_brief(
+            run_id, draft, expected_revision=value["revision"], origin="fast-path",
+        )
+        return self.create_conversation_round(run_id, approval_policy="auto")
+
     def run_request(self, run_id: str) -> RunResult:
         run_dir = self.store.find_run(run_id)
         manifest = self.store.manifest(run_dir)
-        if manifest["status"] != "created":
-            raise ValueError("This natural-language task has already started.")
+        if manifest["status"] != "created":            raise ValueError("This natural-language task has already started.")
         try:
             state = self._load_request_state(run_dir, manifest)
         except Exception as exc:
@@ -361,6 +448,9 @@ class CorpusAtelierApplication(ConversationMixin):
             "candidate_limit": validate_candidate_count(manifest.get("candidate_limit")),
             "generation_mode": self._validate_generation_mode(
                 manifest.get("generation_mode", "auto"),
+            ),
+            "approval_policy": self._validate_approval_policy(
+                manifest.get("approval_policy", "manual"),
             ),
             "status": "created",
         }

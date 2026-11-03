@@ -79,11 +79,9 @@ class FakeTextProvider:
             }
             return value, {"status": "completed", "provider": "fake"}
         if schema_name == "image-prompt.schema.json":
-            target = prompt.split("# Compilation target\n\n", 1)[1].split(
-                "\n\n# Approved design", 1,
-            )[0]
+            target = _json_section(prompt, "# Compilation target\n\n")
             design = _json_section(prompt, "# Approved design\n\n")
-            visible = json.loads(target)["exact_copy"]
+            visible = target["exact_copy"]
             description = design.get(
                 "design_description",
                 design.get("topic")

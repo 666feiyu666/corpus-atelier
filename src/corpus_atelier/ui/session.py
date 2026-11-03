@@ -119,6 +119,7 @@ def _application(
     return CorpusAtelierApplication(
         runs_root=paths.tasks_root,
         corpus_db_path=paths.corpus_db_path,
+        corpus_media_root=paths.corpus_media_root,
         text_provider=OpenAITextProvider(
             model=text_model,
             reasoning_effort=reasoning_effort,

@@ -20,6 +20,52 @@ MODEL_FAMILY_REFERENCES = {
     "gpt-image-2.5": "gpt-image-2.5.md",
 }
 
+# The image model resolves a scene, not an essay: 550-900 characters for the scene
+# prompt keeps every requirement visible without burying the last one.
+PROMPT_BUDGET_MIN = 550
+PROMPT_BUDGET_MAX = 900
+# Hard ceiling mirrored by `maxLength` in image-prompt.schema.json.
+PROMPT_HARD_MAX = 1000
+CANVAS_STATEMENT_BUDGET_MAX = 240
+# Ceiling for the assembled prompt the image model receives, after the canvas
+# statement, the exact-copy instruction, confirmed requirements, and exclusions.
+MAX_GENERATION_PROMPT_CHARS = 1400
+
+
+def _length_budget_section() -> str:
+    return (
+        "# Prompt length budget\n\n"
+        f"`canvas_statement` is one sentence of at most {CANVAS_STATEMENT_BUDGET_MAX} "
+        f"characters. Write `prompt` between {PROMPT_BUDGET_MIN} and {PROMPT_BUDGET_MAX} "
+        f"characters (roughly 90 to 150 English words) and never exceed {PROMPT_HARD_MAX} "
+        f"characters. The assembled image prompt must stay under "
+        f"{MAX_GENERATION_PROMPT_CHARS} characters once the canvas statement, the "
+        "exact-copy instruction, the confirmed requirements, and the exclusions are added.\n\n"
+        "Density is carried by concrete scene content, not by length. When a draft runs long, "
+        "cut in this order: stacked adjectives, repeated composition or placement wording, then "
+        "generic quality words. Keep entity identity, count, ownership, relationships, the "
+        "approved copy, the medium and style anchor, and the exclusions that block a plausible "
+        "misreading. Do not pad a short design to reach the lower bound."
+    )
+
+
+def _audience_section() -> str:
+    return (
+        "# Audience split\n\n"
+        "The compilation target and the approved design are written for a person. They are "
+        "long-form and explanatory on purpose: purpose, audience, use context, preferences, and "
+        "design reasoning may all be spelled out at whatever length the decision needs. Treat "
+        "that prose as evidence about what the image must show and what it must avoid; it is not "
+        "text to carry across.\n\n"
+        "`canvas_statement` and `prompt` are read by an image model that never sees the brief. "
+        "Write for that reader: statements about what appears in the frame, in the order the "
+        "renderer has to resolve them. Translate intent into a visible decision — \"for "
+        "commuters in a hurry\" becomes \"one oversized headline, high contrast, legible at arm's "
+        "length\" — and leave out purpose, audience labels, rationale, process notes, and "
+        "anything a camera cannot see. Do not restate a brief sentence when a shorter visual "
+        "statement carries the same requirement."
+    )
+
 
 def compile_image_prompt_prompt(
     *,
@@ -42,9 +88,11 @@ def compile_image_prompt_prompt(
     sections = [
         load_skill("image-llm-prompt"),
         compile_language_policy(content_language or brief.get("content_language")),
+        _audience_section(),
         "# Prompt craft checklist\n\n" + load_skill_reference_body("image-llm-prompt", "craft.md"),
         "# Renderer output contract\n\n"
         + load_skill_reference_body("image-llm-prompt", "rendering-boundaries.md"),
+        _length_budget_section(),
     ]
     family_reference = MODEL_FAMILY_REFERENCES.get(model_family)
     if family_reference:
@@ -77,11 +125,15 @@ def compile_image_prompt_prompt(
             "Archived prompts whose labels or wording resemble this task. Use them only as "
             "evidence about how similar work is described: borrow vocabulary, layout habits, or "
             "level of detail. Do not copy their subjects, copy, brand names, or composition into "
-            "this design.\n\n"
+            "this design. Those archived prompts may run longer than your budget; match their "
+            "specificity, not their length.\n\n"
             + json.dumps(corpus_references, ensure_ascii=False, indent=2, allow_nan=False)
         )
     sections.extend([
-        "# Compilation target\n\n" + json.dumps({
+        "# Compilation target\n\n"
+        "Contract fields for this task, written for a person and allowed to be verbose. Treat "
+        "every entry as a requirement, not as prompt text to copy.\n\n"
+        + json.dumps({
             "provider_profile": provider_profile,
             "model_family": model_family,
             "operation": operation,
@@ -92,8 +144,10 @@ def compile_image_prompt_prompt(
             "reference_notes": list(reference_notes or []),
         }, ensure_ascii=False, indent=2, allow_nan=False),
         "# Approved design\n\n"
-        "This is the design to express as a renderer prompt. Preserve its design decisions "
-        "instead of restyling or extending it.\n\n"
+        "The approved design, written for a human reviewer, so it may be long and explanatory. "
+        "Preserve its design decisions instead of restyling or extending it, and carry them over "
+        "as renderer instructions: keep what is visible and decidable, leave the reasoning "
+        "behind.\n\n"
         + json.dumps(design or brief, ensure_ascii=False, indent=2, allow_nan=False),
     ])
     return "\n\n".join(sections)
@@ -108,7 +162,8 @@ def compile_generation_prompt(
 
     Canvas first, then the resolved scene, then the literal wording, then the confirmed
     requirements, then the edit invariants and targeted exclusions. Settings such as model, size,
-    and quality stay outside the prompt.
+    and quality stay outside the prompt. The result is capped at
+    ``MAX_GENERATION_PROMPT_CHARS`` so optional sections cannot silently double the prompt.
     """
     parts: list[str] = []
     for field in ("canvas_statement", "prompt"):
@@ -139,4 +194,10 @@ def compile_generation_prompt(
     avoid = [str(item).strip() for item in image_prompt.get("avoid") or [] if str(item).strip()]
     if avoid:
         parts.append("Avoid: " + "; ".join(avoid) + ".")
-    return "\n\n".join(parts)
+    prompt = "\n\n".join(parts)
+    if len(prompt) > MAX_GENERATION_PROMPT_CHARS:
+        raise ValueError(
+            f"The assembled image prompt is {len(prompt)} characters; keep it under "
+            f"{MAX_GENERATION_PROMPT_CHARS} characters."
+        )
+    return prompt

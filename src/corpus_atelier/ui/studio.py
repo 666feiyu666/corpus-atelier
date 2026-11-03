@@ -13,6 +13,7 @@ from corpus_atelier.config.models import (
     get_text_model_profile,
 )
 from corpus_atelier.config.settings import load_preferences
+from corpus_atelier.app.service import CorpusAtelierApplication, FastPathUnavailable
 from corpus_atelier.app.state import NaturalLanguageDesignJob, RunSummary
 
 from corpus_atelier.config.paths import resolve_paths
@@ -58,7 +59,7 @@ def _render_product_tabs() -> str:
     return view
 
 
-def _render_new_task_settings() -> tuple[str, str, str, str, str, int, str]:
+def _render_new_task_settings() -> tuple[str, str, str, str, str, int, str, bool]:
     model_ids = [profile.model for profile in TEXT_MODEL_PROFILES]
     model = st.selectbox(
         _t("text_model"),
@@ -109,7 +110,14 @@ def _render_new_task_settings() -> tuple[str, str, str, str, str, int, str]:
         format_func=lambda value: _t(f"mode_{value}"),
         key="new_task_mode",
     )
-    return model, reasoning, image_model, image_quality, method, candidates, generation_mode
+    fast_path = st.toggle(
+        _t("fast_path_toggle"),
+        value=False,
+        key="new_task_fast_path",
+        help=_t("fast_path_help"),
+    )
+    return (model, reasoning, image_model, image_quality, method, candidates,
+            generation_mode, fast_path)
 
 
 def _start_task(
@@ -122,6 +130,7 @@ def _start_task(
     profile: str,
     candidate_count: int,
     generation_mode: str = "auto",
+    fast_path: bool = False,
     attachments: list[tuple[str, bytes]] | None = None,
     reference_images: list[tuple[str, bytes]] | None = None,
     mask: tuple[str, bytes] | None = None,
@@ -152,15 +161,18 @@ def _start_task(
             mask=mask,
         )
         result = app.create_conversation(job, attachments=attachments)
-        with st.spinner(_t("drafting_brief")):
-            try:
-                app.draft_brief(result.run_id)
-            except Exception:
-                LOGGER.warning(
-                    "Draft brief failed for %s; the user can still fill it in.",
-                    result.run_id, exc_info=True,
-                )
-        summary = app.inspect_task(result.run_id)
+        if fast_path:
+            summary = _start_fast_round(app, result.run_id)
+        else:
+            with st.spinner(_t("drafting_brief")):
+                try:
+                    app.draft_brief(result.run_id)
+                except Exception:
+                    LOGGER.warning(
+                        "Draft brief failed for %s; the user can still fill it in.",
+                        result.run_id, exc_info=True,
+                    )
+            summary = app.inspect_task(result.run_id)
     except Exception:
         st.error(_t("create_failed"), icon=":material/error:")
     finally:
@@ -171,6 +183,31 @@ def _start_task(
         st.rerun()
 
 
+def _start_fast_round(app: CorpusAtelierApplication, run_id: str) -> RunSummary:
+    """Draft, confirm, and start one round in a single step.
+
+    Anything that still needs a decision — a direction exploration, an open
+    question, a missing language — raises FastPathUnavailable, and the ordinary
+    review flow resumes with the reason shown on the task page.
+    """
+    with st.spinner(_t("fast_path_working")):
+        try:
+            app.continue_task(run_id)
+            app.draft_brief(run_id)
+            round_result = app.start_fast_round(run_id)
+        except FastPathUnavailable as exc:
+            LOGGER.info("Fast path kept the review flow for %s (%s).", run_id, exc.reason)
+            st.session_state["fast_path_notice"] = exc.reason
+            return app.inspect_task(run_id)
+        except Exception:
+            LOGGER.warning(
+                "Fast path failed for %s; the review flow resumes.", run_id, exc_info=True,
+            )
+            st.session_state["fast_path_notice"] = "failed"
+            return app.inspect_task(run_id)
+    return app.inspect_task(round_result.run_id)
+
+
 def _render_studio() -> None:
     st.title(_t("product_name"))
     st.caption(_t("product_tagline"))
@@ -179,7 +216,7 @@ def _render_studio() -> None:
     with st.popover(_t("task_settings"), icon=":material/tune:"):
         (
             model, reasoning, image_model, image_quality, profile,
-            candidate_count, generation_mode,
+            candidate_count, generation_mode, fast_path,
         ) = _render_new_task_settings()
         st.divider()
         st.caption(_t("generation_inputs_hint"))
@@ -219,6 +256,7 @@ def _render_studio() -> None:
                 profile=profile,
                 candidate_count=candidate_count,
                 generation_mode=generation_mode,
+                fast_path=fast_path,
                 attachments=_submission_attachments(submission),
                 reference_images=references,
                 mask=mask,

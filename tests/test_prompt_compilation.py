@@ -7,10 +7,15 @@ from corpus_atelier.atelier.design_implementation.prompt_compiler import (
     compile_design_implementation_prompt,
 )
 from corpus_atelier.atelier.image_prompt.prompt_compiler import (
+    MAX_GENERATION_PROMPT_CHARS,
+    PROMPT_BUDGET_MAX,
+    PROMPT_BUDGET_MIN,
+    PROMPT_HARD_MAX,
     compile_generation_prompt, compile_image_prompt_prompt,
 )
 from corpus_atelier.atelier.image_prompt.synthesis import synthesize_image_prompt
 from corpus_atelier.app.registry import get_profile
+from corpus_atelier.design_support.validation import validate, validate_image_prompt
 from tests.fakes import FakeTextProvider
 
 
@@ -280,6 +285,105 @@ class GenerationPromptTests(unittest.TestCase):
         prompt = compile_generation_prompt({**IMAGE_PROMPT, "preserve": [], "avoid": []})
         self.assertNotIn("Preserve without change", prompt)
         self.assertNotIn("Avoid:", prompt)
+
+
+class PromptBudgetTests(unittest.TestCase):
+    """The scene prompt carries a character budget, enforced by schema and assembly."""
+
+    @staticmethod
+    def _scene_prompt(length: int) -> str:
+        sentence = "The poster keeps one clear title block above a layered motif. "
+        return (sentence * (length // len(sentence) + 1))[:length]
+
+    def test_schema_accepts_a_prompt_inside_the_budget(self):
+        value = validate_image_prompt(
+            {**IMAGE_PROMPT, "prompt": self._scene_prompt(PROMPT_BUDGET_MAX)},
+            IMAGE_PROMPT["exact_copy"],
+        )
+        self.assertEqual(len(value["prompt"]), PROMPT_BUDGET_MAX)
+
+    def test_schema_rejects_an_overlong_prompt(self):
+        with self.assertRaisesRegex(ValueError, "Invalid image-prompt.schema.json at prompt"):
+            validate_image_prompt(
+                {**IMAGE_PROMPT, "prompt": self._scene_prompt(PROMPT_HARD_MAX + 1)},
+                IMAGE_PROMPT["exact_copy"],
+            )
+
+    def test_schema_rejects_an_overlong_canvas_statement(self):
+        with self.assertRaisesRegex(
+            ValueError, "Invalid image-prompt.schema.json at canvas_statement",
+        ):
+            validate_image_prompt(
+                {**IMAGE_PROMPT, "canvas_statement": self._scene_prompt(241)},
+                IMAGE_PROMPT["exact_copy"],
+            )
+
+    def test_writer_brief_states_the_length_budget(self):
+        prompt = compile_image_prompt_prompt(
+            brief={"content_language": "en", "exact_copy": ["CORPUS ATELIER"]},
+            canvas=CANVAS,
+            provider_profile="gpt-image-2",
+        )
+        self.assertIn("# Prompt length budget", prompt)
+        for budget in (
+            PROMPT_BUDGET_MIN, PROMPT_BUDGET_MAX, PROMPT_HARD_MAX,
+            MAX_GENERATION_PROMPT_CHARS,
+        ):
+            self.assertIn(str(budget), prompt)
+
+    def test_assembled_prompt_fits_when_the_scene_respects_the_budget(self):
+        prompt = compile_generation_prompt(
+            {**IMAGE_PROMPT, "prompt": self._scene_prompt(PROMPT_BUDGET_MAX)},
+            exact_copy=["CORPUS ATELIER"],
+            user_requirements=["Keep the lower-right area clear."],
+        )
+        self.assertLessEqual(len(prompt), MAX_GENERATION_PROMPT_CHARS)
+
+    def test_assembled_prompt_rejects_excess_sections(self):
+        with self.assertRaisesRegex(ValueError, "keep it under"):
+            compile_generation_prompt(
+                {**IMAGE_PROMPT, "prompt": self._scene_prompt(PROMPT_HARD_MAX)},
+                exact_copy=["A long approved line " * 6],
+                user_requirements=["Keep the lower-right area clear. " * 8],
+            )
+
+
+class AudienceSplitTests(unittest.TestCase):
+    """The brief is written for a person; the prompt is written for the model."""
+
+    @staticmethod
+    def _long_text(repeat: int) -> str:
+        return "The opening night runs late, so the poster has to stay legible after dark. " * repeat
+
+    def test_writer_brief_separates_the_two_readers(self):
+        prompt = compile_image_prompt_prompt(
+            brief={"content_language": "en", "exact_copy": ["CORPUS ATELIER"]},
+            canvas=CANVAS,
+            provider_profile="gpt-image-2",
+        )
+        self.assertIn("# Audience split", prompt)
+        self.assertIn("never sees the brief", prompt)
+        self.assertIn("Translate intent into a visible decision", prompt)
+
+    def test_brief_has_no_length_budget(self):
+        brief = {
+            "deliverable": "A2 poster",
+            "purpose": self._long_text(20),
+            "audience": self._long_text(10),
+            "use_context": self._long_text(6),
+            "exact_copy": ["OPENING NIGHT"],
+            "constraints": [self._long_text(3)],
+            "user_requirements": [],
+            "preferences": [self._long_text(4)],
+            "canvas": {"aspect_ratio": {"width": 3, "height": 4}},
+        }
+        value = validate(brief, "graphic-design-brief.schema.json")
+        self.assertGreater(len(value["purpose"]), 1000)
+
+    def test_proposal_description_may_exceed_the_prompt_budget(self):
+        proposal = {**PROPOSAL, "design_description": self._long_text(40)}
+        value = validate(proposal, "graphic-design-proposal.schema.json")
+        self.assertGreater(len(value["design_description"]), 2000)
 
 
 if __name__ == "__main__":

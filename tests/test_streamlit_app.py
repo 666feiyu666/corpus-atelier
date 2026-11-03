@@ -16,8 +16,8 @@ from corpus_atelier import __version__
 from corpus_atelier.app.service import CorpusAtelierApplication
 from corpus_atelier.artifacts.hashing import digest_file
 from corpus_atelier.artifacts.records import write_json, write_text
-from corpus_atelier.providers import OpenAITextProvider
-from tests.fakes import FakeTextProvider
+from corpus_atelier.providers import OpenAIImageProvider, OpenAITextProvider
+from tests.fakes import FakeImageProvider, FakeTextProvider
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,24 @@ class StreamlitAppTests(unittest.TestCase):
             return {"content_language": context["content_language"] or "zh-CN", "language_change_quote": None,
                     "reply": reply}, {"status": "completed"}
         return FakeTextProvider().propose(prompt, schema_name=schema_name, reference_paths=reference_paths)
+
+    @staticmethod
+    def _direct_route_propose(provider, prompt, *, schema_name, reference_paths=None):
+        """Declare a precise request so the fast path may render it unattended."""
+        value, response = StreamlitAppTests._offline_propose(
+            provider, prompt, schema_name=schema_name, reference_paths=reference_paths,
+        )
+        if schema_name.endswith("-brief.schema.json"):
+            value = {**value, "execution_route": "direct", "content_language": "zh-CN",
+                     "route_reason": "The request fixes the subject, copy, and ratio."}
+        return value, response
+
+    @staticmethod
+    def _fake_generate(provider, prompt, *, size, output, reference_paths=None, mask_path=None):
+        return FakeImageProvider().generate(
+            prompt, size=size, output=output,
+            reference_paths=reference_paths, mask_path=mask_path,
+        )
 
     @staticmethod
     def _save_initial_brief(app, run_id):
@@ -127,6 +145,48 @@ class StreamlitAppTests(unittest.TestCase):
                 self.assertIsNone(conversation["design_brief"])
                 self.assertEqual(conversation["revision"], 0)
 
+    def test_fast_path_renders_a_precise_request_without_a_review_stop(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                "OPENAI_API_KEY": "sk-test",
+            }), patch.object(
+                OpenAITextProvider, "propose", self._direct_route_propose,
+            ), patch.object(
+                OpenAIImageProvider, "generate", self._fake_generate,
+            ):
+                app = AppTest.from_file(str(APP), default_timeout=15).run()
+                app.toggle(key="new_task_fast_path").set_value(True).run()
+                app.chat_input(key="new_task_prompt").set_value(
+                    "设计一张读书会海报，标题「读书会」，竖版 3:4。"
+                ).run()
+                round_id = app.session_state["selected_task_id"]
+                tasks_root = root / "natural-language"
+                manifest = json.loads(
+                    (tasks_root / round_id / "manifest.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(manifest["approval_policy"], "auto")
+                parent_id = manifest["conversation_parent_id"]
+                conversation = json.loads(
+                    (tasks_root / parent_id / "conversation.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(conversation["brief_history"][-1]["origin"], "fast-path")
+                self.assertEqual(conversation["design_brief"]["execution_route"], "direct")
+                self.assertEqual(len(conversation["rounds"]), 1)
+                self._wait_for_status(app, root, round_id, "awaiting_selection")
+                decision = json.loads(
+                    (tasks_root / round_id / "approval/decision.json").read_text(encoding="utf-8")
+                )
+                self.assertTrue(decision["approved"])
+                self.assertTrue(decision["auto"])
+                self.assertEqual(decision["reviewer"], "fast-path")
+                self.assertTrue(any(
+                    "prompt.md" in code.value for code in app.code
+                ), [code.value for code in app.code])
+
     def test_approval_page_offers_an_editable_prompt(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -157,6 +217,59 @@ class StreamlitAppTests(unittest.TestCase):
                 self.assertEqual(app.text_area(key=key).value, edited)
                 app.button(key=f"restore_prompt_{child_id}_c01").click().run()
                 self.assertEqual(app.text_area(key=key).value, original)
+
+    def test_approval_page_shows_the_corpus_references_it_used(self):
+        from corpus_atelier.corpus.index import CorpusStore
+        from corpus_atelier.corpus.records import new_record
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            media = root / "media"
+            image_path = media / "case" / "tea-poster.png"
+            image_path.parent.mkdir(parents=True)
+            Image.new("RGB", (32, 48), (90, 60, 30)).save(image_path, format="PNG")
+            db = root / "corpus.sqlite3"
+            store = CorpusStore(db)
+            try:
+                store.add(new_record(
+                    prompt="国庆花艺海报，暖红与金色，密集中文文案。",
+                    tags=["poster", "warm"],
+                    source_kind="import",
+                    image={"path": "case/tea-poster.png"},
+                    source_note="No. 48 · Tea poster",
+                ))
+            finally:
+                store.close()
+            with patch.dict(os.environ, {
+                "CORPUS_ATELIER_TASKS_ROOT": directory,
+                "CORPUS_ATELIER_PREFERENCES_PATH": str(root / "settings.json"),
+                "CORPUS_ATELIER_ENV_PATH": str(root / ".env"),
+                "CORPUS_ATELIER_CORPUS_DB": str(db),
+                "CORPUS_ATELIER_CORPUS_MEDIA": str(media),
+                "OPENAI_API_KEY": "sk-test",
+            }), patch.object(OpenAITextProvider, "propose", self._offline_propose):
+                app = AppTest.from_file(str(APP), default_timeout=10).run()
+                app.chat_input(key="new_task_prompt").set_value("设计一张读书会海报。").run()
+                parent_id = app.session_state["selected_task_id"]
+                self._wait_for_status(app, root, parent_id, "discussing")
+                self._save_initial_brief(app, parent_id)
+                app.button(key=f"prepare_round_{parent_id}").click().run()
+                conversation = json.loads(
+                    (root / "natural-language" / parent_id / "conversation.json")
+                    .read_text(encoding="utf-8")
+                )
+                child_id = conversation["rounds"][-1]["run_id"]
+                self._wait_for_status(app, root, child_id, "awaiting_approval")
+
+        self.assertFalse(app.exception)
+        labels = [expander.label for expander in app.expander]
+        self.assertTrue(
+            any("参考语料" in label for label in labels),
+            f"no reference block rendered: {labels}",
+        )
+        self.assertIn("No. 48 · Tea poster", json.dumps(
+            [markdown.value for markdown in app.markdown], ensure_ascii=False,
+        ))
 
     def test_single_brief_editor_persists_changes_and_invalidates_old_designs(self):
         with TemporaryDirectory() as directory:
@@ -659,9 +772,13 @@ class StreamlitAppTests(unittest.TestCase):
                     [status.label for status in app.get("status")],
                 )
                 self.assertIn("最终选择", app.get("tab")[0].label)
-                self.assertEqual(len(app.code), 3)
-                self.assertTrue(all(
-                    "Render candidate" in code.value for code in app.code
+                render_prompts = [
+                    code.value for code in app.code
+                    if "Render candidate" in code.value
+                ]
+                self.assertEqual(len(render_prompts), 3)
+                self.assertTrue(any(
+                    "generation/prompt.md" in code.value for code in app.code
                 ))
                 self.assertNotIn(
                     "任务 artifacts",

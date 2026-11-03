@@ -16,6 +16,8 @@ from .validation import (
 def compile_design_direction_prompt(
     profile, brief: dict, *, canvas: dict, candidate_limit: int,
     content_language: str | None = None,
+    corpus_references: list[dict] | None = None,
+    reference_image_names: list[str] | None = None,
 ) -> str:
     asset_category = brief.get("asset_category")
     sections = [
@@ -57,6 +59,25 @@ def compile_design_direction_prompt(
         f"# Visual-language dimensions for {profile.objective}\n\n"
         + load_style_space_body(profile.objective),
     ])
+    if corpus_references:
+        sections.append(
+            "# Reference gallery slice\n\n"
+            "Archived cases whose labels or wording resemble this brief. They are evidence of how "
+            "similar work is described and built: borrow vocabulary, structural habits, and level "
+            "of detail. Do not copy their subjects, copy, brand names, or composition into this "
+            "design.\n\n"
+            + json.dumps(corpus_references, ensure_ascii=False, indent=2, allow_nan=False)
+        )
+    if reference_image_names:
+        listing = "\n".join(
+            f"{index}. {name}" for index, name in enumerate(reference_image_names, start=1)
+        )
+        sections.append(
+            "# Attached reference images\n\n"
+            "These archived case images are attached in this order. Use them as evidence of "
+            "craft — framing, light, density, palette discipline — never as content to reproduce.\n\n"
+            + listing
+        )
     sections.append(
         "# Frozen shared brief\n\n"
         "This JSON is authoritative user data. Every direction must preserve it. Explicit style, "

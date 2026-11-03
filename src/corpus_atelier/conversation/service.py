@@ -87,7 +87,8 @@ class ConversationMixin:
     @serialized_conversation
     def save_conversation_brief(self, run_id: str, brief: dict, *, expected_revision: int,
                                 source_revision: int | None = None,
-                                open_questions: list[str] | None = None) -> RunResult:
+                                open_questions: list[str] | None = None,
+                                origin: str = "user") -> RunResult:
         """Make a user-edited brief authoritative without invoking a model."""
         root, value = self._conversation_idle(run_id)
         if expected_revision != value["revision"]:
@@ -113,7 +114,7 @@ class ConversationMixin:
                      user_requirements=list(requirements),
                      open_questions=list(questions), content_language=language)
         value["effective_request"] = "User-confirmed design brief:\n" + json.dumps(brief, ensure_ascii=False)
-        record_brief(value, origin="user", based_on=(
+        record_brief(value, origin=origin, based_on=(
             source_revision if source_revision is not None else expected_revision))
         self._save_conversation(root, value)
         self._sync_saved_brief(root, value, refresh_manifest=True)
@@ -277,7 +278,8 @@ class ConversationMixin:
         return self._result(run_id)
 
     @serialized_conversation
-    def create_conversation_round(self, run_id: str) -> RunResult:
+    def create_conversation_round(self, run_id: str, *,
+                                  approval_policy: str = "manual") -> RunResult:
         root, value = self._conversation_idle(run_id)
         if not value["effective_request"]:
             raise ValueError("Write and save a design brief before preparing a round.")
@@ -301,7 +303,7 @@ class ConversationMixin:
             candidate_count=manifest["candidate_limit"],
             content_language=value["content_language"],
         ), conversation_parent_id=run_id, conversation_revision=value["revision"],
-           conversation_snapshot=value)
+           conversation_snapshot=value, approval_policy=approval_policy)
         round_record = {"run_id": child.run_id, "revision": value["revision"], "created_at": now()}
         value["rounds"].append(round_record)
         self._save_conversation(root, value)

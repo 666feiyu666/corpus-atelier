@@ -8,30 +8,36 @@
     },
     "topic": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "What the poster is about, named the way a person would describe it."
     },
     "purpose": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Why the poster exists and what it has to achieve, written for a human reviewer. Explain the intent fully; there is no length budget, and this text never reaches the image model."
     },
     "audience": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Who reads the poster and what they already know. Human-facing context, as detailed as the decision needs."
     },
     "setting": {
-      "type": "string"
+      "type": "string",
+      "description": "Where, when, and at what distance the poster is seen. Human-facing context, not renderer text."
     },
     "exact_copy": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "Wording approved to appear in the image, preserved exactly. The only text the image model may render."
     },
     "constraints": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "Boundaries the design must respect, each stated as a full requirement for a human reviewer."
     },
     "user_requirements": {
       "type": "array",
@@ -39,7 +45,8 @@
       "items": {
         "type": "string",
         "minLength": 1
-      }
+      },
+      "description": "Explicit mandatory requirements confirmed by the user. Copy them exactly; never paraphrase to save space."
     },
     "preferences": {
       "type": "array",

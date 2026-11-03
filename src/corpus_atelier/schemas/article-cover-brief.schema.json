@@ -8,27 +8,32 @@
     },
     "article_title": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "The article's own title, kept exactly as published."
     },
     "article_summary": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "What the article argues or covers, written for a human reviewer. There is no length budget; this summary never reaches the image model."
     },
     "audience": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Who reads the publication and what they already know. Human-facing context, as detailed as the decision needs."
     },
     "exact_copy": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "Wording approved to appear in the image, preserved exactly. The only text the image model may render."
     },
     "constraints": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "Boundaries the design must respect, each stated as a full requirement for a human reviewer."
     },
     "user_requirements": {
       "type": "array",
@@ -36,10 +41,12 @@
       "items": {
         "type": "string",
         "minLength": 1
-      }
+      },
+      "description": "Explicit mandatory requirements confirmed by the user. Copy them exactly; never paraphrase to save space."
     },
     "art_direction": {
-      "type": "string"
+      "type": "string",
+      "description": "The editorial visual direction in the publication's own words. Human-facing guidance, not renderer text."
     },
     "execution_route": {
       "type": "string",

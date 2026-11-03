@@ -27,6 +27,33 @@ Write `prompt` in this order, and skip a stage the design does not need:
 `canvas_statement` is one opening sentence: deliverable, aspect ratio, orientation, and where the
 main zones sit. It is rendered before `prompt`, so do not repeat the canvas inside `prompt`.
 
+## Audience
+
+Two different readers, two different documents. The brief, the direction, and the approved design
+are written for a person: they carry purpose, audience, context, preferences, and design reasoning,
+and they may be as long as the decision needs. `canvas_statement` and `prompt` are read by an image
+model that never sees any of that.
+
+So write for the model, not for the reviewer. State what appears in the frame and the order in
+which the renderer has to resolve it. Turn intent into a visible decision — "for commuters in a
+hurry" becomes "one oversized headline, high contrast, legible at arm's length" — and leave out
+purpose, audience labels, rationale, process notes, and anything a camera cannot see. Never paste a
+brief sentence into `prompt` when a shorter visual statement carries the same requirement.
+
+## Length budget
+
+Length is a constraint on the prompt, not a style. Keep `canvas_statement` to one sentence of at
+most 240 characters. Write `prompt` between 550 and 900 characters — about 90 to 150 English
+words — and never above 1000. The assembled prompt the image model receives must stay under 1400
+characters once the exact-copy instruction, the confirmed requirements, the preserve list, and the
+exclusions are appended.
+
+Spend that budget on scene content: identity, count, ownership, spatial relations, medium and
+light, copy placement, and focal hierarchy. When a draft runs long, cut in this order — stacked
+adjectives, repeated composition or placement wording, then generic quality words — and keep the
+exclusions that block a plausible misreading. Never pad a short design to reach the lower bound,
+and never replace a concrete visual decision with a longer description of the same decision.
+
 Do not improve, restyle, or replace the design. Abstract words such as elegant, premium, modern, or
 dynamic are not instructions: whenever one matters, replace it with the visual decision that
 produces it. Scene density beats adjectives; a specific object with a stated relationship is worth

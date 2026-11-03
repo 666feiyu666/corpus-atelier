@@ -8,6 +8,7 @@ from corpus_atelier.app.service import RECOVERABLE_TASK_STATUSES
 from corpus_atelier.conversation.service import BUSY_ROUND_STATUSES
 from corpus_atelier.conversation.records import ConversationRecord
 from corpus_atelier.ui import brief_editor
+from corpus_atelier.ui.i18n import fast_path_notice
 from corpus_atelier.ui.viewport import render_viewport, viewport_controller
 from corpus_atelier.corpus import FACETS, resolve, tags_of
 from corpus_atelier.corpus.ingest import ingest_run
@@ -37,8 +38,10 @@ from corpus_atelier.ui.candidates import (
     _ready_candidates,
     _render_design_details,
     _render_generation_preview,
+    _render_generation_receipt,
     _render_image_gallery,
     _selected_candidate_id,
+    read_json_artifact,
 )
 from corpus_atelier.ui.dialogue import (
     _agent_brief_draft,
@@ -85,6 +88,41 @@ def _render_archive_control(summary: RunSummary) -> None:
                 st.toast(_t("corpus_archived"), icon=":material/check_circle:")
 
 
+def _tag_label(tag_id: str) -> str:
+    try:
+        return resolve(tag_id).zh
+    except ValueError:
+        return tag_id
+
+
+def _render_corpus_references(result: RunResult) -> None:
+    """Show the archived cases the direction stage leaned on, with their images."""
+    plan = read_json_artifact(result, "direction_plan")
+    if not isinstance(plan, dict):
+        return
+    references = plan.get("corpus_references") or []
+    if not references:
+        return
+    images = plan.get("corpus_reference_images") or []
+    with st.expander(_t("corpus_references_title", count=len(references))):
+        for index, reference in enumerate(references):
+            left, right = st.columns([1, 3], vertical_alignment="top")
+            with left:
+                relative = images[index] if index < len(images) else None
+                path = resolve_paths().corpus_media_root / relative if relative else None
+                if path is not None and path.is_file():
+                    st.image(str(path), width="stretch", output_format="PNG")
+            with right:
+                st.markdown(f"**{reference.get('note') or reference['id']}**")
+                tags = reference.get("tags") or []
+                if tags:
+                    st.caption(" · ".join(_tag_label(tag_id) for tag_id in tags))
+                url = reference.get("url")
+                if url:
+                    st.caption(url)
+                st.code(reference.get("prompt") or "", language=None, wrap_lines=True)
+
+
 def _render_approval(
     summary: RunSummary,
     result: RunResult,
@@ -95,6 +133,7 @@ def _render_approval(
         _t("approval_notice"),
         icon=":material/approval:",
     )
+    _render_corpus_references(result)
     overrides = _render_generation_preview(result, editable=True, active=active)
     ready_count = len(_ready_candidates(result))
     with st.container(horizontal=True, horizontal_alignment="right"):
@@ -144,11 +183,23 @@ def _render_round_picker(summary: RunSummary, conversation: ConversationRecord,
 
 
 def _render_design_panel(summary: RunSummary, conversation: ConversationRecord,
-                         rounds: list[RunSummary], *, busy: bool, design_busy: bool) -> RunSummary | None:
+                         rounds: list[RunSummary], *, busy: bool, design_busy: bool,
+                         fast_round: bool = False) -> RunSummary | None:
     with st.container(height=700, key=f"design_panel_{summary.run_id}", autoscroll=False):
         render_viewport(summary.run_id, conversation, label=_t("return_latest_brief"), controller=viewport_controller())
         st.html('<div id="atelier-latest-brief" aria-hidden="true"></div>')
-        dirty = _render_brief_editor(summary, conversation, disabled=design_busy)
+        questions = conversation["open_questions"]
+        if questions:
+            # Ask for one clarification at a time instead of listing every question.
+            st.caption(_t("single_open_question", question=questions[0]))
+            if len(questions) > 1:
+                st.caption(_t("more_open_questions", count=len(questions) - 1))
+        if fast_round:
+            with st.expander(_t("fast_path_confirmed_brief"), expanded=False):
+                st.caption(_t("fast_path_confirmed_hint"))
+                dirty = _render_brief_editor(summary, conversation, disabled=design_busy)
+        else:
+            dirty = _render_brief_editor(summary, conversation, disabled=design_busy)
         if st.button(
             _t("prepare_design_round"), type="primary", key=f"prepare_round_{summary.run_id}",
             width="stretch",
@@ -178,6 +229,9 @@ def _render_conversation_task(summary: RunSummary) -> None:
         return
     st.subheader(_display_title(summary.manifest.get("title", summary.run_id), limit=44))
     st.caption(_t("conversation_hint"))
+    notice = st.session_state.pop("fast_path_notice", None)
+    if notice:
+        st.info(_t(fast_path_notice(notice)), icon=":material/bolt:")
     view = st.segmented_control(
         _t("workspace_view"), ["split", "design", "assistant"], default="split",
         format_func=lambda value: _t(f"workspace_{value}"), key=f"workspace_view_{summary.run_id}",
@@ -187,6 +241,10 @@ def _render_conversation_task(summary: RunSummary) -> None:
     design_busy = any(_task_supervisor().is_running(round_.run_id) or round_.status in BUSY_ROUND_STATUSES
                       for round_ in rounds)
     workspace_busy = assistant_busy or design_busy
+    # A fast-path round already confirmed this brief, so the editor stops blocking the page.
+    fast_round = bool(rounds) and rounds[-1].manifest.get("approval_policy") == "auto"
+    if fast_round:
+        st.badge(_t("fast_path_badge"), icon=":material/bolt:", color="blue")
     if view == "split":
         design_column, assistant_column = st.columns([1.5, 1], gap="large", vertical_alignment="top")
     else:
@@ -200,7 +258,8 @@ def _render_conversation_task(summary: RunSummary) -> None:
     if view != "assistant":
         with design_column:
             selected = _render_design_panel(summary, conversation, rounds,
-                                            busy=workspace_busy, design_busy=design_busy)
+                                            busy=workspace_busy, design_busy=design_busy,
+                                            fast_round=fast_round)
     if view != "design":
         with assistant_column:
             _render_assistant_panel(summary, conversation, selected, busy=assistant_busy)
@@ -297,10 +356,12 @@ def _render_task(summary: RunSummary, *, embedded: bool = False, actions_allowed
                 selectable=True,
                 active=active,
             )
+            _render_generation_receipt(result)
         elif result.status == "completed":
             if _selected_candidate_id(result) is None:
                 st.info(_t("completed_without_selection"))
             _render_image_gallery(summary, result, selectable=False)
+            _render_generation_receipt(result)
             _render_archive_control(summary)
         elif result.status == "rejected":
             st.warning(_t("generation_canceled"))

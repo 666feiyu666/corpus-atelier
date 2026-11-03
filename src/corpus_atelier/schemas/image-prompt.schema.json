@@ -10,12 +10,14 @@
     "canvas_statement": {
       "type": "string",
       "minLength": 1,
-      "description": "One opening sentence that names the deliverable, states the aspect ratio and orientation, and reserves the main layout zones before any surface detail."
+      "maxLength": 240,
+      "description": "One opening sentence that names the deliverable, states the aspect ratio and orientation, and reserves the main layout zones before any surface detail. Budget: at most 240 characters; it is one sentence, not a second prompt."
     },
     "prompt": {
       "type": "string",
       "minLength": 1,
-      "description": "One self-contained prompt in fixed order: canvas and layout, subject and relationships, medium and style, palette, material and light, typography placement, composition and hierarchy, then targeted exclusions. No headings, labels, JSON, or rationale."
+      "maxLength": 1000,
+      "description": "One self-contained prompt in fixed order: canvas and layout, subject and relationships, medium and style, palette, material and light, typography placement, composition and hierarchy, then targeted exclusions. No headings, labels, JSON, or rationale. Budget: 550 to 900 characters (about 90 to 150 English words) and never more than 1000. When the draft runs long, cut in this order: stacked adjectives, repeated composition or placement wording, then generic quality words; keep identity, count, ownership, relationships, exact copy, the medium and style anchor, and the exclusions that block a plausible misreading."
     },
     "exact_copy": {
       "type": "array",

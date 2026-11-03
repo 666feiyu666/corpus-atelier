@@ -9,14 +9,32 @@ from ...artifacts.hashing import digest_json
 from ...artifacts.records import read_json
 from ..registry import get_profile
 from ..state import AtelierState
+from .routing import resolve_execution_route
 
 class ApprovalMixin:
     """Pause for human approval and apply prompt overrides."""
+
+    def _auto_approval_applies(self, state: AtelierState, failed: list[str]) -> bool:
+        """A fast-path round renders without confirmation only when nothing is at stake.
+
+        The route must already be direct (no design exploration) and every candidate
+        must have compiled, so the pause would only repeat what the user asked for.
+        """
+        return (
+            state.get("approval_policy") == "auto"
+            and resolve_execution_route(state) == "direct"
+            and not failed
+        )
 
     def approval(self, state: AtelierState) -> AtelierState:
         run_dir = self._dir(state)
         profile = get_profile(state["profile"])
         ready = [candidate for candidate in state["candidates"] if candidate["status"] == "ready"]
+        failed_candidates = [
+            candidate["candidate_id"]
+            for candidate in state["candidates"]
+            if candidate["status"] == "failed"
+        ]
         payload = {
             "run_id": state["run_id"],
             "profile": profile.name,
@@ -47,13 +65,25 @@ class ApprovalMixin:
                 }
                 for candidate in ready
             ],
-            "failed_candidates": [
-                candidate["candidate_id"]
-                for candidate in state["candidates"]
-                if candidate["status"] == "failed"
-            ],
+            "failed_candidates": failed_candidates,
         }
         self.store.update(run_dir, "awaiting_approval", approval_request=payload)
+        if self._auto_approval_applies(state, failed_candidates):
+            # The fast path records the same decision a user would have made, so the
+            # audit trail stays complete without an extra click.
+            record = {
+                "approved": True,
+                "reviewer": "fast-path",
+                "auto": True,
+                "decided_at": datetime.now(timezone.utc).isoformat(),
+                "batch_digest": state["batch_digest"],
+            }
+            self.store.json(run_dir, "approval/decision.json", record)
+            self.store.register(run_dir, approval="approval/decision.json")
+            return {
+                "approval": record,
+                "status": "generating_candidates",
+            }
         decision = interrupt(payload)
         if not isinstance(decision, dict) or not isinstance(decision.get("approved"), bool):
             raise ValueError("Human approval must be an explicit boolean decision.")

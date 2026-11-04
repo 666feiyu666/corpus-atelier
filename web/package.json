@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nuxt dev --port 3210",
+    "dev": "node scripts/require-port.mjs 3211 && cross-env NUXT_PUBLIC_API_BASE=http://127.0.0.1:8788 nuxt dev --port 3211",
     "build": "nuxt build",
-    "preview": "nuxt preview --port 3210",
+    "generate": "nuxt generate",
+    "preview": "node scripts/require-port.mjs 3210 && cross-env NUXT_PUBLIC_API_BASE=http://127.0.0.1:8787 nuxt preview --port 3210",
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
@@ -14,6 +15,7 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "typescript": "^5.7.2",
     "vue-tsc": "^2.2.0"
   }

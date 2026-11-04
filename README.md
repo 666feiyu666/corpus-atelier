@@ -22,13 +22,16 @@ py -m venv .venv
 
 python -m pip install -r requirements.txt
 
-# Terminal 1 — the Python boundary
-corpus-atelier api --host 127.0.0.1 --port 8787
-
-# Terminal 2 — the interface (Node 20 or later)
+# Daily use — generate the interface once, then one command for everything
 cd web
 npm install
-npm run dev
+npm run generate
+cd ..
+corpus-atelier start                              # http://127.0.0.1:8787
+
+# Development — separate data root, hot reload
+corpus-atelier api --dev                          # http://127.0.0.1:8788
+cd web && npm run dev                             # http://localhost:3211
 ```
 
 ### macOS
@@ -42,16 +45,24 @@ source .venv/bin/activate
 
 python -m pip install -r requirements.txt
 
-# Terminal 1 — the Python boundary
-corpus-atelier api --host 127.0.0.1 --port 8787
-
-# Terminal 2 — the interface (Node 20 or later)
+# Daily use — generate the interface once, then one command for everything
 cd web
 npm install
-npm run dev
+npm run generate
+cd ..
+corpus-atelier start                              # http://127.0.0.1:8787
+
+# Development — separate data root, hot reload
+corpus-atelier api --dev                          # http://127.0.0.1:8788
+cd web && npm run dev                             # http://localhost:3211
 ```
 
 Corpus Atelier opens in your browser. On first use, open **Settings** and enter your OpenAI API key. Finished designs can be archived into the **Corpus** view; archived prompts and reference images become searchable references for future work.
+
+The ports are fixed (`8787` daily, `8788` development API, `3211`/`3210` for the
+interface) and never borrowed: if another project already holds one, the command
+stops and names the port instead of sharing it or moving to the next one. See
+`docs/nuxt-interface.md` for the full rule and how to change a port.
 
 ## Tests
 

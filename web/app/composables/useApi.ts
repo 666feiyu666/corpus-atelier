@@ -21,13 +21,17 @@ function safeJson(text: string): unknown {
   }
 }
 
+/** The header the Python boundary stamps on every response it sends. */
+const SERVICE_HEADER = 'X-Corpus-Atelier'
+const SERVICE_NAME = 'corpus-atelier'
+
 /**
  * The one place that talks to the Python boundary. Responses are already
  * projected (no paths, no keys), so pages can render them directly.
  */
 export function useApi() {
   const config = useRuntimeConfig()
-  const base = String(config.public.apiBase ?? 'http://127.0.0.1:8787').replace(/\/+$/, '')
+  const base = String(config.public.apiBase ?? '').replace(/\/+$/, '')
 
   function absolute(path: string): string {
     return path.startsWith('http') ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`
@@ -43,6 +47,18 @@ export function useApi() {
       })
     } catch {
       throw new ApiFailure(0, 'unreachable', 'Cannot reach the local API.')
+    }
+    if (response.headers.get(SERVICE_HEADER) !== SERVICE_NAME) {
+      // Something else answers on that port — most likely another local project.
+      // Its JSON can look close enough to ours to be misread, so refuse it here
+      // rather than report a confusing bug against this interface.
+      throw new ApiFailure(
+        0,
+        'wrong_service',
+        `The service answering on ${base || 'this origin'} is not the Corpus Atelier API. `
+          + 'Another local project may be using that port; start this one with '
+          + '`corpus-atelier start`, or point the interface at its own port.',
+      )
     }
     if (response.status === 204) {
       return undefined as T

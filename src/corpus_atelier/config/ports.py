@@ -22,6 +22,12 @@ import socket
 
 CONNECT_TIMEOUT_SECONDS = 0.25
 
+# The two loopback ports this product owns. Kept here so the CLI, the interface
+# scripts, and the documents all name the same numbers. Ports 8787/8788 were
+# left behind because another local project has used them.
+DEFAULT_API_PORT = 8789
+DEFAULT_DEV_API_PORT = 8790
+
 # One command per platform that names the process holding a port.
 _HOLDER_COMMANDS = {
     "nt": 'netstat -ano | findstr :{port}',

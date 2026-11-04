@@ -525,25 +525,26 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
 
 
     @serialized_session
-    def queue_refine_turn(self, run_id: str, result_image_id: str) -> RunResult:
-        """Queue one source-versus-result comparison; the user still owns the proposal."""
+    def queue_refine_turn(
+        self, run_id: str, result_image_id: str, base_image_id: str | None = None,
+    ) -> RunResult:
+        """Queue one comparison between a chosen reference and one result.
+
+        The comparison is where a later iteration gets its prompt from, so it is
+        available to every session: an image-started one compares against the
+        uploaded source by default, a prompt-started one against an earlier
+        result. The user still owns the proposed revision.
+        """
         root, session, _ = self._prompt_session(run_id)
         self._assert_model_binding(root)
-        if session["entry_mode"] != "image":
-            raise ValueError("Only an image-started session can refine against its source.")
         if session.get("pending_turn"):
             raise TaskConflict("Wait for the current response, or retry it.")
-        source = next(
-            (upload for upload in session["uploads"] if upload.get("role") == "source_image"),
-            None,
-        )
-        if source is None:
-            raise ValueError("This session has no source image to compare against.")
         find_result(session, result_image_id)
+        base = self._refine_base(session, result_image_id, base_image_id)
         session["pending_turn"] = {
             "kind": "refine",
             "turn_id": new_id("turn"),
-            "source_image_id": source["id"],
+            "base_image_id": base["id"],
             "result_image_id": result_image_id,
             "base_revision_id": session["current_prompt_revision_id"],
             "created_at": now(),
@@ -551,6 +552,40 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
         self._save(root, session)
         self.store.update(root, "discussing_request", error=None)
         return self._result(run_id)
+
+    @staticmethod
+    def _refine_base(
+        session: PromptSessionRecord, result_image_id: str, base_image_id: str | None,
+    ) -> dict[str, Any]:
+        """The image a result is compared against: an explicit choice, else a sensible one."""
+        base: dict[str, Any] | None
+        if base_image_id:
+            base = image_record(session, base_image_id)
+        else:
+            base = next(
+                (
+                    item for item in session["uploads"]
+                    if item.get("role") == "source_image"
+                ),
+                None,
+            )
+            if base is None:
+                base = next(
+                    (
+                        item for item in session["image_results"]
+                        if item["id"] != result_image_id
+                    ),
+                    None,
+                )
+        if base is None:
+            raise ValueError(
+                "Choose the image this result should be compared with: a comparison "
+                "needs an earlier result or an uploaded source image."
+            )
+        if base["id"] == result_image_id:
+            raise ValueError("A result cannot be compared with itself.")
+        return base
+
 
 
     @serialized_session
@@ -563,7 +598,9 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
         self._assert_model_binding(root)
         turn_id = pending["turn_id"]
         turn_dir = root / "turns" / turn_id
-        source = image_record(session, pending["source_image_id"])
+        source = image_record(
+            session, pending.get("base_image_id") or pending["source_image_id"],
+        )
         result = image_record(session, pending["result_image_id"])
         base = (
             find_revision(session, pending["base_revision_id"])
@@ -601,7 +638,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
                 "id": new_id("msg"), "role": "assistant", "text": answer["reply"],
                 "attachment_ids": [source["id"], result["id"]],
                 "attachment_names": [
-                    source.get("name") or source["id"],
+                    source.get("name") or source.get("label") or source["id"],
                     result.get("label") or result["id"],
                 ],
                 "discrepancies": answer["discrepancies"],
@@ -638,7 +675,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
         result_path = verified_image(root, result["path"], result["sha256"])
         prompt = build_refine_prompt(
             session, base_revision=base,
-            source_label=source.get("name") or source["id"],
+            reference_label=source.get("name") or source.get("label") or source["id"],
             result_label=result.get("label") or result["id"],
         )
         self.store.text(turn_dir, "prompt.md", prompt)

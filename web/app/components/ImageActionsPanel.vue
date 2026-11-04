@@ -5,7 +5,6 @@ const props = defineProps<{
   task: Task
   session: Session
   busy: boolean
-  editSource: string | null
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
@@ -59,14 +58,6 @@ const previewUrl = computed(() => {
 watch([mask, chosenEdit], () => {
   maskFailed.value = false
 })
-
-watch(
-  () => props.editSource,
-  (value) => {
-    if (value) chosenEdit.value = value
-  },
-  { immediate: true },
-)
 
 watch(
   () => candidates.value,
@@ -152,6 +143,9 @@ function uploadRole(item: Upload): string {
       <h2 id="images-heading">{{ t('imagesHeading') }}</h2>
     </div>
     <p class="hint">{{ t('imagesHint') }}</p>
+
+    <details class="tool-body">
+      <summary>{{ t('toolsHeading') }}</summary>
 
     <div v-if="session.uploads.length" style="margin-bottom: 16px">
       <p class="hint" style="margin-bottom: 6px">
@@ -284,5 +278,6 @@ function uploadRole(item: Upload): string {
         {{ t('prepareEdit') }}
       </button>
     </div>
+    </details>
   </section>
 </template>

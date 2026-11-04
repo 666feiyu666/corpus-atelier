@@ -17,11 +17,14 @@ onMounted(async () => {
 <template>
   <div class="shell">
     <header class="masthead">
-      <NuxtLink to="/" class="wordmark">Corpus <span>Atelier</span></NuxtLink>
-      <nav>
+      <NuxtLink to="/" class="brand">
+        <span class="wordmark">Corpus <span>Atelier</span></span>
+        <span class="brand-sub">{{ t('tagline') }}</span>
+      </NuxtLink>
+      <nav aria-label="Primary">
         <NuxtLink to="/">{{ t('navStudio') }}</NuxtLink>
         <NuxtLink to="/gallery">{{ t('navGallery') }}</NuxtLink>
-        <button type="button" class="btn-quiet" @click="showSettings = true">
+        <button type="button" class="nav-quiet" @click="showSettings = true">
           {{ t('navSettings') }}
         </button>
         <span v-if="settings" class="who">{{ credentialLabel }}</span>

@@ -9,7 +9,12 @@ from pathlib import Path
 
 from .app.service import CorpusAtelierApplication
 from .config.paths import resolve_paths
-from .config.ports import PortUnavailable, require_available
+from .config.ports import (
+    DEFAULT_API_PORT,
+    DEFAULT_DEV_API_PORT,
+    PortUnavailable,
+    require_available,
+)
 from .corpus.gallery import import_seed, load_seed, packaged_seed_path
 from .corpus.index import CorpusStore
 
@@ -43,7 +48,8 @@ def _parser() -> argparse.ArgumentParser:
     api.add_argument(
         "--port", type=int, default=None,
         help=(
-            "Bind this port (default 8787, or 8788 with --dev). A port that "
+            f"Bind this port (default {DEFAULT_API_PORT}, or "
+            f"{DEFAULT_DEV_API_PORT} with --dev). A port that "
             "another program is using stops startup instead of being borrowed "
             "or skipped, so a request can never reach that program."
         ),
@@ -52,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
         "--dev", action="store_true",
         help=(
             "Serve the development profile: a separate data root (.atelier/dev) "
-            "and port 8788, so daily tasks and corpus stay untouched."
+            f"and port {DEFAULT_DEV_API_PORT}, so daily tasks and corpus stay untouched."
         ),
     )
     api.add_argument(
@@ -70,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     start.add_argument("--host", default="127.0.0.1")
     start.add_argument(
-        "--port", type=int, default=8787,
+        "--port", type=int, default=DEFAULT_API_PORT,
         help=(
             "Bind this port. A port that another program is using stops startup "
             "instead of being borrowed or skipped."
@@ -108,7 +114,10 @@ def _serve_api(args) -> int:
     if args.dev:
         # Set before anything resolves paths: the profile decides the data root.
         os.environ["CORPUS_ATELIER_PROFILE"] = "dev"
-    port = args.port if args.port is not None else (8788 if args.dev else 8787)
+    port = (
+        args.port if args.port is not None
+        else (DEFAULT_DEV_API_PORT if args.dev else DEFAULT_API_PORT)
+    )
     _require_port(args.host, port, "the API")
 
     import uvicorn

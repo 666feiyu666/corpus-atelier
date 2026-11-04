@@ -138,6 +138,7 @@ class MessageCreate(BaseModel):
 
 class RefineCreate(BaseModel):
     result_image_id: str
+    base_image_id: str | None = None
 
 
 class AttemptPrepare(BaseModel):

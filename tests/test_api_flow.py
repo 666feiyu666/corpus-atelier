@@ -165,12 +165,32 @@ class FlowContractTests(ApiTestCase):
         self.assertTrue(message["discrepancies"])
         self.assertEqual(len(self.text_provider.refine_calls), 1)
 
-    def test_refining_a_prompt_started_task_is_refused(self):
+    def test_refining_a_prompt_started_task_compares_with_an_earlier_result(self):
         run_id = self.create_task()
-        result = self.generate_one_result(run_id)
+        self.generate_one_result(run_id)
+        self.generate_one_result(run_id)
+        results = self.task_payload(run_id)["session"]["image_results"]
+        self.assertEqual(len(results), 2)
+        first, second = results[0], results[1]
+        before = self.task_payload(run_id)["session"]["current_prompt_revision_id"]
+
+        queued = self.client.post(
+            f"/api/v1/tasks/{run_id}/refine-turns",
+            json={"result_image_id": second["id"], "base_image_id": first["id"]},
+        )
+        self.assertEqual(queued.status_code, 202, queued.text)
+        payload = self.wait_status(run_id, "prompt_ready")
+        newest = payload["session"]["prompt_revisions"][-1]
+        self.assertNotEqual(newest["id"], before)
+        self.assertEqual(newest["origin"], "assistant_revision")
+        self.assertEqual(len(self.text_provider.refine_calls), 1)
+
+    def test_refining_needs_an_earlier_image(self):
+        run_id = self.create_task()
+        only = self.generate_one_result(run_id)
         response = self.client.post(
             f"/api/v1/tasks/{run_id}/refine-turns",
-            json={"result_image_id": result["id"]},
+            json={"result_image_id": only["id"]},
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.error_code(response), "invalid_request")

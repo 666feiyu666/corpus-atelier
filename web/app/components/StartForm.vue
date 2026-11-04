@@ -147,7 +147,7 @@ async function start(generateNow: boolean): Promise<void> {
       <textarea
         id="start-prompt"
         v-model="prompt"
-        rows="7"
+        rows="6"
         :placeholder="t('promptPlaceholder')"
         :disabled="busy"
       />

@@ -5,23 +5,19 @@ const runId = computed(() => String(route.params.runId ?? ''))
 const { t, api, report, loadTasks } = useAtelier()
 const { task, session, loading, failure, live, refresh } = useLiveTask(runId.value)
 
-const editSource = ref<string | null>(null)
+const reviewOpen = ref(false)
 
 const prepared = computed(
   () => session.value?.image_attempts.find((item) => item.status === 'prepared') ?? null,
 )
 
+// A frozen request is the moment that needs a decision. Open the review as soon
+// as one exists; polling refreshes the session, so compare ids rather than the
+// object, and let a dismissed review stay closed until the next request.
 watch(
-  session,
-  (value) => {
-    if (!value) return
-    if (editSource.value) return
-    if (value.active_image_id) {
-      editSource.value = value.active_image_id
-      return
-    }
-    const last = value.image_results[value.image_results.length - 1]
-    if (last) editSource.value = last.id
+  () => prepared.value?.id ?? null,
+  (id) => {
+    if (id) reviewOpen.value = true
   },
   { immediate: true },
 )
@@ -70,29 +66,9 @@ async function removeTask(): Promise<void> {
         </p>
 
         <PromptPanel :task="task" :session="session" :busy="live" @changed="reload" />
+        <ResultsWall :task="task" :session="session" :busy="live" @changed="reload" />
+        <ImageActionsPanel :task="task" :session="session" :busy="live" @changed="reload" />
         <CanvasPanel :task="task" :session="session" :busy="live" @changed="reload" />
-        <ImageActionsPanel
-          :task="task"
-          :session="session"
-          :busy="live"
-          :edit-source="editSource"
-          @changed="reload"
-        />
-        <RequestProof
-          v-if="prepared"
-          :task="task"
-          :session="session"
-          :attempt="prepared"
-          :busy="live"
-          @changed="reload"
-        />
-        <ResultsGrid
-          :task="task"
-          :session="session"
-          :busy="live"
-          @changed="reload"
-          @edit="editSource = $event"
-        />
       </template>
 
       <p v-else class="hint">{{ t('readOnlyDone') }}</p>
@@ -104,6 +80,16 @@ async function removeTask(): Promise<void> {
       :session="session"
       :busy="live"
       @changed="reload"
+    />
+
+    <RequestReview
+      v-if="prepared && reviewOpen"
+      :task="task!"
+      :session="session!"
+      :attempt="prepared"
+      :busy="live"
+      @changed="reload"
+      @close="reviewOpen = false"
     />
   </div>
 </template>

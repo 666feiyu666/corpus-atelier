@@ -27,11 +27,11 @@ cd web
 npm install
 npm run generate
 cd ..
-corpus-atelier start                              # http://127.0.0.1:8787
+corpus-atelier start                              # http://127.0.0.1:8789
 
 # Development — separate data root, hot reload
-corpus-atelier api --dev                          # http://127.0.0.1:8788
-cd web && npm run dev                             # http://localhost:3211
+corpus-atelier api --dev                          # http://127.0.0.1:8790
+cd web && npm run dev                             # http://localhost:3213
 ```
 
 ### macOS
@@ -50,16 +50,16 @@ cd web
 npm install
 npm run generate
 cd ..
-corpus-atelier start                              # http://127.0.0.1:8787
+corpus-atelier start                              # http://127.0.0.1:8789
 
 # Development — separate data root, hot reload
-corpus-atelier api --dev                          # http://127.0.0.1:8788
-cd web && npm run dev                             # http://localhost:3211
+corpus-atelier api --dev                          # http://127.0.0.1:8790
+cd web && npm run dev                             # http://localhost:3213
 ```
 
 Corpus Atelier opens in your browser. On first use, open **Settings** and enter your OpenAI API key. Finished designs can be archived into the **Corpus** view; archived prompts and reference images become searchable references for future work.
 
-The ports are fixed (`8787` daily, `8788` development API, `3211`/`3210` for the
+The ports are fixed (`8789` daily, `8790` development API, `3213`/`3212` for the
 interface) and never borrowed: if another project already holds one, the command
 stops and names the port instead of sharing it or moving to the next one. See
 `docs/nuxt-interface.md` for the full rule and how to change a port.

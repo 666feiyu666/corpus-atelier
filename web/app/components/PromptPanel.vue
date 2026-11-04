@@ -76,6 +76,43 @@ async function save(): Promise<void> {
   }
 }
 
+/**
+ * The main path: generate from what is in the editor right now.
+ *
+ * An unsaved edit is saved as a new revision first, so the request always names
+ * a revision the task really holds. The image call still waits for the explicit
+ * submit in the request review.
+ */
+async function generate(): Promise<void> {
+  if (!draft.value.trim()) return
+  working.value = true
+  try {
+    let revision = props.session.current_prompt_revision_id
+    if (dirty.value || !revision) {
+      const saved = await api.post<{ session: Session | null }>(
+        `/api/v1/tasks/${props.task.run_id}/prompt-revisions`,
+        {
+          prompt_text: draft.value,
+          expected_revision: props.session.current_prompt_revision_id,
+        },
+      )
+      revision = saved.session?.current_prompt_revision_id ?? revision
+      clearDraft()
+    }
+    await api.post(`/api/v1/tasks/${props.task.run_id}/image-attempts`, {
+      action: 'generate',
+      expected_revision: revision,
+      reference_image_ids: [],
+      reference_roles: {},
+    })
+    emit('changed')
+  } catch (error) {
+    report(error)
+  } finally {
+    working.value = false
+  }
+}
+
 async function askForRevision(): Promise<void> {
   working.value = true
   try {
@@ -150,20 +187,28 @@ const disabled = computed(() => props.busy || working.value)
 
     <textarea
       v-model="draft"
-      rows="9"
+      rows="6"
       :disabled="disabled"
       :aria-label="t('promptHeading')"
       @input="onInput"
     />
 
-    <div class="row" style="margin-top: 8px">
-      <button class="btn btn-primary" type="button" :disabled="disabled || !dirty" @click="save">
+    <div class="row" style="margin-top: 10px">
+      <button
+        class="btn btn-primary"
+        type="button"
+        :disabled="disabled || !draft.trim()"
+        @click="generate"
+      >
+        {{ dirty || !session.current_prompt_revision_id ? t('saveAndGenerate') : t('generateNow') }}
+      </button>
+      <button class="btn" type="button" :disabled="disabled || !dirty" @click="save">
         {{ t('savePrompt') }}
       </button>
       <button class="btn" type="button" :disabled="disabled || !dirty" @click="reload">
         {{ t('reloadPrompt') }}
       </button>
-      <button class="btn" type="button" :disabled="disabled" @click="askForRevision">
+      <button class="btn-quiet" type="button" :disabled="disabled" @click="askForRevision">
         {{ t('reviseWithModel') }}
       </button>
       <span v-if="dirty" class="eyebrow">{{ t('dirtyDraft') }}</span>

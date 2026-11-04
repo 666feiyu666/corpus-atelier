@@ -6,15 +6,16 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   compatibilityDate: '2025-01-01',
   css: ['~/assets/css/main.css'],
-  // Two profiles, two ports. Daily use is `npm run preview` on 3210 against the
-  // daily API (8787); development is `npm run dev` on 3211 against a separate
-  // API process (`corpus-atelier api --dev`, 8788) with its own data root.
-  // 3000/3001 additionally belong to another local project (anti-habit).
-  devServer: { port: 3211 },
+  // Two profiles, two ports. Daily use is `npm run preview` on 3212 against the
+  // daily API (8789); development is `npm run dev` on 3213 against a separate
+  // API process (`corpus-atelier api --dev`, 8790) with its own data root.
+  // 3000/3001 additionally belong to another local project (anti-habit), and
+  // 3210/3211 plus API 8787/8788 were used by another project before this one.
+  devServer: { port: 3213 },
   runtimeConfig: {
     public: {
       // Empty means "same origin": daily use is one Python process serving both
-      // the API and the built SPA. The dev script overrides this with :8788.
+      // the API and the built SPA. The dev script overrides this with :8790.
       apiBase: '',
     },
   },

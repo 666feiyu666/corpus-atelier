@@ -208,24 +208,26 @@ def build_refine_prompt(
     session: PromptSessionRecord,
     *,
     base_revision: dict[str, Any] | None,
-    source_label: str,
+    reference_label: str,
     result_label: str,
 ) -> str:
-    """Ask for the few visual discrepancies between a source image and one result."""
+    """Ask for the few visual discrepancies between a reference image and one result."""
     return (
-        "You compare two images from the same session: image 1 is the source the user "
-        "uploaded, image 2 is the result the image model produced from the current "
-        "prompt. Report only the discrepancies that matter most for reproducing the "
-        "source: subject and its proportions, composition and framing, medium, palette, "
-        "lighting, materials, background geometry, and legible copy. Ignore incidental "
-        "noise, and do not invent details that are not visible in either image.\n\n"
+        "You compare two images from the same session: image 1 is the reference the "
+        "user compares against (an earlier result, or the source they uploaded) and "
+        "image 2 is the newest result the image model produced from the current "
+        "prompt. Report only the discrepancies that matter most for bringing the "
+        "result closer to the reference: subject and its proportions, composition and "
+        "framing, medium, palette, lighting, materials, background geometry, and "
+        "legible copy. Ignore incidental noise, and do not invent details that are "
+        "not visible in either image.\n\n"
         "Return three fields. reply is one or two sentences for the user. discrepancies "
         "is an ordered list of short, concrete observations, at most six. proposed_prompt "
         "is one complete replacement prompt that keeps what already matches and corrects "
         "only the discrepancies; it must stand alone in English and must not refer to "
-        "image 1, image 2, the source, or this instruction. Return null for "
-        "proposed_prompt only when the result already matches the source closely enough "
-        "that no change is worth making.\n\n"
+        "image 1, image 2, the reference, or this instruction. Return null for "
+        "proposed_prompt only when the result already matches the reference closely "
+        "enough that no change is worth making.\n\n"
         + json.dumps({
             "entry_mode": session["entry_mode"],
             "current_prompt": None if base_revision is None else {
@@ -233,7 +235,7 @@ def build_refine_prompt(
                 "prompt_text": base_revision["prompt_text"],
             },
             "images": [
-                {"index": 1, "role": "source", "label": source_label},
+                {"index": 1, "role": "reference", "label": reference_label},
                 {"index": 2, "role": "result", "label": result_label},
             ],
             "limits": {

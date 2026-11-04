@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/require-port.mjs 3211 && cross-env NUXT_PUBLIC_API_BASE=http://127.0.0.1:8788 nuxt dev --port 3211",
+    "dev": "node scripts/require-port.mjs 3213 && cross-env NUXT_PUBLIC_API_BASE=http://127.0.0.1:8790 nuxt dev --port 3213",
     "build": "nuxt build",
     "generate": "nuxt generate",
-    "preview": "node scripts/require-port.mjs 3210 && cross-env NUXT_PUBLIC_API_BASE=http://127.0.0.1:8787 nuxt preview --port 3210",
+    "preview": "node scripts/require-port.mjs 3212 && cross-env NUXT_PUBLIC_API_BASE=http://127.0.0.1:8789 nuxt preview --port 3212",
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {

@@ -415,11 +415,54 @@ class RefineTests(PromptSessionCase):
             self.assertEqual(len(calls), 1)
             self.assertEqual(len(calls[0]["references"]), 2)
 
-    def test_a_prompt_session_cannot_refine_against_a_source(self):
+    @staticmethod
+    def _prompt_session_with_results(app, count):
+        """A prompt-started session with `count` generated results."""
+        result = app.start_from_prompt(
+            "A quiet poster of a paper lantern at dusk.", case_id=CASE, settings=SETTINGS,
+        )
+        ids = []
+        for _ in range(count):
+            attempt = app.prepare_image_action(result.run_id, action="generate")
+            app.submit_image_action(
+                result.run_id, attempt["id"], expected_digest=attempt["request_digest"],
+            )
+            ids.append(app.prompt_session(result.run_id)["image_results"][-1]["id"])
+        return result.run_id, ids
+
+    def test_a_prompt_session_refines_against_an_earlier_result(self):
         with TemporaryDirectory() as directory, self.app(directory) as app:
-            result = self.start(app)
-            with self.assertRaisesRegex(ValueError, "image-started"):
-                app.queue_refine_turn(result.run_id, "img_unknown")
+            run_id, (first, second) = self._prompt_session_with_results(app, 2)
+            app.queue_refine_turn(run_id, second)
+            pending = app.prompt_session(run_id)["pending_turn"]
+            self.assertEqual(pending["kind"], "refine")
+            self.assertEqual(pending["base_image_id"], first)
+            app.continue_task(run_id)
+            session = app.prompt_session(run_id)
+            self.assertEqual(session["prompt_revisions"][-1]["origin"], "assistant_revision")
+            message = session["messages"][-1]
+            self.assertEqual(message["attachment_ids"], [first, second])
+            self.assertEqual(len(app.runtime.text_provider.refine_calls), 1)
+
+    def test_an_explicit_base_can_be_chosen(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, (first, second) = self._prompt_session_with_results(app, 2)
+            app.queue_refine_turn(run_id, second, base_image_id=first)
+            self.assertEqual(
+                app.prompt_session(run_id)["pending_turn"]["base_image_id"], first,
+            )
+
+    def test_refining_needs_something_to_compare_with(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, (only,) = self._prompt_session_with_results(app, 1)
+            with self.assertRaisesRegex(ValueError, "compared with"):
+                app.queue_refine_turn(run_id, only)
+
+    def test_a_result_cannot_be_compared_with_itself(self):
+        with TemporaryDirectory() as directory, self.app(directory) as app:
+            run_id, (_, second) = self._prompt_session_with_results(app, 2)
+            with self.assertRaisesRegex(ValueError, "itself"):
+                app.queue_refine_turn(run_id, second, base_image_id=second)
 
     def test_a_failed_comparison_keeps_the_pending_turn(self):
         provider = PromptTextProvider()

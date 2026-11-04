@@ -215,18 +215,19 @@ def continue_task(run_id: str, runtime: RuntimeDep) -> dict:
 def create_refine_turn(run_id: str, body: RefineCreate, runtime: RuntimeDep) -> dict:
     credential = runtime.require_credential()
     summary = runtime.summary(run_id)
-    # A static constraint outranks the runtime state: a prompt-started session can
-    # never refine, whether or not something else is running.
     if not summary.manifest.get("is_prompt_session"):
         raise invalid("This task does not use the prompt-centered workflow.")
-    if runtime.session(run_id).get("entry_mode") != "image":
-        raise invalid("Only an image-started session can refine against its source.")
     if runtime.is_running(run_id):
         raise conflict("This task is already running.")
+    # Any session may compare a result with an earlier image: that is how a later
+    # iteration gets its prompt. The service picks a default reference when the
+    # caller names none, and refuses when there is nothing to compare against.
     result = mutate(
         runtime,
         run_id,
-        lambda app: app.queue_refine_turn(run_id, body.result_image_id),
+        lambda app: app.queue_refine_turn(
+            run_id, body.result_image_id, base_image_id=body.base_image_id,
+        ),
         api_key=credential.value,
     )
     schedule_task(runtime, run_id, credential.value)

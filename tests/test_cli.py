@@ -32,6 +32,10 @@ class CliTests(unittest.TestCase):
             self.assertEqual(manifest["run_id"], created.run_id)
             self.assertEqual(manifest["status"], "prompt_ready")
 
+    def test_the_api_command_refuses_a_public_host(self):
+        with self.assertRaises(SystemExit):
+            main(["api", "--host", "0.0.0.0", "--port", "0"])
+
     def test_the_retired_profile_commands_are_gone(self):
         for command in (["profiles"], ["validate", "--brief", "x.json"]):
             with self.assertRaises(SystemExit):

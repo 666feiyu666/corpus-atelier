@@ -17,9 +17,6 @@ dist/
 .coverage
 htmlcov/
 
-# Streamlit secrets; config.toml is tracked
-.streamlit/secrets.toml
-
 # Local product state, agent scratch, and experiment outputs
 .atelier/
 .reasonix/
@@ -28,6 +25,14 @@ AGENTS.md
 
 # Local-only documentation
 docs/
+
+# Node and Nuxt interface artifacts
+node_modules/
+.nuxt/
+.output/
+.nitro/
+.cache/nuxt/
+*.tsbuildinfo
 
 # OS noise and logs
 .DS_Store

@@ -33,7 +33,40 @@ def _parser() -> argparse.ArgumentParser:
     gallery.add_argument("--seed", type=Path, default=None)
     gallery.add_argument("--db", type=Path, default=None)
     gallery.add_argument("--media-root", type=Path, default=None)
+
+    api = commands.add_parser(
+        "api", help="Serve the local HTTP API for the browser interface.",
+    )
+    api.add_argument("--host", default="127.0.0.1")
+    api.add_argument("--port", type=int, default=8787)
+    api.add_argument(
+        "--allow-remote", action="store_true",
+        help="Permit binding a non-loopback host. The API is local-first by default.",
+    )
+    api.add_argument(
+        "--no-resume", action="store_true",
+        help="Do not resume interrupted text steps at startup.",
+    )
     return parser
+
+
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _serve_api(args) -> int:
+    """Serve the HTTP boundary over loopback only, unless told otherwise."""
+    if args.host not in LOOPBACK_HOSTS and not args.allow_remote:
+        raise SystemExit(
+            f"Refusing to bind {args.host!r}: this API is local-only. "
+            "Pass --allow-remote to expose it deliberately."
+        )
+    import uvicorn
+
+    from .api import TaskRuntime, create_app
+
+    app = create_app(runtime=TaskRuntime(), resume=not args.no_resume)
+    uvicorn.run(app, host=args.host, port=int(args.port), log_level="info")
+    return 0
 
 
 def _import_gallery(args) -> int:
@@ -67,6 +100,8 @@ def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "corpus":
         return _import_gallery(args)
+    if args.command == "api":
+        return _serve_api(args)
 
     runs_root = args.runs_root or resolve_paths().tasks_root
     app = CorpusAtelierApplication(runs_root=runs_root)

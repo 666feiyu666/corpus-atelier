@@ -10,6 +10,7 @@ from PIL import Image
 
 from ..artifacts.hashing import digest_file
 from ..artifacts.paths import verified_image
+from ..app.errors import TaskConflict
 from ..app.locking import serialized_run as serialized_session
 from ..app.state import RunResult
 from .records import (
@@ -98,7 +99,7 @@ class ImageAttemptMixin:
             if revision is None:
                 raise ValueError("Write the prompt before preparing an image request.")
             if expected_revision is not None and expected_revision != revision["id"]:
-                raise ValueError(
+                raise TaskConflict(
                     "The prompt changed after this request was prepared. Review the current prompt."
                 )
             reference_ids = [item for item in (reference_image_ids or []) if item]
@@ -220,7 +221,7 @@ class ImageAttemptMixin:
             root, session, _ = self._prompt_session(run_id)
             attempt = find_attempt(session, attempt_id)
             if attempt["status"] != "prepared":
-                raise ValueError("Only an unsubmitted image request can be discarded.")
+                raise TaskConflict("Only an unsubmitted image request can be discarded.")
             attempt["status"] = "discarded"
             self._write_attempt(root, attempt)
             self._save(root, session)
@@ -235,15 +236,15 @@ class ImageAttemptMixin:
             root, session, _ = self._prompt_session(run_id)
             attempt = find_attempt(session, attempt_id)
             if attempt["status"] != "prepared":
-                raise ValueError(
+                raise TaskConflict(
                     "This image request was already submitted. Prepare a new request to try again."
                 )
             if attempt["request_digest"] != expected_digest:
-                raise ValueError(
+                raise TaskConflict(
                     "This image request changed. Review the exact request before submitting."
                 )
             if attempt["prompt_revision_id"] != session.get("current_prompt_revision_id"):
-                raise ValueError(
+                raise TaskConflict(
                     "The prompt changed after this request was prepared. Prepare the image action again."
                 )
             self._assert_model_binding(root)

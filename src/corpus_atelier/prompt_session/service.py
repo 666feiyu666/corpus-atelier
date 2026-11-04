@@ -14,6 +14,7 @@ from typing import Any
 
 from ..artifacts.paths import verified_image
 from ..artifacts.records import read_json
+from ..app.errors import TaskConflict
 from ..app.locking import serialized_run as serialized_session
 from ..app.state import PromptSessionJob, RunResult
 from .assistant import (
@@ -84,7 +85,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
             """A pending chat turn does not block an edit; a running image call does."""
             for attempt in session["image_attempts"]:
                 if attempt["status"] == "submitting":
-                    raise ValueError("An image request is still running for this session.")
+                    raise TaskConflict("An image request is still running for this session.")
 
 
     @staticmethod
@@ -244,7 +245,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
         if proposal is None:
             raise ValueError("That prompt proposal does not exist in this session.")
         if expected_revision != session.get("current_prompt_revision_id"):
-            raise ValueError("The prompt changed. Review the current prompt before adopting.")
+            raise TaskConflict("The prompt changed. Review the current prompt before adopting.")
         revision = new_revision(
             session, proposal["prompt_text"], "assistant_revision",
             parent_revision_id=expected_revision, note=proposal.get("notes"),
@@ -267,7 +268,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
             self._require_idle(session)
             current = session.get("current_prompt_revision_id")
             if expected_revision != current:
-                raise ValueError("The prompt changed. Review the current prompt before saving.")
+                raise TaskConflict("The prompt changed. Review the current prompt before saving.")
             text = validate_prompt_text(prompt_text)
             if current is not None and text == find_revision(session, current)["prompt_text"]:
                 return self._result(run_id)
@@ -286,7 +287,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
             self._require_idle(session)
             current = session.get("current_prompt_revision_id")
             if expected_revision != current:
-                raise ValueError("The prompt changed. Review the current prompt before restoring.")
+                raise TaskConflict("The prompt changed. Review the current prompt before restoring.")
             target = find_revision(session, revision_id)
             if target["id"] == current:
                 return self._result(run_id)
@@ -307,7 +308,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
             root, session, _ = self._prompt_session(run_id)
             self._assert_model_binding(root)
             if session.get("pending_turn"):
-                raise ValueError("Wait for the current response, or retry it.")
+                raise TaskConflict("Wait for the current response, or retry it.")
             if len(attachments or []) > MAX_REFERENCES:
                 raise ValueError(f"Attach at most {MAX_REFERENCES} images per message.")
             if not isinstance(text, str) or (not text.strip() and not attachments):
@@ -531,7 +532,7 @@ class PromptSessionMixin(UploadMixin, ImageAttemptMixin):
         if session["entry_mode"] != "image":
             raise ValueError("Only an image-started session can refine against its source.")
         if session.get("pending_turn"):
-            raise ValueError("Wait for the current response, or retry it.")
+            raise TaskConflict("Wait for the current response, or retry it.")
         source = next(
             (upload for upload in session["uploads"] if upload.get("role") == "source_image"),
             None,

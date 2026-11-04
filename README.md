@@ -21,7 +21,14 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 python -m pip install -r requirements.txt
-python -m streamlit run src/corpus_atelier/ui/studio.py
+
+# Terminal 1 — the Python boundary
+corpus-atelier api --host 127.0.0.1 --port 8787
+
+# Terminal 2 — the interface (Node 20 or later)
+cd web
+npm install
+npm run dev
 ```
 
 ### macOS
@@ -34,7 +41,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 python -m pip install -r requirements.txt
-python -m streamlit run src/corpus_atelier/ui/studio.py
+
+# Terminal 1 — the Python boundary
+corpus-atelier api --host 127.0.0.1 --port 8787
+
+# Terminal 2 — the interface (Node 20 or later)
+cd web
+npm install
+npm run dev
 ```
 
 Corpus Atelier opens in your browser. On first use, open **Settings** and enter your OpenAI API key. Finished designs can be archived into the **Corpus** view; archived prompts and reference images become searchable references for future work.

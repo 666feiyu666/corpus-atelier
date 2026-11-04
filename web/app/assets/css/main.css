@@ -641,11 +641,13 @@ select:disabled {
 
 .wall-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 14px;
+}
+
+.wall-head .hint {
+  margin: 0;
 }
 
 .wall-grid {
@@ -842,14 +844,6 @@ select:disabled {
   color: var(--ink);
 }
 
-.home-notes h2 {
-  font-size: 16px;
-}
-
-.home-main > * {
-  max-width: 760px;
-}
-
 /* ---------- corpus gallery ---------- */
 
 .gallery-layout {
@@ -1036,15 +1030,286 @@ select:disabled {
   }
 }
 
-.home-steps {
-  margin: 10px 0 18px 18px;
-  padding: 0;
-  font-size: 13.5px;
-  line-height: 1.8;
+/* ---------- studio home: the proof sheet ---------- */
+
+.home-layout {
+  grid-template-columns: 236px minmax(0, 1fr);
+  align-items: stretch;
+  min-height: calc(100vh - 62px);
 }
 
-.home-steps li + li {
-  margin-top: 4px;
+.home-main {
+  max-width: 1120px;
+  width: 100%;
+  justify-self: center;
+  align-content: start;
+}
+
+.home-hero {
+  padding-bottom: 18px;
+}
+
+.home-hero h1 {
+  font-size: 33px;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+}
+
+.home-lead {
+  margin: 8px 0 0;
+  font-size: 14.5px;
+  color: var(--ink-soft);
+  max-width: 52ch;
+}
+
+.sheet {
+  border: 1px solid var(--rule);
+  background: #fff;
+  padding: 18px 22px 22px;
+  max-width: 900px;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 18px;
+}
+
+.mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+}
+
+.mode-option {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  padding: 6px 15px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.mode-option + .mode-option {
+  border-left: 1px solid var(--rule);
+}
+
+.mode-option:hover {
+  color: var(--ink);
+}
+
+.mode-option.is-on {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--indigo);
+}
+
+.sheet-settings summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink-soft);
+  padding: 6px 0;
+}
+
+.sheet-settings summary:hover {
+  color: var(--ink);
+}
+
+.sheet-settings-body {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 18px;
+}
+
+.sheet-settings-body .hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.sheet-input {
+  width: 100%;
+  max-width: 760px;
+  min-height: 150px;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 15.5px;
+  line-height: 1.65;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  resize: vertical;
+}
+
+.sheet-input:focus {
+  outline: 2px solid var(--indigo);
+  outline-offset: -1px;
+}
+
+.dropzone {
+  margin-top: 16px;
+  padding: 13px 15px;
+  border: 1px dashed var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 760px;
+}
+
+.dropzone.is-over {
+  border-color: var(--indigo);
+  background: var(--indigo-soft);
+}
+
+.dropzone-target {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.dropzone-target:hover .dropzone-title {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dropzone-title {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.dropzone-files {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.dropzone-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.dropzone .hint {
+  margin: 0;
+}
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  max-width: 760px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.home-steps {
+  margin-top: 34px;
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+}
+
+.home-steps ol {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 22px;
+}
+
+.home-steps li {
+  display: flex;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.step-index {
+  font-family: var(--display);
+  font-size: 15px;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.home-steps .hint {
+  margin: 16px 0 0;
+}
+
+@media (max-width: 900px) {
+  .home-steps ol {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Wide screens: the same sheet, with the three steps as a side column, so the
+   page fills the width instead of leaving a field of paper on the right. */
+@media (min-width: 1440px) {
+  .home-main {
+    max-width: 1320px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas:
+      "hero hero"
+      "sheet steps";
+    column-gap: 40px;
+    align-items: stretch;
+  }
+
+  .sheet-input {
+    min-height: 260px;
+  }
+
+  .home-hero {
+    grid-area: hero;
+  }
+
+  .home-hero h1 {
+    font-size: 36px;
+  }
+
+  .sheet {
+    grid-area: sheet;
+    max-width: none;
+  }
+
+  .home-steps {
+    grid-area: steps;
+    margin-top: 0;
+    padding: 0 0 0 24px;
+    border-top: none;
+    border-left: 1px solid var(--rule);
+  }
+
+  .home-steps ol {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    margin-top: 12px;
+  }
+
+  .home-steps .hint {
+    margin-top: 14px;
+  }
 }
 
 /* ---------- narrow screens ---------- */

@@ -20,7 +20,7 @@ htmlcov/
 # Local product state, agent scratch, and experiment outputs
 .atelier/
 .reasonix/
-experiments/
+_bugs/
 AGENTS.md
 
 # Local-only documentation

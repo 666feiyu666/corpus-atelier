@@ -53,6 +53,12 @@ export function useAtelier() {
         showNotice(t('apiDown'), 'warn')
         return
       }
+      if (error.code === 'wrong_service') {
+        // The boundary refused to answer as this API; say which port lied.
+        reachable.value = false
+        showNotice(t('wrongService'), 'warn')
+        return
+      }
       reachable.value = true
       showNotice(error.message, 'warn')
       return

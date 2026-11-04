@@ -73,6 +73,35 @@ function onSource(event: Event): void {
   source.value = input.files?.[0] ?? null
 }
 
+const dragging = reactive({ reference: false, source: false })
+
+/** A dropped image is the same thing as a chosen one; only images are accepted. */
+function droppedImages(event: DragEvent): File[] {
+  return [...(event.dataTransfer?.files ?? [])].filter((file) =>
+    file.type.startsWith('image/'),
+  )
+}
+
+function dropReferences(event: DragEvent): void {
+  dragging.reference = false
+  const files = droppedImages(event)
+  if (files.length) references.value = files.slice(0, 3)
+}
+
+function dropSource(event: DragEvent): void {
+  dragging.source = false
+  const files = droppedImages(event)
+  if (files.length) source.value = files[0] ?? null
+}
+
+function clearReferences(): void {
+  references.value = []
+}
+
+function clearSource(): void {
+  source.value = null
+}
+
 async function start(generateNow: boolean): Promise<void> {
   if (busy.value) return
   busy.value = true
@@ -115,31 +144,73 @@ async function start(generateNow: boolean): Promise<void> {
 </script>
 
 <template>
-  <div>
-    <h1>{{ t('startHeading') }}</h1>
-    <p class="hint" style="margin-top: 6px; margin-bottom: 18px">{{ t('startHint') }}</p>
+  <div class="sheet">
+    <div class="sheet-head">
+      <div class="mode-switch" role="tablist" :aria-label="t('startHeading')">
+        <button
+          class="mode-option"
+          :class="{ 'is-on': mode === 'prompt' }"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'prompt'"
+          @click="mode = 'prompt'"
+        >
+          {{ t('modePrompt') }}
+        </button>
+        <button
+          class="mode-option"
+          :class="{ 'is-on': mode === 'image' }"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'image'"
+          @click="mode = 'image'"
+        >
+          {{ t('modeImage') }}
+        </button>
+      </div>
 
-    <div class="row" role="tablist" style="margin-bottom: 16px">
-      <button
-        class="btn"
-        type="button"
-        role="tab"
-        :aria-selected="mode === 'prompt'"
-        :style="mode === 'prompt' ? 'border-color: var(--indigo); color: var(--indigo)' : ''"
-        @click="mode = 'prompt'"
-      >
-        {{ t('modePrompt') }}
-      </button>
-      <button
-        class="btn"
-        type="button"
-        role="tab"
-        :aria-selected="mode === 'image'"
-        :style="mode === 'image' ? 'border-color: var(--indigo); color: var(--indigo)' : ''"
-        @click="mode = 'image'"
-      >
-        {{ t('modeImage') }}
-      </button>
+      <details class="sheet-settings">
+        <summary>{{ t('taskSettings') }}</summary>
+        <div class="sheet-settings-body">
+          <div>
+            <label class="field" for="start-text-model">{{ t('textModel') }}</label>
+            <select id="start-text-model" v-model="textModel" :disabled="busy">
+              <option v-for="profile in textProfiles" :key="profile.model" :value="profile.model">
+                {{ profile.label }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label class="field" for="start-reasoning">{{ t('reasoning') }}</label>
+            <select id="start-reasoning" v-model="reasoning" :disabled="busy">
+              <option v-for="effort in efforts" :key="effort" :value="effort">{{ effort }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="field" for="start-image-model">{{ t('imageModel') }}</label>
+            <select id="start-image-model" v-model="imageModel" :disabled="busy">
+              <option v-for="profile in imageProfiles" :key="profile.model" :value="profile.model">
+                {{ profile.label }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label class="field" for="start-quality">{{ t('quality') }}</label>
+            <select id="start-quality" v-model="quality" :disabled="busy">
+              <option v-for="item in qualities" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="field" for="start-ratio">{{ t('aspectRatio') }}</label>
+            <select id="start-ratio" v-model="ratio" :disabled="busy">
+              <option v-for="item in ratios" :key="item.join(':')" :value="item.join(':')">
+                {{ item.join(':') }}
+              </option>
+            </select>
+          </div>
+          <p class="hint">{{ t('settingsHint') }}</p>
+        </div>
+      </details>
     </div>
 
     <template v-if="mode === 'prompt'">
@@ -147,26 +218,47 @@ async function start(generateNow: boolean): Promise<void> {
       <textarea
         id="start-prompt"
         v-model="prompt"
+        class="sheet-input"
         rows="6"
         :placeholder="t('promptPlaceholder')"
         :disabled="busy"
       />
-      <p class="hint" style="margin-top: 6px">{{ t('promptExactHint') }}</p>
+      <p class="hint">{{ t('promptExactHint') }}</p>
 
-      <div style="margin-top: 16px">
-        <label class="field" for="start-references">{{ t('referenceImages') }}</label>
-        <input
-          id="start-references"
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          multiple
-          :disabled="busy"
-          @change="onReferences"
-        />
-        <p class="hint" style="margin-top: 6px">{{ t('referenceHint') }}</p>
+      <div
+        class="dropzone"
+        :class="{ 'is-over': dragging.reference }"
+        @dragenter.prevent="dragging.reference = true"
+        @dragover.prevent="dragging.reference = true"
+        @dragleave.prevent="dragging.reference = false"
+        @drop.prevent="dropReferences"
+      >
+        <label class="dropzone-target" for="start-references">
+          <span class="dropzone-title">{{ t('referenceImages') }}</span>
+          <span class="hint">{{ t('dropHint') }}</span>
+          <input
+            id="start-references"
+            class="visually-hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            :disabled="busy"
+            @change="onReferences"
+          />
+        </label>
+        <div v-if="references.length" class="dropzone-foot">
+          <span class="eyebrow">{{ t('filesChosen', { count: references.length }) }}</span>
+          <button class="btn-quiet" type="button" :disabled="busy" @click="clearReferences">
+            {{ t('clearFiles') }}
+          </button>
+        </div>
+        <ul v-if="references.length" class="dropzone-files">
+          <li v-for="file in references" :key="file.name">{{ file.name }}</li>
+        </ul>
+        <p class="hint">{{ t('referenceHint') }}</p>
       </div>
 
-      <div class="row" style="margin-top: 18px">
+      <div class="sheet-actions">
         <button
           class="btn btn-primary"
           type="button"
@@ -182,65 +274,45 @@ async function start(generateNow: boolean): Promise<void> {
     </template>
 
     <template v-else>
-      <label class="field" for="start-source">{{ t('sourceImage') }}</label>
-      <input
-        id="start-source"
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        :disabled="busy"
-        @change="onSource"
-      />
-      <p class="hint" style="margin-top: 6px">{{ t('extractHint') }}</p>
-      <div class="row" style="margin-top: 18px">
-        <button class="btn btn-primary" type="button" :disabled="busy || !source" @click="start(false)">
+      <div
+        class="dropzone"
+        :class="{ 'is-over': dragging.source }"
+        @dragenter.prevent="dragging.source = true"
+        @dragover.prevent="dragging.source = true"
+        @dragleave.prevent="dragging.source = false"
+        @drop.prevent="dropSource"
+      >
+        <label class="dropzone-target" for="start-source">
+          <span class="dropzone-title">{{ t('sourceImage') }}</span>
+          <span class="hint">{{ t('dropHint') }}</span>
+          <input
+            id="start-source"
+            class="visually-hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            :disabled="busy"
+            @change="onSource"
+          />
+        </label>
+        <div v-if="source" class="dropzone-foot">
+          <span class="eyebrow">{{ source.name }}</span>
+          <button class="btn-quiet" type="button" :disabled="busy" @click="clearSource">
+            {{ t('clearFiles') }}
+          </button>
+        </div>
+        <p class="hint">{{ t('extractHint') }}</p>
+      </div>
+
+      <div class="sheet-actions">
+        <button
+          class="btn btn-primary"
+          type="button"
+          :disabled="busy || !source"
+          @click="start(false)"
+        >
           {{ t('extractPrompt') }}
         </button>
       </div>
     </template>
-
-    <details style="margin-top: 26px">
-      <summary class="dim" style="cursor: pointer; font-size: 13.5px">
-        {{ t('taskSettings') }}
-      </summary>
-      <div class="stack" style="margin-top: 12px; max-width: 520px">
-        <div>
-          <label class="field" for="start-text-model">{{ t('textModel') }}</label>
-          <select id="start-text-model" v-model="textModel" :disabled="busy">
-            <option v-for="profile in textProfiles" :key="profile.model" :value="profile.model">
-              {{ profile.label }}
-            </option>
-          </select>
-        </div>
-        <div>
-          <label class="field" for="start-reasoning">{{ t('reasoning') }}</label>
-          <select id="start-reasoning" v-model="reasoning" :disabled="busy">
-            <option v-for="effort in efforts" :key="effort" :value="effort">{{ effort }}</option>
-          </select>
-        </div>
-        <div>
-          <label class="field" for="start-image-model">{{ t('imageModel') }}</label>
-          <select id="start-image-model" v-model="imageModel" :disabled="busy">
-            <option v-for="profile in imageProfiles" :key="profile.model" :value="profile.model">
-              {{ profile.label }}
-            </option>
-          </select>
-        </div>
-        <div>
-          <label class="field" for="start-quality">{{ t('quality') }}</label>
-          <select id="start-quality" v-model="quality" :disabled="busy">
-            <option v-for="item in qualities" :key="item" :value="item">{{ item }}</option>
-          </select>
-        </div>
-        <div>
-          <label class="field" for="start-ratio">{{ t('aspectRatio') }}</label>
-          <select id="start-ratio" v-model="ratio" :disabled="busy">
-            <option v-for="item in ratios" :key="item.join(':')" :value="item.join(':')">
-              {{ item.join(':') }}
-            </option>
-          </select>
-        </div>
-        <p class="hint">{{ t('settingsHint') }}</p>
-      </div>
-    </details>
   </div>
 </template>

@@ -78,7 +78,7 @@ function toggle(id: string): void {
     return
   }
   if (selected.value.length >= 3) {
-    report(new Error('At most 3 reference images may be attached.'))
+    report(new Error('too many references'), 'tooManyReferences')
     return
   }
   selected.value = [...selected.value, id]

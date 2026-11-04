@@ -35,7 +35,7 @@ function clock(task: Task): string {
       <span class="eyebrow">{{ t('tasksCount', { count: tasks.length }) }}</span>
     </div>
 
-    <p v-if="!tasks.length" class="hint">{{ t('noTasks') }}</p>
+    <p v-if="!tasks.length" class="hint">{{ t('noTasksHint') }}</p>
     <p v-else class="hint">{{ t('tasksHint') }}</p>
 
     <div v-for="group in days" :key="group.day">

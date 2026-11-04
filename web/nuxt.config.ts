@@ -6,6 +6,9 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   compatibilityDate: '2025-01-01',
   css: ['~/assets/css/main.css'],
+  // 3000/3001 belong to another local project of ours (anti-habit); this
+  // interface keeps its own port so neither dev server has to take over.
+  devServer: { port: 3210 },
   runtimeConfig: {
     public: {
       // Override with NUXT_PUBLIC_API_BASE when the API is not on the default port.

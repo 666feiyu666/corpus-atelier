@@ -214,6 +214,13 @@ def continue_task(run_id: str, runtime: RuntimeDep) -> dict:
 @router.post("/tasks/{run_id}/refine-turns", status_code=202)
 def create_refine_turn(run_id: str, body: RefineCreate, runtime: RuntimeDep) -> dict:
     credential = runtime.require_credential()
+    summary = runtime.summary(run_id)
+    # A static constraint outranks the runtime state: a prompt-started session can
+    # never refine, whether or not something else is running.
+    if not summary.manifest.get("is_prompt_session"):
+        raise invalid("This task does not use the prompt-centered workflow.")
+    if runtime.session(run_id).get("entry_mode") != "image":
+        raise invalid("Only an image-started session can refine against its source.")
     if runtime.is_running(run_id):
         raise conflict("This task is already running.")
     result = mutate(

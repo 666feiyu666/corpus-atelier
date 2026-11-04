@@ -20,7 +20,7 @@ from .runtime import TaskRuntime
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000")
+DEFAULT_ORIGINS = ("http://localhost:3210", "http://127.0.0.1:3210")
 
 
 def _origins() -> list[str]:

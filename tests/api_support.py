@@ -107,6 +107,35 @@ class ApiTestCase(unittest.TestCase):
             time.sleep(0.05)
         self.fail(f"task {run_id} stayed {payload['task']['status']!r}, wanted {status!r}")
 
+    def wait_for_results(self, run_id: str, count: int = 1, timeout: float = 15.0) -> dict:
+        """Wait for a completed image call.
+
+        The task status alone is not enough: it is already ``prompt_ready`` before
+        a submission starts, so a status check can return before the result exists.
+        """
+        deadline = time.time() + timeout
+        payload = self.task_payload(run_id)
+        while time.time() < deadline:
+            payload = self.task_payload(run_id)
+            if len(payload["session"]["image_results"]) >= count:
+                return payload
+            time.sleep(0.05)
+        self.fail(
+            f"task {run_id} produced "
+            f"{len(payload['session']['image_results'])} result(s), wanted {count}"
+        )
+
+    def wait_idle(self, run_id: str, timeout: float = 15.0) -> dict:
+        """Wait until the runtime has no in-flight work for this task."""
+        deadline = time.time() + timeout
+        payload = self.task_payload(run_id)
+        while time.time() < deadline:
+            payload = self.task_payload(run_id)
+            if not payload["task"]["running"]:
+                return payload
+            time.sleep(0.05)
+        self.fail(f"task {run_id} stayed running for more than {timeout}s")
+
     def prepare_attempt(self, run_id: str, **extra) -> dict:
         revision = self.task_payload(run_id)["session"]["current_prompt_revision_id"]
         body = {"action": "generate", "expected_revision": revision}

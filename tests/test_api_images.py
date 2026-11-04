@@ -36,7 +36,7 @@ class ImageContractTests(ApiTestCase):
 
         response = self.submit(run_id, attempt)
         self.assertEqual(response.status_code, 202, response.text)
-        payload = self.wait_status(run_id, "prompt_ready")
+        payload = self.wait_for_results(run_id, 1)
         self.assertEqual(len(payload["session"]["image_results"]), 1)
         self.assertEqual(self.image_provider.calls, 1)
         result = payload["session"]["image_results"][0]
@@ -46,7 +46,7 @@ class ImageContractTests(ApiTestCase):
         run_id = self.create_task()
         attempt = self.prepare_attempt(run_id)
         self.assertEqual(self.submit(run_id, attempt).status_code, 202)
-        self.wait_status(run_id, "prompt_ready")
+        self.wait_for_results(run_id, 1)
 
         second = self.submit(run_id, attempt)
         self.assertEqual(second.status_code, 409)
@@ -66,7 +66,7 @@ class ImageContractTests(ApiTestCase):
         frozen_text = attempt["request_text"]
         frozen_digest = attempt["request_digest"]
         self.assertEqual(self.submit(run_id, attempt).status_code, 202)
-        self.wait_status(run_id, "prompt_ready")
+        self.wait_for_results(run_id, 1)
 
         revision = self.task_payload(run_id)["session"]["current_prompt_revision_id"]
         edited = self.client.post(
@@ -183,7 +183,7 @@ class ImageContractTests(ApiTestCase):
         run_id = self.create_task()
         attempt = self.prepare_attempt(run_id)
         self.assertEqual(self.submit(run_id, attempt).status_code, 202)
-        payload = self.wait_status(run_id, "prompt_ready")
+        payload = self.wait_for_results(run_id, 1)
         result = payload["session"]["image_results"][0]
         self.assertTrue(result["is_active"])
 
@@ -208,7 +208,7 @@ class ImageContractTests(ApiTestCase):
         run_id = self.create_task()
         attempt = self.prepare_attempt(run_id)
         self.assertEqual(self.submit(run_id, attempt).status_code, 202)
-        self.wait_status(run_id, "prompt_ready")
+        self.wait_for_results(run_id, 1)
         # The first read seeds the packaged gallery; record the baseline.
         before = self.client.get("/api/v1/corpus/search").json()["total"]
 

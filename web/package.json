@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nuxt dev",
+    "dev": "nuxt dev --port 3210",
     "build": "nuxt build",
-    "preview": "nuxt preview",
+    "preview": "nuxt preview --port 3210",
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
